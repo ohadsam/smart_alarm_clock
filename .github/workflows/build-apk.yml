@@ -72,6 +72,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: SmartRing-release-${{ github.run_number }}
-          path: app/build/outputs/apk/release/app-release.apk
+          # No signingConfig is set on the release buildType, so AGP names the
+          # output app-release-unsigned.apk, not app-release.apk — the old path
+          # never matched anything, so this step silently uploaded nothing
+          # (if-no-files-found: warn let the job report success anyway).
+          path: app/build/outputs/apk/release/app-release-unsigned.apk
           retention-days: 30
-          if-no-files-found: warn
+          if-no-files-found: error
