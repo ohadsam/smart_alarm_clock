@@ -5,16 +5,23 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.glance.*
+import androidx.glance.action.clickable
 import androidx.glance.appwidget.*
+import androidx.glance.appwidget.action.actionStartActivity
 import androidx.glance.layout.*
 import androidx.glance.text.*
 import androidx.glance.unit.ColorProvider
+import com.smartring.app.MainActivity
 import com.smartring.app.data.repository.AlarmRepository
 import com.smartring.app.domain.model.Alarm
 import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
 import dagger.hilt.android.EntryPointAccessors
 import dagger.hilt.components.SingletonComponent
+
+// Tapping any widget opens the app to the alarm list; previously the widgets had no
+// click action at all.
+private val openAppModifier = GlanceModifier.clickable(actionStartActivity<MainActivity>())
 
 @EntryPoint @InstallIn(SingletonComponent::class)
 interface WidgetEntryPoint { fun alarmRepository(): AlarmRepository }
@@ -29,7 +36,7 @@ class SmartRingWidgetSmall : SmartRingBaseWidget() {
     override suspend fun provideGlance(ctx: Context, id: GlanceId) {
         val next = activeAlarms(ctx).firstOrNull()
         provideContent {
-            Box(GlanceModifier.fillMaxSize().background(Color(0xEE13161E)).cornerRadius(20.dp)) {
+            Box(GlanceModifier.fillMaxSize().background(Color(0xEE13161E)).cornerRadius(20.dp).then(openAppModifier)) {
                 Column(GlanceModifier.fillMaxSize().padding(12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalAlignment = Alignment.CenterHorizontally) {
@@ -48,7 +55,7 @@ class SmartRingWidgetMedium : SmartRingBaseWidget() {
     override suspend fun provideGlance(ctx: Context, id: GlanceId) {
         val alarms = activeAlarms(ctx); val next = alarms.firstOrNull()
         provideContent {
-            Box(GlanceModifier.fillMaxSize().background(Color(0xEE13161E)).cornerRadius(20.dp)) {
+            Box(GlanceModifier.fillMaxSize().background(Color(0xEE13161E)).cornerRadius(20.dp).then(openAppModifier)) {
                 Column(GlanceModifier.fillMaxSize().padding(14.dp)) {
                     Row(GlanceModifier.fillMaxWidth()) {
                         Text("⏰ SMARTRING", TextStyle(fontSize = 9.sp, color = ColorProvider(Color(0xFF5B8DF6))),
@@ -70,7 +77,7 @@ class SmartRingWidgetWide : SmartRingBaseWidget() {
     override suspend fun provideGlance(ctx: Context, id: GlanceId) {
         val alarms = activeAlarms(ctx).take(3)
         provideContent {
-            Box(GlanceModifier.fillMaxSize().background(Color(0xEE13161E)).cornerRadius(20.dp)) {
+            Box(GlanceModifier.fillMaxSize().background(Color(0xEE13161E)).cornerRadius(20.dp).then(openAppModifier)) {
                 Column(GlanceModifier.fillMaxSize().padding(14.dp)) {
                     Text("⏰ ${alarms.size} פעילים", TextStyle(fontSize = 9.sp, color = ColorProvider(Color(0xFF5B8DF6))))
                     Spacer(GlanceModifier.height(8.dp))
@@ -85,7 +92,7 @@ class SmartRingWidgetLarge : SmartRingBaseWidget() {
     override suspend fun provideGlance(ctx: Context, id: GlanceId) {
         val alarms = activeAlarms(ctx).take(4)
         provideContent {
-            Box(GlanceModifier.fillMaxSize().background(Color(0xEE13161E)).cornerRadius(20.dp)) {
+            Box(GlanceModifier.fillMaxSize().background(Color(0xEE13161E)).cornerRadius(20.dp).then(openAppModifier)) {
                 Column(GlanceModifier.fillMaxSize().padding(14.dp)) {
                     Text("⏰ SMARTRING · ${alarms.size} פעילים", TextStyle(fontSize = 9.sp, color = ColorProvider(Color(0xFF5B8DF6))))
                     Spacer(GlanceModifier.height(8.dp))

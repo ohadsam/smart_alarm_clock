@@ -30,7 +30,7 @@ import java.util.*
 @Composable
 fun HistoryScreen(
     onBack: () -> Unit,
-    onLoadAlarm: ((name: String, hour: Int, minute: Int) -> Unit)? = null,
+    onLoadAlarm: ((name: String, hour: Int?, minute: Int?) -> Unit)? = null,
     vm: HistoryViewModel = hiltViewModel(),
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
@@ -101,7 +101,7 @@ fun HistoryScreen(
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun HistoryLogCard(log: AlarmLog, onDelete: () -> Unit, onLoad: ((String, Int, Int) -> Unit)?) {
+private fun HistoryLogCard(log: AlarmLog, onDelete: () -> Unit, onLoad: ((String, Int?, Int?) -> Unit)?) {
     val fmt = remember { SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault()) }
     var showDelete by remember { mutableStateOf(false) }
 
@@ -168,7 +168,18 @@ private fun HistoryLogCard(log: AlarmLog, onDelete: () -> Unit, onLoad: ((String
             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f))
         if (onLoad != null) {
             TextButton(
-                onClick = { onLoad(log.alarmName, 7, 0) },
+                onClick = {
+                    // scheduledFor only reliably holds the alarm's actual configured fire
+                    // time on a FIRED row — STOPPED/SNOOZED/MISSED rows log it as the
+                    // moment of that action instead, which can be minutes after the real
+                    // fire time. Only trust it for FIRED; otherwise just carry the name.
+                    if (log.action == "FIRED") {
+                        val cal = Calendar.getInstance().apply { timeInMillis = log.scheduledFor }
+                        onLoad(log.alarmName, cal.get(Calendar.HOUR_OF_DAY), cal.get(Calendar.MINUTE))
+                    } else {
+                        onLoad(log.alarmName, null, null)
+                    }
+                },
                 contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
             ) {
                 Icon(Icons.Rounded.Replay, null, Modifier.size(14.dp))

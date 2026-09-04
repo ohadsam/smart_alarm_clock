@@ -31,14 +31,14 @@
 | 2 | תאריך + שעה ספציפיים | `Alarm.specificDateTime`, `DateTimePickerInline` |
 | 3 | חזרתיות עשירה (WEEKLY/BIWEEKLY/MONTHLY) | `Alarm.repeatDaysBitmask`, `AlarmScheduler.nextFireTime()` |
 | 4 | סיום חזרתיות (FOREVER/UNTIL/COUNT) | `RecurrenceEnd`, `RecurrenceEndSection` |
-| 5 | צלצולים חוזרים (עד 10) | `AlarmRing`, `AlarmDao` |
+| 5 | צלצולים חוזרים (עד 10) | `AlarmRing`, `AlarmDao`, `AlarmFiringService.startAudioSequence()` (מנגן ברצף, v1.1.0), `RingsSection` ב-`AlarmEditScreen` (UI לעריכה, v1.1.0) |
 | 6 | רטט 4 מצבים | `VibrationMode`, `AlarmFiringService.fireAlarm()` |
 | 7 | Crescendo | `Alarm.volumeAtSecond()`, `startCrescendo()` |
 | 8 | נודניק (עם reschedule מהמסך) | `AlarmRingViewModel.snooze()` + `AlarmScheduler.scheduleAt()` |
 | 9 | טקסט תזכורת | `Alarm.reminderText` |
 | 10 | ניהול גלובלי | GlobalControls BottomSheet, freeze/unfreeze toggle חכם |
 | 11 | מסך היסטוריה | `HistoryScreen`, `HistoryViewModel`, `AlarmLog` |
-| 12 | טעינת שעמור מהיסטוריה | `onLoadAlarm` callback, כפתור Replay |
+| 12 | טעינת שעמור מהיסטוריה | `onLoadAlarm` callback, כפתור Replay, `AlarmEditViewModel.prefill()` (v1.1.0) |
 | 13 | Dirty-state check | `BackHandler` + `isDirty` + dialog אישור |
 | 14 | ווידג'ט 4 גדלים | `SmartRingWidget.kt`, Glance API |
 | 15 | עברית RTL + אנגלית | `values/strings.xml`, `values-en/strings.xml` |
@@ -209,15 +209,15 @@ PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
 ## 9. Backlog – מה נשאר
 
 ### עדיפות גבוהה
-- [ ] **"טען שוב" מהיסטוריה** – כרגע מנווט ל-edit ריק; צריך savedStateHandle להעביר נתוני log
+- [x] ~~"טען שוב" מהיסטוריה~~ – **בוצע v1.1.0**: `HistoryScreen` מעביר name/hour/minute (מ-`log.scheduledFor`) דרך `NavGraph` route args אל `AlarmEditViewModel.prefill()`.
 - [ ] **גופן Heebo** – `Typography.kt` מוכן; צריך קבצי TTF ב-`res/font/`
-- [ ] **בחירת קובץ שמע** – `AlarmRing.ringtoneUri` תומך; צריך RingtoneManager picker ב-UI
+- [x] ~~בחירת קובץ שמע~~ – **בוצע v1.1.0**: `RingsSection` ב-`AlarmEditScreen` פותח RingtoneManager system picker לכל סבב צלצול.
 
 ### עדיפות בינונית
-- [ ] SwipeToDismiss על כרטיסיות (כרגע long-press)
+- [x] ~~SwipeToDismiss על כרטיסיות~~ – **בוצע v1.1.0**: `SwipeToDismissBox` נוסף לצד long-press, שניהם פותחים את אותו דיאלוג אישור.
 - [ ] Alarm preview – "נסה עכשיו" בעריכה
-- [ ] Widget deep link → AlarmListScreen
-- [ ] Accessibility labels על Switch/IconButtons
+- [x] ~~Widget deep link → AlarmListScreen~~ – **בוצע v1.1.0**: כל 4 הווידג'טים פותחים את האפליקציה בלחיצה.
+- [ ] Accessibility labels על Switch/IconButtons – רק המתג ברשימת השעמורים קיבל תווית (v1.1.0); ה-Switch/IconButtons במסך העריכה עדיין ללא.
 - [ ] Unit tests ל-AlarmScheduler.nextFireTime()
 
 ### עדיפות נמוכה

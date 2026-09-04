@@ -1,6 +1,11 @@
 package com.smartring.app.presentation.alarmedit
 
+import android.content.Intent
+import android.media.RingtoneManager
+import android.net.Uri
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
@@ -11,6 +16,7 @@ import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.*
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.*
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -24,10 +30,16 @@ import java.util.*
 @Composable
 fun AlarmEditScreen(
     alarmId: Long    = 0L,
+    prefillName: String? = null,
+    prefillHour: Int? = null,
+    prefillMinute: Int? = null,
     onBack: () -> Unit,
     vm: AlarmEditViewModel = hiltViewModel(),
 ) {
-    LaunchedEffect(alarmId) { vm.loadAlarm(alarmId) }
+    LaunchedEffect(alarmId, prefillName, prefillHour, prefillMinute) {
+        if (alarmId > 0L) vm.loadAlarm(alarmId)
+        else if (prefillName != null || prefillHour != null) vm.prefill(prefillName, prefillHour, prefillMinute)
+    }
     val s by vm.state.collectAsStateWithLifecycle()
     LaunchedEffect(s.isSaved) { if (s.isSaved) onBack() }
 
@@ -253,6 +265,10 @@ fun AlarmEditScreen(
                 }
             }
 
+            // ── Ring rounds (up to 10, each with its own sound/volume/duration) ────
+            item { SectionLabel("סבבי צלצול") }
+            item { RingsSection(s.rings, vm::updateRing, vm::addRing, vm::removeRing) }
+
             // ── Vibration ─────────────────────────────────────────
             item { SectionLabel("רטט וצלצול") }
             item {
@@ -407,6 +423,93 @@ private fun DateTimePickerInline(epochMillis: Long, onChanged: (Long) -> Unit) {
             dismissButton = { TextButton({ showTimePicker = false }) { Text("ביטול") } },
         )
     }
+}
+
+/**
+ * Editor for the up-to-10 ring "rounds" (AlarmRing), each with its own sound, volume,
+ * duration and post-round delay — AlarmScheduler/AlarmFiringService already support
+ * sequencing through this list, but until now there was no UI to configure more than
+ * the single default round.
+ */
+@Composable
+private fun RingsSection(
+    rings: List<AlarmRing>,
+    onUpdate: (Int, AlarmRing) -> Unit,
+    onAdd: () -> Unit,
+    onRemove: (Int) -> Unit,
+) {
+    val context = LocalContext.current
+    var pickingIndex by remember { mutableStateOf(-1) }
+    val ringtonePicker = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        val uri: Uri? = result.data?.getParcelableExtra(RingtoneManager.EXTRA_RINGTONE_PICKED_URI)
+        if (pickingIndex in rings.indices) {
+            onUpdate(pickingIndex, rings[pickingIndex].copy(ringtoneUri = uri?.toString() ?: "default"))
+        }
+        pickingIndex = -1
+    }
+
+    EditCard {
+        rings.forEachIndexed { i, ring ->
+            Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {
+                Text("סבב ${i + 1}", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall)
+                if (rings.size > 1) {
+                    IconButton({ onRemove(i) }, Modifier.size(28.dp)) {
+                        Icon(Icons.Rounded.Close, "הסר סבב ${i + 1}", Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.error)
+                    }
+                }
+            }
+            Spacer(Modifier.height(4.dp))
+            OutlinedButton(
+                onClick = {
+                    pickingIndex = i
+                    ringtonePicker.launch(Intent(RingtoneManager.ACTION_RINGTONE_PICKER).apply {
+                        putExtra(RingtoneManager.EXTRA_RINGTONE_TYPE, RingtoneManager.TYPE_ALARM)
+                        putExtra(RingtoneManager.EXTRA_RINGTONE_SHOW_DEFAULT, true)
+                        putExtra(RingtoneManager.EXTRA_RINGTONE_SHOW_SILENT, false)
+                        putExtra(RingtoneManager.EXTRA_RINGTONE_DEFAULT_URI,
+                            RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM))
+                        if (ring.ringtoneUri != "default")
+                            putExtra(RingtoneManager.EXTRA_RINGTONE_EXISTING_URI, Uri.parse(ring.ringtoneUri))
+                    })
+                },
+                modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(10.dp),
+            ) {
+                Icon(Icons.Rounded.MusicNote, null, Modifier.size(16.dp))
+                Spacer(Modifier.width(8.dp))
+                Text(ringtoneDisplayName(context, ring.ringtoneUri), maxLines = 1)
+            }
+            Spacer(Modifier.height(8.dp))
+            LabeledSlider("משך", ring.durationSeconds, "שנ׳", 5f, 300f, 59, Blue) {
+                onUpdate(i, ring.copy(durationSeconds = it))
+            }
+            Spacer(Modifier.height(6.dp))
+            LabeledSlider("עוצמה", ring.volumePercent, "%", 10f, 100f, 18, Green) {
+                onUpdate(i, ring.copy(volumePercent = it))
+            }
+            Spacer(Modifier.height(6.dp))
+            LabeledSlider("השהיה אחרי סבב זה", ring.delayAfterSeconds, "שנ׳", 0f, 600f, 60, Gold) {
+                onUpdate(i, ring.copy(delayAfterSeconds = it))
+            }
+            if (i < rings.size - 1) HorizontalDivider(Modifier.padding(vertical = 10.dp))
+        }
+        Spacer(Modifier.height(10.dp))
+        OutlinedButton(
+            onClick = onAdd, enabled = rings.size < 10,
+            modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(10.dp),
+        ) {
+            Icon(Icons.Rounded.Add, null, Modifier.size(18.dp))
+            Spacer(Modifier.width(6.dp))
+            Text(if (rings.size < 10) "הוסף סבב צלצול (${rings.size}/10)" else "הגעת למקסימום סבבים (10)")
+        }
+    }
+}
+
+private fun ringtoneDisplayName(context: android.content.Context, uriString: String): String {
+    if (uriString == "default") return "צלצול ברירת מחדל"
+    return runCatching {
+        RingtoneManager.getRingtone(context, Uri.parse(uriString))?.getTitle(context)
+    }.getOrNull() ?: "צלצול נבחר"
 }
 
 @Composable

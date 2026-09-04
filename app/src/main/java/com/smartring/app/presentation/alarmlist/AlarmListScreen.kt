@@ -102,11 +102,38 @@ fun AlarmListScreen(onAddAlarm: ()->Unit, onEditAlarm: (Long)->Unit, onOpenHisto
         }
     }}
 
-@OptIn(ExperimentalFoundationApi::class)
+@OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
 private fun AlarmCardItem(alarm: Alarm, onToggle:(Boolean)->Unit, onEdit:()->Unit, onDelete:()->Unit) {
     var showDel by remember { mutableStateOf(false) }
     val dotColor = if (alarm.isFrozen) Blue else if (alarm.isActive) Green else MaterialTheme.colorScheme.outline
+
+    // Swipe (either direction) surfaces the same confirm dialog as long-press, rather
+    // than deleting outright — a quicker, more discoverable gesture without an
+    // accidental-delete risk. confirmValueChange always returns false so the card
+    // snaps back to place once the dialog is shown; the dialog owns the real delete.
+    val dismissState = rememberSwipeToDismissBoxState(
+        confirmValueChange = { value ->
+            if (value != SwipeToDismissBoxValue.Settled) showDel = true
+            false
+        },
+    )
+
+    SwipeToDismissBox(
+        state = dismissState,
+        backgroundContent = {
+            val alignment = if (dismissState.dismissDirection == SwipeToDismissBoxValue.StartToEnd)
+                Alignment.CenterStart else Alignment.CenterEnd
+            Box(
+                Modifier.fillMaxSize().clip(RoundedCornerShape(16.dp))
+                    .background(MaterialTheme.colorScheme.errorContainer)
+                    .padding(horizontal = 24.dp),
+                contentAlignment = alignment,
+            ) {
+                Icon(Icons.Rounded.Delete, "מחק", tint = MaterialTheme.colorScheme.onErrorContainer)
+            }
+        },
+    ) {
     Surface(Modifier.fillMaxWidth().combinedClickable(onClick=onEdit,onLongClick={showDel=true}),
         RoundedCornerShape(16.dp), color=MaterialTheme.colorScheme.surface,
         border=BorderStroke(1.5.dp,dotColor.copy(.3f))) {
@@ -132,6 +159,7 @@ private fun AlarmCardItem(alarm: Alarm, onToggle:(Boolean)->Unit, onEdit:()->Uni
                     fontSize=9.sp)
             }
         }
+    }
     }
     if (showDel) AlertDialog({showDel=false},title={Text("מחק שעמור")},text={Text("מחק את \"${alarm.name}\"?")},
         confirmButton={TextButton({showDel=false;onDelete()}){Text("מחק",color=MaterialTheme.colorScheme.error)}},

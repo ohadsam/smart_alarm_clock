@@ -103,6 +103,18 @@ class AlarmEditViewModel @Inject constructor(
 
     val isDirty: Boolean get() = originalState != null && _state.value != originalState
 
+    /** Pre-fills a brand-new (unsaved) alarm from a History "load again" action. */
+    fun prefill(name: String?, hour: Int?, minute: Int?) {
+        _state.update { s ->
+            s.copy(
+                name   = name ?: s.name,
+                hour   = hour ?: s.hour,
+                minute = minute ?: s.minute,
+            )
+        }
+        updateNextFireHintLater()
+    }
+
     // ── Setters ───────────────────────────────────────────────────
     fun setName(v: String)                       = _state.update { it.copy(name = v, nameError = false) }
     fun setTime(h: Int, m: Int)                   = _state.update { it.copy(hour = h, minute = m).also { updateNextFireHintLater() } }
