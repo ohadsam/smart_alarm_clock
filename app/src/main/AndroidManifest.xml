@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
     <uses-permission android:name="android.permission.WAKE_LOCK"/>
@@ -79,7 +80,7 @@
             android:authorities="${applicationId}.androidx-startup"
             android:exported="false">
             <meta-data android:name="androidx.work.WorkManagerInitializer"
-                android:value="androidx.startup" android:node="remove"/>
+                android:value="androidx.startup" tools:node="remove"/>
         </provider>
     </application>
 </manifest>
