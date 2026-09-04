@@ -661,7 +661,7 @@ fun SectionLabel(text: String) = Text(text.uppercase(),
 
 @Composable
 fun EditCard(content: @Composable ColumnScope.() -> Unit) = Surface(
-    RoundedCornerShape(16.dp),
+    shape    = RoundedCornerShape(16.dp),
     color    = MaterialTheme.colorScheme.surface,
     border   = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(.2f)),
     modifier = Modifier.fillMaxWidth(),
@@ -669,7 +669,7 @@ fun EditCard(content: @Composable ColumnScope.() -> Unit) = Surface(
 
 @Composable
 fun ValueBadge(text: String, color: androidx.compose.ui.graphics.Color) = Surface(
-    RoundedCornerShape(999.dp), color = color.copy(.12f),
+    shape = RoundedCornerShape(999.dp), color = color.copy(.12f),
     border = BorderStroke(1.dp, color.copy(.3f))) {
     Text(text, Modifier.padding(horizontal = 10.dp, vertical = 3.dp),
         style = MaterialTheme.typography.labelMedium, color = color, fontWeight = FontWeight.ExtraBold)

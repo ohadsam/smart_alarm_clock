@@ -83,7 +83,7 @@ fun AlarmRingScreen(alarmId: Long, onDismiss: () -> Unit,
                 alarm.vibrationMode == VibrationMode.VIBRATION_ONLY      -> "רק רטט" to Green
                 else -> "צלצול + רטט" to Gold
             }
-            Surface(RoundedCornerShape(999.dp), color = vColor.copy(.12f),
+            Surface(shape = RoundedCornerShape(999.dp), color = vColor.copy(.12f),
                 border = BorderStroke(1.dp, vColor.copy(.35f))) {
                 Text(vLabel, Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
                     style = MaterialTheme.typography.labelMedium, color = vColor, fontWeight = FontWeight.SemiBold)
@@ -96,7 +96,7 @@ fun AlarmRingScreen(alarmId: Long, onDismiss: () -> Unit,
                 Spacer(Modifier.height(8.dp))
                 val vol = alarm.volumeAtSecond(100, s.elapsedSeconds)
                 val accent = MaterialTheme.colorScheme.tertiary
-                Surface(RoundedCornerShape(12.dp), color = accent.copy(.08f),
+                Surface(shape = RoundedCornerShape(12.dp), color = accent.copy(.08f),
                     border = BorderStroke(1.dp, accent.copy(.2f)), modifier = Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(12.dp)) {
                         Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween) {
@@ -120,7 +120,7 @@ fun AlarmRingScreen(alarmId: Long, onDismiss: () -> Unit,
             alarm.reminderText?.takeIf { it.isNotBlank() }?.let { txt ->
                 Spacer(Modifier.height(12.dp))
                 val accent = MaterialTheme.colorScheme.tertiary
-                Surface(RoundedCornerShape(16.dp), color = accent.copy(.1f),
+                Surface(shape = RoundedCornerShape(16.dp), color = accent.copy(.1f),
                     border = BorderStroke(1.dp, accent.copy(.3f)), modifier = Modifier.fillMaxWidth()) {
                     Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Rounded.StickyNote2, null, Modifier.size(20.dp), tint = accent)
