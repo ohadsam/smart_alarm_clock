@@ -85,39 +85,43 @@ fun AlarmRingScreen(alarmId: Long, onDismiss: () -> Unit,
                     style = MaterialTheme.typography.labelMedium, color = vColor, fontWeight = FontWeight.SemiBold)
             }
 
-            // Crescendo bar
+            // Crescendo bar. Uses the theme's `tertiary` role (not the raw Green
+            // constant) so it stays legible in Light mode too — Green (a light mint)
+            // as literal text/icon color on a white surface fails contrast.
             if (alarm.crescendoEnabled) {
                 Spacer(Modifier.height(8.dp))
                 val vol = alarm.volumeAtSecond(100, s.elapsedSeconds)
-                Surface(RoundedCornerShape(12.dp), color = Green.copy(.08f),
-                    border = BorderStroke(1.dp, Green.copy(.2f)), modifier = Modifier.fillMaxWidth()) {
+                val accent = MaterialTheme.colorScheme.tertiary
+                Surface(RoundedCornerShape(12.dp), color = accent.copy(.08f),
+                    border = BorderStroke(1.dp, accent.copy(.2f)), modifier = Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(12.dp)) {
                         Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Rounded.TrendingUp, null, Modifier.size(14.dp), tint = Green)
+                                Icon(Icons.Rounded.TrendingUp, null, Modifier.size(14.dp), tint = accent)
                                 Spacer(Modifier.width(6.dp))
                                 Text("צלצול מתחזק", style = MaterialTheme.typography.labelMedium,
-                                    color = Green, fontWeight = FontWeight.SemiBold)
+                                    color = accent, fontWeight = FontWeight.SemiBold)
                             }
                             Text("${vol}%", style = MaterialTheme.typography.labelMedium,
-                                color = Green, fontWeight = FontWeight.ExtraBold)
+                                color = accent, fontWeight = FontWeight.ExtraBold)
                         }
                         Spacer(Modifier.height(6.dp))
                         LinearProgressIndicator({ vol / 100f }, Modifier.fillMaxWidth().height(6.dp),
-                            color = Green, trackColor = MaterialTheme.colorScheme.surfaceVariant)
+                            color = accent, trackColor = MaterialTheme.colorScheme.surfaceVariant)
                     }
                 }
             }
 
-            // Reminder text
+            // Reminder text — same theme-aware accent as the crescendo bar above.
             alarm.reminderText?.takeIf { it.isNotBlank() }?.let { txt ->
                 Spacer(Modifier.height(12.dp))
-                Surface(RoundedCornerShape(16.dp), color = Green.copy(.1f),
-                    border = BorderStroke(1.dp, Green.copy(.3f)), modifier = Modifier.fillMaxWidth()) {
+                val accent = MaterialTheme.colorScheme.tertiary
+                Surface(RoundedCornerShape(16.dp), color = accent.copy(.1f),
+                    border = BorderStroke(1.dp, accent.copy(.3f)), modifier = Modifier.fillMaxWidth()) {
                     Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Rounded.StickyNote2, null, Modifier.size(20.dp), tint = Green)
+                        Icon(Icons.Rounded.StickyNote2, null, Modifier.size(20.dp), tint = accent)
                         Spacer(Modifier.width(10.dp))
-                        Text(txt, color = Green, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                        Text(txt, color = accent, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
                     }
                 }
             }

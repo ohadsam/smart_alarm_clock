@@ -45,6 +45,12 @@ data class AlarmEditUiState(
     val nameError: Boolean                 = false,
     // "next fire" hint shown to user
     val nextFireHint: String?              = null,
+    // Preserved verbatim from the loaded alarm; not editable on this screen but must
+    // survive save() so editing an alarm doesn't silently re-enable/un-freeze it or
+    // reset its COUNT-recurrence progress.
+    val isEnabled: Boolean                 = true,
+    val isFrozen: Boolean                  = false,
+    val occurrencesFired: Int              = 0,
 )
 
 @HiltViewModel
@@ -85,6 +91,9 @@ class AlarmEditViewModel @Inject constructor(
                     crescendoStartVolume = a.crescendoStartVolume,
                     crescendoStepSeconds = a.crescendoStepSeconds,
                     crescendoStepPercent = a.crescendoStepPercent,
+                    isEnabled            = a.isEnabled,
+                    isFrozen             = a.isFrozen,
+                    occurrencesFired     = a.occurrencesFired,
             )
             originalState = loaded
             _state.update { loaded }
@@ -189,6 +198,9 @@ class AlarmEditViewModel @Inject constructor(
         hour                 = s.hour,
         minute               = s.minute,
         specificDateTime     = s.specificDateTime,
+        isEnabled            = s.isEnabled,
+        isFrozen             = s.isFrozen,
+        occurrencesFired     = s.occurrencesFired,
         repeatDaysBitmask    = s.repeatDaysBitmask,
         repeatFrequency      = s.repeatFrequency,
         recurrenceEnd        = RecurrenceEnd(s.recurrenceEndType, s.recurrenceUntilDate, s.recurrenceCount),

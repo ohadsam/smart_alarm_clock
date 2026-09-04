@@ -16,8 +16,17 @@ class SnoozeAlarmReceiver : BroadcastReceiver() {
         ctx.stopService(Intent(ctx, AlarmFiringService::class.java))
         goAsync().also { p -> CoroutineScope(Dispatchers.IO).launch {
             repository.getAlarm(id)?.let { alarm ->
-                scheduler.scheduleAt(alarm, System.currentTimeMillis() + alarm.snoozeMinutes * 60_000L)
-                repository.log(id, alarm.name, System.currentTimeMillis(), "SNOOZED")
+                // Derived from history rather than an in-memory counter: the
+                // notification action can be tapped even after the app process (and
+                // any in-app snooze counter) is gone, so snoozeMaxCount must be
+                // enforced from persisted state.
+                val alreadySnoozed = repository.snoozeCountSinceLastFire(id)
+                if (alreadySnoozed < alarm.snoozeMaxCount) {
+                    scheduler.scheduleAt(alarm, System.currentTimeMillis() + alarm.snoozeMinutes * 60_000L)
+                    repository.log(id, alarm.name, System.currentTimeMillis(), "SNOOZED")
+                } else {
+                    repository.log(id, alarm.name, System.currentTimeMillis(), "MISSED")
+                }
             }; p.finish()
         }}
     }

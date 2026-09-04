@@ -1,5 +1,5 @@
 package com.smartring.app.presentation.navigation
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.navigation.*
 import androidx.navigation.compose.*
 import com.smartring.app.presentation.alarmedit.AlarmEditScreen
@@ -17,9 +17,23 @@ sealed class Screen(val route: String) {
 }
 
 @Composable
-fun SmartRingNavGraph(startAlarmId: Long = -1L) {
+fun SmartRingNavGraph(alarmTrigger: Pair<Long, Long> = 0L to -1L) {
     val nav = rememberNavController()
-    val start = if (startAlarmId > 0L) Screen.Ring.go(startAlarmId) else Screen.List.route
+    val (initialNonce, initialAlarmId) = alarmTrigger
+    val start = if (initialAlarmId > 0L) Screen.Ring.go(initialAlarmId) else Screen.List.route
+
+    // The start destination already handles the very first alarm id; only re-navigate
+    // when a *new* trigger (a higher nonce) arrives, e.g. via MainActivity.onNewIntent
+    // while this nav graph is already showing.
+    var lastHandledNonce by remember { mutableStateOf(initialNonce) }
+    LaunchedEffect(alarmTrigger) {
+        val (nonce, id) = alarmTrigger
+        if (id > 0L && nonce != lastHandledNonce) {
+            nav.navigate(Screen.Ring.go(id))
+            lastHandledNonce = nonce
+        }
+    }
+
     NavHost(nav, start) {
         composable(Screen.List.route) {
             AlarmListScreen(

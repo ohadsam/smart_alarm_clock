@@ -39,7 +39,7 @@ fun HistoryScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                navigationIcon = { IconButton(onBack) { Icon(Icons.Rounded.ArrowBack, "חזור") } },
+                navigationIcon = { IconButton(onBack) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, "חזור") } },
                 title          = { Text("היסטוריה", fontWeight = FontWeight.ExtraBold) },
                 actions        = {
                     if (state.logs.isNotEmpty()) {

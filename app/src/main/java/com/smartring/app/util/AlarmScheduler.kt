@@ -7,6 +7,8 @@ import com.smartring.app.domain.model.*
 import com.smartring.app.receiver.AlarmReceiver
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.util.Calendar
+import java.util.TimeZone
+import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -27,7 +29,10 @@ class AlarmScheduler @Inject constructor(
         alarmManager.setExactAndAllowWhileIdle(
             AlarmManager.RTC_WAKEUP, at, buildSnoozePendingIntent(alarm.id))
 
-    fun cancel(id: Long) = alarmManager.cancel(buildIntent(id))
+    fun cancel(id: Long) {
+        alarmManager.cancel(buildIntent(id))
+        alarmManager.cancel(buildSnoozePendingIntent(id))
+    }
 
     fun rescheduleAll(alarms: List<Alarm>) =
         alarms.forEach { cancel(it.id); if (it.isActive && !it.isRecurrenceExpired()) schedule(it) }
@@ -42,7 +47,7 @@ class AlarmScheduler @Inject constructor(
 
         // 2. Specific dates list
         alarm.specificDates
-            .map { it.date + timeOfDay(alarm.hour, alarm.minute) }
+            .map { localDateTimeFor(it.date, alarm.hour, alarm.minute) }
             .filter { it > now }
             .minOrNull()?.let { return it }
 
@@ -54,19 +59,30 @@ class AlarmScheduler @Inject constructor(
                 RepeatFrequency.NONE     -> base
                 RepeatFrequency.WEEKLY   -> base
                 RepeatFrequency.BIWEEKLY -> {
-                    val calNow  = Calendar.getInstance().apply { timeInMillis = now }
-                    val calBase = Calendar.getInstance().apply { timeInMillis = base }
-                    val diff = calBase.get(Calendar.WEEK_OF_YEAR) - calNow.get(Calendar.WEEK_OF_YEAR)
-                    if (diff % 2 == 0) base
-                    else calBase.apply { add(Calendar.WEEK_OF_YEAR, 1) }.timeInMillis
+                    // Parity is derived from the candidate fire date itself (days since
+                    // epoch / 7), not from "now" vs. "base" via Calendar.WEEK_OF_YEAR:
+                    // WEEK_OF_YEAR resets every January and Kotlin's `%` keeps the
+                    // dividend's sign, so a now/base pair straddling a year boundary
+                    // used to silently break the every-other-week cadence. An absolute,
+                    // now-independent parity check keeps the cadence stable regardless
+                    // of when this is (re)computed.
+                    if (weekParity(base) == 0L) base else base + 7 * 24 * 3_600_000L
                 }
                 RepeatFrequency.MONTHLY -> {
-                    val calNow  = Calendar.getInstance().apply { timeInMillis = now }
-                    val calBase = Calendar.getInstance().apply { timeInMillis = base }
-                    if (calBase.get(Calendar.MONTH) == calNow.get(Calendar.MONTH) &&
-                        calBase.get(Calendar.YEAR)  == calNow.get(Calendar.YEAR)) base
-                    else nextFromMask(alarm.hour, alarm.minute, alarm.repeatDaysBitmask,
-                            base + 7 * 24 * 3_600_000L) ?: base
+                    // "Monthly" = only the first matching weekday in each calendar
+                    // month fires. The previous now-vs-base month comparison degraded
+                    // to weekly in the common case (base is always within ~2 weeks of
+                    // now, so it was almost always "still this month").
+                    var probe = firstMatchInMonth(alarm.hour, alarm.minute, alarm.repeatDaysBitmask, base)
+                    if (probe <= now) {
+                        val nextMonth = Calendar.getInstance().apply {
+                            timeInMillis = probe
+                            set(Calendar.DAY_OF_MONTH, 1)
+                            add(Calendar.MONTH, 1)
+                        }.timeInMillis
+                        probe = firstMatchInMonth(alarm.hour, alarm.minute, alarm.repeatDaysBitmask, nextMonth)
+                    }
+                    probe
                 }
             }
         }
@@ -94,7 +110,42 @@ class AlarmScheduler @Inject constructor(
         return null
     }
 
-    private fun timeOfDay(h: Int, m: Int) = h * 3_600_000L + m * 60_000L
+    private fun weekParity(millis: Long): Long =
+        Math.floorDiv(TimeUnit.MILLISECONDS.toDays(millis), 7L) % 2L
+
+    /** Earliest day within [from]'s calendar month whose weekday matches [mask], at [h]:[m]. */
+    private fun firstMatchInMonth(h: Int, m: Int, mask: Int, from: Long): Long {
+        val cal = Calendar.getInstance().apply {
+            timeInMillis = from
+            set(Calendar.DAY_OF_MONTH, 1)
+            set(Calendar.HOUR_OF_DAY, h); set(Calendar.MINUTE, m)
+            set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
+        }
+        val month = cal.get(Calendar.MONTH)
+        while (cal.get(Calendar.MONTH) == month) {
+            if ((mask shr (cal.get(Calendar.DAY_OF_WEEK) - 1)) and 1 == 1) return cal.timeInMillis
+            cal.add(Calendar.DAY_OF_YEAR, 1)
+        }
+        return from
+    }
+
+    /**
+     * [utcMidnightMillis] is a date picked via Compose's DatePicker, reported as UTC
+     * midnight of the chosen day. Re-anchor its year/month/day onto a device-local
+     * calendar before applying [h]:[m] — combining the raw UTC millis with a local
+     * time-of-day offset would shift the fire date by the device's UTC offset.
+     */
+    private fun localDateTimeFor(utcMidnightMillis: Long, h: Int, m: Int): Long {
+        val utcCal = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply { timeInMillis = utcMidnightMillis }
+        return Calendar.getInstance().apply {
+            set(Calendar.YEAR, utcCal.get(Calendar.YEAR))
+            set(Calendar.MONTH, utcCal.get(Calendar.MONTH))
+            set(Calendar.DAY_OF_MONTH, utcCal.get(Calendar.DAY_OF_MONTH))
+            set(Calendar.HOUR_OF_DAY, h)
+            set(Calendar.MINUTE, m)
+            set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
+        }.timeInMillis
+    }
 
     private fun buildIntent(id: Long) = PendingIntent.getBroadcast(
         context, id.toInt(),
@@ -103,6 +154,8 @@ class AlarmScheduler @Inject constructor(
 
     private fun buildSnoozePendingIntent(id: Long) = PendingIntent.getBroadcast(
         context, (id + 100_000).toInt(),
-        Intent(context, AlarmReceiver::class.java).putExtra(AlarmReceiver.EXTRA_ALARM_ID, id),
+        Intent(context, AlarmReceiver::class.java)
+            .putExtra(AlarmReceiver.EXTRA_ALARM_ID, id)
+            .putExtra(AlarmReceiver.EXTRA_IS_SNOOZE, true),
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
 }

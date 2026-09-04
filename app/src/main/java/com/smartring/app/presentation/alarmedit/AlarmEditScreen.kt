@@ -31,8 +31,11 @@ fun AlarmEditScreen(
     val s by vm.state.collectAsStateWithLifecycle()
     LaunchedEffect(s.isSaved) { if (s.isSaved) onBack() }
 
-    // Dirty-state check: confirm before discarding unsaved changes
+    // Dirty-state check: confirm before discarding unsaved changes. Shared by the
+    // system back gesture/button (BackHandler) and the toolbar's back arrow below —
+    // the latter used to call onBack() directly, bypassing this check entirely.
     var showDiscardDialog by remember { mutableStateOf(false) }
+    val onBackPressed = { if (vm.isDirty) showDiscardDialog = true else onBack() }
     BackHandler(enabled = vm.isDirty) { showDiscardDialog = true }
 
     if (showDiscardDialog) {
@@ -49,7 +52,7 @@ fun AlarmEditScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                navigationIcon = { IconButton(onBack) { Icon(Icons.Rounded.ArrowBack, "חזור") } },
+                navigationIcon = { IconButton(onBackPressed) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, "חזור") } },
                 title          = { Text(if (alarmId > 0) "עריכת שעמור" else "שעמור חדש", fontWeight = FontWeight.ExtraBold) },
                 actions = {
                     TextButton(onClick = vm::save, enabled = !s.isSaving) {
@@ -100,10 +103,10 @@ fun AlarmEditScreen(
                     s.nextFireHint?.let { hint ->
                         Spacer(Modifier.height(6.dp))
                         Row(Modifier.fillMaxWidth(), Arrangement.Center, Alignment.CenterVertically) {
-                            Icon(Icons.Rounded.Schedule, null, Modifier.size(13.dp), tint = Blue)
+                            Icon(Icons.Rounded.Schedule, null, Modifier.size(13.dp), tint = MaterialTheme.colorScheme.primary)
                             Spacer(Modifier.width(4.dp))
                             Text(hint, style = MaterialTheme.typography.labelSmall,
-                                color = Blue, fontWeight = FontWeight.SemiBold)
+                                color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
                         }
                     }
                 }
@@ -357,8 +360,18 @@ private fun DateTimePickerInline(epochMillis: Long, onChanged: (Long) -> Unit) {
             confirmButton = {
                 TextButton({
                     dpState.selectedDateMillis?.let { date ->
-                        val newCal = Calendar.getInstance().apply {
+                        // DatePicker reports the picked day as UTC midnight; read the
+                        // year/month/day from a UTC calendar, then apply them (plus the
+                        // chosen hour/minute) on a device-local calendar. Building the
+                        // local calendar straight from the UTC millis would shift the
+                        // date by a day for negative-UTC-offset timezones.
+                        val utcCal = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply {
                             timeInMillis = date
+                        }
+                        val newCal = Calendar.getInstance().apply {
+                            set(Calendar.YEAR, utcCal.get(Calendar.YEAR))
+                            set(Calendar.MONTH, utcCal.get(Calendar.MONTH))
+                            set(Calendar.DAY_OF_MONTH, utcCal.get(Calendar.DAY_OF_MONTH))
                             set(Calendar.HOUR_OF_DAY, cal.get(Calendar.HOUR_OF_DAY))
                             set(Calendar.MINUTE, cal.get(Calendar.MINUTE))
                             set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)

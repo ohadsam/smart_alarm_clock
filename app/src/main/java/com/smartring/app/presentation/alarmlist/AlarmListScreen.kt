@@ -12,6 +12,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.*
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.*
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -117,11 +119,13 @@ private fun AlarmCardItem(alarm: Alarm, onToggle:(Boolean)->Unit, onEdit:()->Uni
                 Text(alarm.name,style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant,maxLines=1)
                 alarm.reminderText?.takeIf{it.isNotBlank()}?.let{
                     Spacer(Modifier.height(2.dp))
-                    Text("📝 $it",style=MaterialTheme.typography.labelSmall,color=Green,maxLines=1)
+                    Text("📝 $it",style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.tertiary,maxLines=1)
                 }
             }
             Column(horizontalAlignment=Alignment.End){
-                Switch(alarm.isEnabled,onToggle)
+                Switch(alarm.isEnabled,onToggle,
+                    modifier=Modifier.semantics{contentDescription=
+                        "שעמור ${alarm.name.ifBlank{alarm.timeFormatted}} בשעה ${alarm.timeFormatted}, ${if(alarm.isEnabled)"פעיל" else "כבוי"}"})
                 Text("לחץ לחיצה ארוכה למחיקה",
                     style=MaterialTheme.typography.labelSmall,
                     color=MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha=0.5f),

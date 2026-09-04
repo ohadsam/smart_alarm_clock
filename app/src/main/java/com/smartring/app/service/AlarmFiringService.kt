@@ -24,6 +24,7 @@ class AlarmFiringService : Service() {
     private var vibrator: Vibrator? = null
     private var crescendoJob: Job? = null
     private var autoStopJob: Job? = null
+    private var ringSequenceJob: Job? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -34,6 +35,7 @@ class AlarmFiringService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val id = intent?.getLongExtra(AlarmReceiver.EXTRA_ALARM_ID, -1L) ?: -1L
         if (id < 0) { stopSelf(); return START_NOT_STICKY }
+        val isSnooze = intent?.getBooleanExtra(AlarmReceiver.EXTRA_IS_SNOOZE, false) ?: false
 
         // Start foreground immediately (within 5-second ANR window)
         startForeground(NOTIF_ID, buildPlaceholderNotification())
@@ -44,10 +46,12 @@ class AlarmFiringService : Service() {
             getSystemService(NotificationManager::class.java)
                 .notify(NOTIF_ID, buildNotification(alarm))
             repository.log(id, alarm.name, scheduledFor, "FIRED")
-            repository.incrementOccurrences(id)
+            // A snooze re-fire is a continuation of the same occurrence, not a new
+            // one: bumping occurrencesFired/rescheduling here too would advance a
+            // COUNT-limited recurrence once per snooze instead of once per real day.
+            if (!isSnooze) repository.incrementOccurrences(id)
             fireAlarm(alarm)
-            // Reschedule next occurrence (respects recurrenceEnd)
-            scheduler.schedule(alarm.copy(occurrencesFired = alarm.occurrencesFired + 1))
+            if (!isSnooze) scheduler.schedule(alarm.copy(occurrencesFired = alarm.occurrencesFired + 1))
         }
         return START_NOT_STICKY
     }
@@ -61,26 +65,52 @@ class AlarmFiringService : Service() {
             repository.log(alarm.id, alarm.name, System.currentTimeMillis(), "MISSED"); stopSelf()
         }
         when (alarm.vibrationMode) {
-            VibrationMode.SOUND_ONLY          -> startAudio(alarm, 0)
+            VibrationMode.SOUND_ONLY          -> startAudioSequence(alarm, 0)
             VibrationMode.VIBRATION_ONLY      -> startVibration()
-            VibrationMode.SOUND_AND_VIBRATION -> { startVibration(); startAudio(alarm, 0) }
+            VibrationMode.SOUND_AND_VIBRATION -> { startVibration(); startAudioSequence(alarm, 0) }
             VibrationMode.VIBRATION_THEN_SOUND -> {
                 startVibration()
                 delay(alarm.vibrationOnlySeconds * 1_000L)
-                startAudio(alarm, alarm.vibrationOnlySeconds)
+                startAudioSequence(alarm, alarm.vibrationOnlySeconds)
             }
         }
     }
 
-    private fun startAudio(alarm: Alarm, elapsed: Int) {
-        val ring = alarm.rings.firstOrNull()
-        val uri = if (ring != null && ring.ringtoneUri != "default")
-            Uri.parse(ring.ringtoneUri)
-        else android.provider.Settings.System.DEFAULT_ALARM_ALERT_URI
-        val base = (ring?.volumePercent ?: 100) / 100f
+    /**
+     * Plays through alarm.rings in order (each with its own duration/volume/ringtone,
+     * separated by delayAfterSeconds), looping the whole sequence until autoStopJob
+     * or the user ends it. Previously only rings.firstOrNull() ever played on an
+     * infinite loop, so a configured multi-round alarm never advanced past round 1.
+     */
+    private fun startAudioSequence(alarm: Alarm, elapsedAtStart: Int) {
+        val rings = alarm.rings.ifEmpty { listOf(AlarmRing(volumePercent = 100)) }
+            .sortedBy { it.orderIndex }
+        ringSequenceJob = scope.launch {
+            var elapsed = elapsedAtStart
+            while (isActive) {
+                for (ring in rings) {
+                    if (!isActive) break
+                    playOneRing(alarm, ring, elapsed)
+                    elapsed += ring.durationSeconds
+                    if (ring.delayAfterSeconds > 0) {
+                        delay(ring.delayAfterSeconds * 1_000L)
+                        elapsed += ring.delayAfterSeconds
+                    }
+                }
+            }
+        }
+    }
+
+    private suspend fun playOneRing(alarm: Alarm, ring: AlarmRing, elapsedAtRingStart: Int) {
+        val uri = if (ring.ringtoneUri != "default") Uri.parse(ring.ringtoneUri)
+                  else android.provider.Settings.System.DEFAULT_ALARM_ALERT_URI
+        val base = ring.volumePercent / 100f
         val start = if (alarm.crescendoEnabled) alarm.crescendoStartVolume / 100f else base
 
-        player = MediaPlayer().apply {
+        val mp = MediaPlayer()
+        player = mp
+        val prepared = CompletableDeferred<Unit>()
+        mp.apply {
             setAudioAttributes(
                 AudioAttributes.Builder()
                     .setUsage(AudioAttributes.USAGE_ALARM)
@@ -90,20 +120,27 @@ class AlarmFiringService : Service() {
             setDataSource(applicationContext, uri)
             isLooping = true
             setVolume(start, start)
-
             // Use prepareAsync() to avoid blocking the main thread
-            setOnPreparedListener { mp ->
-                mp.start()
-                if (alarm.crescendoEnabled) startCrescendo(alarm, base, elapsed)
-            }
+            setOnPreparedListener { it.start(); prepared.complete(Unit) }
             setOnErrorListener { _, _, _ ->
-                // Fallback: try system default ringtone
-                release()
-                player = null
-                false
+                // Fallback: fall through silently for this ring rather than getting
+                // stuck waiting on `prepared` forever; the next ring (or vibration)
+                // still runs.
+                prepared.complete(Unit)
+                true
             }
             prepareAsync()
         }
+        prepared.await()
+
+        if (alarm.crescendoEnabled) startCrescendo(alarm, base, elapsedAtRingStart)
+
+        delay(ring.durationSeconds * 1_000L)
+
+        crescendoJob?.cancel()
+        runCatching { mp.stop() }
+        runCatching { mp.release() }
+        if (player === mp) player = null
     }
 
     private fun startCrescendo(alarm: Alarm, targetVol: Float, elapsedAtStart: Int) {
@@ -112,7 +149,7 @@ class AlarmFiringService : Service() {
             while (isActive) {
                 delay(1_000L)
                 e++
-                val v = alarm.volumeAtSecond((targetVol * 100).toInt(), e) / 100f
+                val v = alarm.volumeAtSecond(Math.round(targetVol * 100), e) / 100f
                 player?.setVolume(v, v)
                 if (v >= targetVol) break
             }
@@ -127,8 +164,13 @@ class AlarmFiringService : Service() {
     }
 
     private fun stopAll() {
-        autoStopJob?.cancel(); crescendoJob?.cancel()
-        runCatching { player?.stop(); player?.release() }; player = null
+        autoStopJob?.cancel(); crescendoJob?.cancel(); ringSequenceJob?.cancel()
+        // Separate runCatching per call: if stop() throws (e.g. player still in the
+        // Initialized/Prepared-but-not-started state), release() must still run or
+        // the native MediaPlayer leaks.
+        runCatching { player?.stop() }
+        runCatching { player?.release() }
+        player = null
         vibrator?.cancel()
     }
 

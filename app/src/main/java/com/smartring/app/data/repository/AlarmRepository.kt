@@ -33,6 +33,7 @@ class AlarmRepository @Inject constructor(private val dao: AlarmDao) {
     suspend fun unfreezeAll()                           = dao.setFrozenAll(false)
     suspend fun enableAll()                             = dao.enableAll()
     suspend fun incrementOccurrences(id: Long)          = dao.incrementOccurrences(id)
+    suspend fun snoozeCountSinceLastFire(id: Long): Int = dao.snoozeCountSinceLastFire(id)
 
     // ── Logs / History ────────────────────────────────────────────
     fun observeLogs(): Flow<List<AlarmLog>> =

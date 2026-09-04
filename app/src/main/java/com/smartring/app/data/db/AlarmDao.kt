@@ -12,11 +12,14 @@ interface AlarmDao {
     @Transaction @Query("SELECT * FROM alarms WHERE id = :id")
     suspend fun getAlarmWithDetails(id: Long): AlarmWithDetails?
 
-    @Transaction @Query("SELECT * FROM alarms WHERE isEnabled = 1 AND isFrozen = 0")
+    @Transaction @Query("SELECT * FROM alarms WHERE isEnabled = 1 AND isFrozen = 0 ORDER BY hour, minute")
     suspend fun getActiveAlarms(): List<AlarmWithDetails>
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun upsertAlarm(a: AlarmEntity): Long
+    @Insert
+    suspend fun insertAlarm(a: AlarmEntity): Long
+
+    @Update
+    suspend fun updateAlarm(a: AlarmEntity)
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertRings(r: List<AlarmRingEntity>)
@@ -64,6 +67,13 @@ interface AlarmDao {
     @Query("DELETE FROM alarm_logs")
     suspend fun deleteAllLogs()
 
+    @Query("""
+        SELECT COUNT(*) FROM alarm_logs
+        WHERE alarmId = :id AND action = 'SNOOZED'
+        AND firedAt > (SELECT COALESCE(MAX(firedAt), 0) FROM alarm_logs WHERE alarmId = :id AND action = 'FIRED')
+    """)
+    suspend fun snoozeCountSinceLastFire(id: Long): Int
+
     // ── Atomic save ───────────────────────────────────────────────
     @Transaction
     suspend fun saveAlarmTransaction(
@@ -71,7 +81,13 @@ interface AlarmDao {
         rings: List<AlarmRingEntity>,
         dates: List<AlarmDateEntity>,
     ): Long {
-        val id = upsertAlarm(alarm)
+        // insertAlarm()/updateAlarm() rather than a REPLACE upsert: REPLACE is a SQLite
+        // DELETE+INSERT under the hood, which cascades alarm_logs' ON DELETE SET NULL
+        // FK and silently orphans every prior history row each time an alarm is edited.
+        val id = if (alarm.id == 0L) insertAlarm(alarm) else {
+            updateAlarm(alarm)
+            alarm.id
+        }
         deleteRingsForAlarm(id)
         deleteDatesForAlarm(id)
         if (rings.isNotEmpty()) upsertRings(rings.map { it.copy(alarmId = id) })
