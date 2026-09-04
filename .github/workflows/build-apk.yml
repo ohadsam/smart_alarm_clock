@@ -1,0 +1,77 @@
+name: Build SmartRing APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main, master ]
+
+jobs:
+  build:
+    name: Build SmartRing APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      # ── 1. Checkout ──────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── 2. Java 17 ───────────────────────────────
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+          cache: 'gradle'          # built-in gradle cache
+
+      # ── 3. Generate Gradle Wrapper ───────────────
+      # Our repo ships gradlew + gradle-wrapper.properties but NOT the jar.
+      # We install Gradle manually and regenerate the wrapper (jar + script).
+      - name: Generate Gradle Wrapper
+        run: |
+          set -e
+          GRADLE_VERSION="8.7"
+          echo "Downloading Gradle ${GRADLE_VERSION}..."
+          # Retry up to 3 times
+          for i in 1 2 3; do
+            wget -q "https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip" \
+                 -O /tmp/gradle.zip && break
+            echo "Attempt $i failed, retrying..."
+            sleep 5
+          done
+          unzip -q /tmp/gradle.zip -d /tmp/
+          /tmp/gradle-${GRADLE_VERSION}/bin/gradle wrapper \
+               --gradle-version ${GRADLE_VERSION} \
+               --distribution-type bin
+          chmod +x gradlew
+          ls -la gradle/wrapper/
+
+      # ── 4. Build Debug APK ───────────────────────
+      - name: Build Debug APK
+        run: ./gradlew assembleDebug --stacktrace --no-daemon
+        env:
+          GRADLE_OPTS: "-Dorg.gradle.daemon=false"
+
+      # ── 5. Upload Debug APK ──────────────────────
+      - name: Upload Debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: SmartRing-debug-${{ github.run_number }}
+          path: app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 30
+          if-no-files-found: error
+
+      # ── 6. Build Release APK ─────────────────────
+      - name: Build Release APK
+        run: ./gradlew assembleRelease --stacktrace --no-daemon
+        env:
+          GRADLE_OPTS: "-Dorg.gradle.daemon=false"
+
+      # ── 7. Upload Release APK ────────────────────
+      - name: Upload Release APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: SmartRing-release-${{ github.run_number }}
+          path: app/build/outputs/apk/release/app-release.apk
+          retention-days: 30
+          if-no-files-found: warn

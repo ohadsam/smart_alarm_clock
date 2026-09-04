@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">SmartRing</string>
+    <string name="channel_name">SmartRing Alarms</string>
+    <string name="action_stop">עצור</string>
+    <string name="action_snooze">נודניק</string>
+    <string name="widget_small">SmartRing קטן</string>
+    <string name="widget_medium">SmartRing בינוני</string>
+    <string name="widget_wide">SmartRing רחב</string>
+    <string name="widget_large">SmartRing גדול</string>
+    <string name="history">היסטוריה</string>
+    <string name="settings">הגדרות</string>
+    <string name="controls">שליטה כללית</string>
+</resources>
