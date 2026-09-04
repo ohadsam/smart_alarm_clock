@@ -42,14 +42,18 @@ fun AlarmRingScreen(alarmId: Long, onDismiss: () -> Unit,
         onDispose { window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) }
     }
 
-    if (s.alarm == null) {
+    // Null-check the local `alarm` (not the `s.alarm` property access, which is
+    // backed by collectAsStateWithLifecycle()'s custom getter and doesn't smart-cast
+    // reliably across repeated reads) so the rest of this function sees a real
+    // non-null Alarm without needing ?. / !! everywhere.
+    val alarm = s.alarm
+    if (alarm == null) {
         Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background),
             contentAlignment = Alignment.Center) {
             CircularProgressIndicator()
         }
         return
     }
-    val alarm = s.alarm
 
     val pulse = rememberInfiniteTransition(label = "pulse")
     val scale by pulse.animateFloat(0.95f, 1.07f,

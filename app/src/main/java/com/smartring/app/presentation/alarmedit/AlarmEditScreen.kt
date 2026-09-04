@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.*
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -347,6 +348,7 @@ fun AlarmEditScreen(
 
 // ── Sub-composables ───────────────────────────────────────────────
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun DateTimePickerInline(epochMillis: Long, onChanged: (Long) -> Unit) {
     val cal  = remember(epochMillis) { Calendar.getInstance().apply { timeInMillis = epochMillis } }
@@ -512,6 +514,7 @@ private fun ringtoneDisplayName(context: android.content.Context, uriString: Str
     }.getOrNull() ?: "צלצול נבחר"
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun RecurrenceEndSection(s: AlarmEditUiState, vm: AlarmEditViewModel) {
     val fmt = remember { SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()) }
@@ -574,6 +577,7 @@ private fun RecurrenceEndSection(s: AlarmEditUiState, vm: AlarmEditViewModel) {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SpecificDatesSection(
     dates: List<AlarmDate>,
