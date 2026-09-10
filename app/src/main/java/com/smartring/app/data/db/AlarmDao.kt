@@ -74,6 +74,19 @@ interface AlarmDao {
     """)
     suspend fun snoozeCountSinceLastFire(id: Long): Int
 
+    // ── App logs (technical/diagnostic, separate from alarm_logs history) ──
+    @Insert
+    suspend fun insertAppLog(log: AppLogEntity)
+
+    @Query("SELECT * FROM app_logs ORDER BY timestamp DESC LIMIT 1000")
+    fun observeAppLogs(): Flow<List<AppLogEntity>>
+
+    @Query("DELETE FROM app_logs")
+    suspend fun deleteAllAppLogs()
+
+    @Query("DELETE FROM app_logs WHERE timestamp < :cutoffMillis")
+    suspend fun deleteAppLogsOlderThan(cutoffMillis: Long)
+
     // ── Atomic save ───────────────────────────────────────────────
     @Transaction
     suspend fun saveAlarmTransaction(

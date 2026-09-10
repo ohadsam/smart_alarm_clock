@@ -14,14 +14,32 @@ android {
         applicationId   = "com.smartring.app"
         minSdk          = 26
         targetSdk       = 34
-        versionCode     = 2
-        versionName     = "1.1.0"
+        versionCode     = 3
+        versionName     = "1.2.0"
+    }
+
+    // A single committed keystore, reused for both build types, so every APK built
+    // from this repo (any machine, any CI run) shares one signing identity. Without
+    // this, each CI run's debug build gets a fresh ephemeral debug key and the
+    // unconfigured release build is unsigned — neither installs as an update over a
+    // previous build, forcing an uninstall/reinstall (and losing all alarms) every
+    // time. There's no Play Store relationship to protect here, so a plaintext
+    // password committed alongside the keystore is the right tradeoff for a
+    // side-loaded personal app: it buys update compatibility, not secrecy.
+    signingConfigs {
+        create("shared") {
+            storeFile     = file("smartring.keystore")
+            storePassword = "smartring123"
+            keyAlias      = "smartring"
+            keyPassword   = "smartring123"
+        }
     }
 
     buildTypes {
         release {
             isMinifyEnabled   = true
             isShrinkResources = true
+            signingConfig     = signingConfigs.getByName("shared")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -30,6 +48,7 @@ android {
         debug {
             applicationIdSuffix = ".debug"
             isDebuggable        = true
+            signingConfig        = signingConfigs.getByName("shared")
         }
     }
 
@@ -38,7 +57,7 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     kotlinOptions { jvmTarget = "17" }
-    buildFeatures { compose = true }
+    buildFeatures { compose = true; buildConfig = true }
 
     packaging {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"

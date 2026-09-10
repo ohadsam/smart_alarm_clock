@@ -132,11 +132,19 @@ fun AlarmRingScreen(alarmId: Long, onDismiss: () -> Unit,
 
             Spacer(Modifier.height(48.dp))
 
+            // Shabbat mode: Stop/Snooze are disabled (grayed, non-clickable) so
+            // nothing needs to be pressed — the alarm still auto-stops via
+            // ringDurationSeconds (fireAlarm()'s autoStopJob), which isn't a
+            // user-initiated action.
+            val shabbat = !alarm.acceptsInteraction
+            val stopColor = if (shabbat) MaterialTheme.colorScheme.outline else Red
+
             // STOP button
-            Box(Modifier.size(160.dp).scale(scale), contentAlignment = Alignment.Center) {
-                Box(Modifier.fillMaxSize().background(Red.copy(.18f), CircleShape)
-                    .border(2.dp, Red.copy(.4f), CircleShape))
-                IconButton(vm::stop, Modifier.size(130.dp).clip(CircleShape).background(Red)) {
+            Box(Modifier.size(160.dp).scale(if (shabbat) 1f else scale), contentAlignment = Alignment.Center) {
+                Box(Modifier.fillMaxSize().background(stopColor.copy(.18f), CircleShape)
+                    .border(2.dp, stopColor.copy(.4f), CircleShape))
+                IconButton(vm::stop, Modifier.size(130.dp).clip(CircleShape).background(stopColor),
+                    enabled = !shabbat) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Icon(Icons.Rounded.Stop, null, Modifier.size(52.dp), tint = White)
                         Text("עצור", color = White, fontWeight = FontWeight.ExtraBold, fontSize = 16.sp)
@@ -146,16 +154,34 @@ fun AlarmRingScreen(alarmId: Long, onDismiss: () -> Unit,
 
             Spacer(Modifier.height(28.dp))
 
-            if (s.snoozeCount < alarm.snoozeMaxCount) {
-                TextButton(vm::snooze) {
-                    Icon(Icons.Rounded.Bedtime, null, Modifier.size(18.dp), tint = Gold)
-                    Spacer(Modifier.width(6.dp))
-                    Text("נודניק – ${alarm.snoozeMinutes} דק' (${alarm.snoozeMaxCount - s.snoozeCount} נותרו)",
-                        color = Gold, fontWeight = FontWeight.SemiBold)
+            when {
+                shabbat -> {
+                    Surface(shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        modifier = Modifier.fillMaxWidth()) {
+                        Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Rounded.Lock, null, Modifier.size(18.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Spacer(Modifier.width(8.dp))
+                            Text("מצב שבת פעיל — לא ניתן לעצור או לדחות. השעמור ייפסק אוטומטית.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
                 }
-            } else {
-                Text("הגעת למגבלת הנודניק", style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                !alarm.snoozeEnabled -> { /* no snooze UI at all for this alarm */ }
+                s.snoozeCount < alarm.snoozeMaxCount -> {
+                    TextButton(vm::snooze) {
+                        Icon(Icons.Rounded.Bedtime, null, Modifier.size(18.dp), tint = Gold)
+                        Spacer(Modifier.width(6.dp))
+                        Text("נודניק – ${alarm.snoozeMinutes} דק' (${alarm.snoozeMaxCount - s.snoozeCount} נותרו)",
+                            color = Gold, fontWeight = FontWeight.SemiBold)
+                    }
+                }
+                else -> {
+                    Text("הגעת למגבלת הנודניק", style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
             }
         }
     }

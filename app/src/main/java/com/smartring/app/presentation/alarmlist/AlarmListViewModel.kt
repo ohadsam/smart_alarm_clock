@@ -4,6 +4,7 @@ import androidx.lifecycle.viewModelScope
 import com.smartring.app.data.repository.AlarmRepository
 import com.smartring.app.domain.model.Alarm
 import com.smartring.app.util.AlarmScheduler
+import com.smartring.app.util.AppLogger
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -15,6 +16,7 @@ data class AlarmListUiState(val alarms: List<Alarm> = emptyList(), val isLoading
 class AlarmListViewModel @Inject constructor(
     private val repository: AlarmRepository,
     private val scheduler: AlarmScheduler,
+    private val appLogger: AppLogger,
 ) : ViewModel() {
     val uiState = repository.observeAlarms()
         .map { AlarmListUiState(it, false) }
@@ -23,24 +25,30 @@ class AlarmListViewModel @Inject constructor(
     fun toggle(alarm: Alarm, enabled: Boolean) = viewModelScope.launch {
         repository.setEnabled(alarm.id, enabled)
         if (enabled) scheduler.schedule(alarm.copy(isEnabled = true)) else scheduler.cancel(alarm.id)
+        appLogger.log("AlarmList", "\"${alarm.name}\" (#${alarm.id}) ${if (enabled) "הופעל" else "כובה"}")
     }
     fun delete(alarm: Alarm) = viewModelScope.launch {
         scheduler.cancel(alarm.id); repository.deleteAlarm(alarm.id)
+        appLogger.log("AlarmList", "נמחק: \"${alarm.name}\" (#${alarm.id})")
     }
     fun disableAll() = viewModelScope.launch {
         val alarms = repository.getActiveAlarms()
         repository.disableAll()
         alarms.forEach { scheduler.cancel(it.id) }
+        appLogger.log("AlarmList", "כל השעמורים כובו (${alarms.size})")
     }
     fun freezeAll() = viewModelScope.launch {
         val alarms = repository.getActiveAlarms()
         repository.freezeAll()
         alarms.forEach { scheduler.cancel(it.id) }
+        appLogger.log("AlarmList", "כל השעמורים הוקפאו (${alarms.size})")
     }
     fun unfreezeAll() = viewModelScope.launch {
         repository.unfreezeAll(); scheduler.rescheduleAll(repository.getActiveAlarms())
+        appLogger.log("AlarmList", "הקפאה בוטלה לכל השעמורים")
     }
     fun enableAll() = viewModelScope.launch {
         repository.enableAll(); scheduler.rescheduleAll(repository.getActiveAlarms())
+        appLogger.log("AlarmList", "כל השעמורים הופעלו")
     }
 }

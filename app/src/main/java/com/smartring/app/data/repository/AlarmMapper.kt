@@ -23,8 +23,10 @@ internal fun AlarmWithDetails.toDomain() = Alarm(
     specificDates        = dates.map { it.toDomain() },
     ringDurationSeconds  = alarm.ringDurationSeconds,
     rings                = rings.sortedBy { it.orderIndex }.map { it.toDomain() },
+    snoozeEnabled        = alarm.snoozeEnabled,
     snoozeMinutes        = alarm.snoozeMinutes,
     snoozeMaxCount       = alarm.snoozeMaxCount,
+    isShabbatMode        = alarm.isShabbatMode,
     reminderText         = alarm.reminderText,
     vibrationMode        = VibrationMode.valueOf(alarm.vibrationMode),
     vibrationOnlySeconds = alarm.vibrationOnlySeconds,
@@ -37,6 +39,7 @@ internal fun AlarmWithDetails.toDomain() = Alarm(
 internal fun AlarmRingEntity.toDomain() = AlarmRing(id, alarmId, orderIndex, durationSeconds, volumePercent, ringtoneUri, delayAfterSeconds)
 internal fun AlarmDateEntity.toDomain() = AlarmDate(id, alarmId, date, label)
 internal fun AlarmLogEntity.toDomain()  = AlarmLog(id, alarmId ?: 0L, alarmName, firedAt, scheduledFor, action)
+internal fun AppLogEntity.toDomain()    = AppLogEntry(id, timestamp, tag, message)
 
 // ── Domain → Entity ───────────────────────────────────────────────
 
@@ -55,8 +58,10 @@ internal fun Alarm.toEntity() = AlarmEntity(
     recurrenceCount      = recurrenceEnd.count,
     occurrencesFired     = occurrencesFired,
     ringDurationSeconds  = ringDurationSeconds,
+    snoozeEnabled        = snoozeEnabled,
     snoozeMinutes        = snoozeMinutes,
     snoozeMaxCount       = snoozeMaxCount,
+    isShabbatMode        = isShabbatMode,
     reminderText         = reminderText,
     vibrationMode        = vibrationMode.name,
     vibrationOnlySeconds = vibrationOnlySeconds,

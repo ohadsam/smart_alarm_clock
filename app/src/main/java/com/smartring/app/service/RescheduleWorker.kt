@@ -4,15 +4,20 @@ import androidx.hilt.work.HiltWorker
 import androidx.work.*
 import com.smartring.app.data.repository.AlarmRepository
 import com.smartring.app.util.AlarmScheduler
+import com.smartring.app.util.AppLogger
 import dagger.assisted.*
 
 @HiltWorker
 class RescheduleWorker @AssistedInject constructor(
     @Assisted ctx: Context, @Assisted params: WorkerParameters,
     private val repository: AlarmRepository, private val scheduler: AlarmScheduler,
+    private val appLogger: AppLogger,
 ) : CoroutineWorker(ctx, params) {
     override suspend fun doWork(): Result {
-        scheduler.rescheduleAll(repository.getActiveAlarms()); return Result.success()
+        appLogger.log("RescheduleWorker", "עבודת רקע התחילה")
+        scheduler.rescheduleAll(repository.getActiveAlarms())
+        appLogger.log("RescheduleWorker", "עבודת רקע הסתיימה")
+        return Result.success()
     }
     companion object { const val WORK_NAME = "reschedule_alarms" }
 }

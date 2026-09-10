@@ -49,4 +49,14 @@ class AlarmRepository @Inject constructor(private val dao: AlarmDao) {
 
     suspend fun deleteLog(id: Long)  = dao.deleteLog(id)
     suspend fun deleteAllLogs()      = dao.deleteAllLogs()
+
+    // ── App logs (technical/diagnostic) ─────────────────────────────
+    fun observeAppLogs(): Flow<List<AppLogEntry>> =
+        dao.observeAppLogs().map { it.map { l -> l.toDomain() } }
+
+    suspend fun insertAppLog(tag: String, message: String) =
+        dao.insertAppLog(AppLogEntity(tag = tag, message = message))
+
+    suspend fun deleteAllAppLogs() = dao.deleteAllAppLogs()
+    suspend fun deleteAppLogsOlderThan(cutoffMillis: Long) = dao.deleteAppLogsOlderThan(cutoffMillis)
 }

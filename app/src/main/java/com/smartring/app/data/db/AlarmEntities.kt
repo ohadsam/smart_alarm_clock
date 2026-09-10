@@ -23,8 +23,11 @@ data class AlarmEntity(
     // Ring
     val ringDurationSeconds: Int            = 60,
     // Snooze
+    val snoozeEnabled: Boolean              = true,
     val snoozeMinutes: Int                  = 10,
     val snoozeMaxCount: Int                 = 3,
+    // Shabbat mode
+    val isShabbatMode: Boolean              = false,
     // Misc
     val reminderText: String?               = null,
     val vibrationMode: String               = VibrationMode.SOUND_AND_VIBRATION.name,
@@ -77,6 +80,16 @@ data class AlarmLogEntity(
     val firedAt: Long                      = System.currentTimeMillis(),
     val scheduledFor: Long                 = System.currentTimeMillis(),
     val action: String                     = "FIRED",
+)
+
+// ── AppLog (technical/diagnostic log, separate from user-facing alarm_logs) ────
+
+@Entity(tableName = "app_logs", indices = [Index("timestamp")])
+data class AppLogEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val timestamp: Long = System.currentTimeMillis(),
+    val tag: String      = "",
+    val message: String  = "",
 )
 
 // ── Relation POJO ─────────────────────────────────────────────────

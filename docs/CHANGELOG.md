@@ -1,5 +1,45 @@
 # SmartRing – Changelog
 
+## v1.2.0 (2026-09-10)
+
+**New capabilities:**
+- Per-alarm Shabbat mode: while such an alarm rings, Stop/Snooze are disabled everywhere (ring
+  screen and notification actions alike) — nothing can be pressed. It still auto-stops via the
+  alarm's own ring-duration timer, which isn't a user action. `Alarm.acceptsInteraction` is the
+  single source of truth every entry point (`buildNotification`, `StopAlarmReceiver`,
+  `SnoozeAlarmReceiver`, `AlarmRingViewModel`) now reads, after an earlier draft of this had the
+  check in a different order in `SnoozeAlarmReceiver` than the other three, missing a case where a
+  stale notification action could silence a Shabbat alarm.
+- Snooze can now be turned off entirely for a specific alarm (separate from the existing
+  snooze-minutes/max-count settings) — when off, no snooze button/notification-action appears for
+  it at all.
+- Every slider in the edit screen now has a matching numeric-entry dialog (tap the value pill) in
+  addition to dragging, and duration values render as "1 דק' 30 שנ'" instead of a raw seconds count.
+- Info (ⓘ) buttons next to most edit-screen fields explaining what each one does.
+- Settings → Logs: a technical/diagnostic log (scheduling decisions, boot rescheduling, background
+  work — separate from the user-facing ring history) with copy/download/clear, auto-trimmed to the
+  last 3 days by a daily cleanup worker.
+- Settings → background-reliability checks (notifications, exact-alarm permission, battery
+  optimization) with one-tap links to the relevant system settings screen — the three OS-level
+  settings most likely to silently stop an Android alarm clock from firing.
+- A "what's new" dialog shown once after an in-place upgrade (never on a fresh install; an
+  existing user's very first launch on this version sees the full history, since there was no
+  version-tracking before this feature existed to compare against).
+- APK updates now install in place instead of requiring an uninstall (which deleted every alarm)
+  first: `app/build.gradle.kts` points both build types at one committed keystore
+  (`app/smartring.keystore`). Previously `release` had no signing config at all (AGP produced an
+  *unsigned*, non-installable APK) and `debug` used a fresh ephemeral key on every CI run.
+
+**Fixed while building the above** (found by 3 rounds of code review on this batch):
+- `LogCleanupWorker` ran every 3 days deleting rows older than 3 days, so a row written right
+  after one run could survive until the *next* run — up to ~6 days, not the promised 3; now runs
+  daily.
+- Exported/copied log text read newest-first (matching the on-screen DESC order) instead of
+  chronological, awkward for following an event sequence in a downloaded file.
+- `SnoozeAlarmReceiver`/`AlarmRingViewModel.snooze()` treated "snooze disabled for this alarm" the
+  same as Shabbat mode (do nothing) instead of degrading to a plain stop — a stale snooze
+  notification action on a non-Shabbat, snooze-disabled alarm left it ringing until the timeout.
+
 ## v1.1.0 (2026-09-04)
 
 **UI/UX and capability additions:**

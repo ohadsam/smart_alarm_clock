@@ -20,6 +20,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.smartring.app.domain.model.Alarm
 import com.smartring.app.presentation.theme.*
+import com.smartring.app.presentation.whatsnew.WhatsNewDialog
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -27,6 +28,8 @@ fun AlarmListScreen(onAddAlarm: ()->Unit, onEditAlarm: (Long)->Unit, onOpenHisto
     vm: AlarmListViewModel = hiltViewModel()) {
     val state by vm.uiState.collectAsStateWithLifecycle()
     var showControls by remember { mutableStateOf(false) }
+
+    WhatsNewDialog()
 
     Scaffold(
         topBar = {
@@ -148,6 +151,13 @@ private fun AlarmCardItem(alarm: Alarm, onToggle:(Boolean)->Unit, onEdit:()->Uni
                     Spacer(Modifier.height(2.dp))
                     Text("📝 $it",style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.tertiary,maxLines=1)
                 }
+                if (alarm.isShabbatMode || !alarm.snoozeEnabled) {
+                    Spacer(Modifier.height(3.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        if (alarm.isShabbatMode) MiniBadge("🕯 שבת", MaterialTheme.colorScheme.tertiary)
+                        if (!alarm.snoozeEnabled) MiniBadge("ללא נודניק", MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
             }
             Column(horizontalAlignment=Alignment.End){
                 Switch(alarm.isEnabled,onToggle,
@@ -164,4 +174,12 @@ private fun AlarmCardItem(alarm: Alarm, onToggle:(Boolean)->Unit, onEdit:()->Uni
     if (showDel) AlertDialog({showDel=false},title={Text("מחק שעמור")},text={Text("מחק את \"${alarm.name}\"?")},
         confirmButton={TextButton({showDel=false;onDelete()}){Text("מחק",color=MaterialTheme.colorScheme.error)}},
         dismissButton={TextButton({showDel=false}){Text("ביטול")}})
+}
+
+@Composable
+private fun MiniBadge(text: String, color: Color) = Surface(
+    shape = RoundedCornerShape(999.dp), color = color.copy(alpha = 0.12f),
+) {
+    Text(text, Modifier.padding(horizontal = 6.dp, vertical = 1.dp),
+        style = MaterialTheme.typography.labelSmall, color = color, fontSize = 9.sp)
 }

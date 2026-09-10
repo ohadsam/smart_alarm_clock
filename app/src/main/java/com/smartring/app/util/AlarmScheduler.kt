@@ -15,6 +15,7 @@ import javax.inject.Singleton
 @Singleton
 class AlarmScheduler @Inject constructor(
     @ApplicationContext private val context: Context,
+    private val appLogger: AppLogger,
 ) {
     private val alarmManager = context.getSystemService(AlarmManager::class.java)
 
@@ -23,19 +24,28 @@ class AlarmScheduler @Inject constructor(
         if (alarm.isRecurrenceExpired()) return
         val t = nextFireTime(alarm) ?: return
         alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, t, buildIntent(alarm.id))
+        val fmt = Calendar.getInstance().apply { timeInMillis = t }
+        appLogger.log("Scheduler", "תוזמן: \"${alarm.name}\" (#${alarm.id}) ל-%02d/%02d %02d:%02d".format(
+            fmt.get(Calendar.DAY_OF_MONTH), fmt.get(Calendar.MONTH) + 1,
+            fmt.get(Calendar.HOUR_OF_DAY), fmt.get(Calendar.MINUTE)))
     }
 
-    fun scheduleAt(alarm: Alarm, at: Long) =
+    fun scheduleAt(alarm: Alarm, at: Long) {
         alarmManager.setExactAndAllowWhileIdle(
             AlarmManager.RTC_WAKEUP, at, buildSnoozePendingIntent(alarm.id))
+        appLogger.log("Scheduler", "נודניק תוזמן: \"${alarm.name}\" (#${alarm.id})")
+    }
 
     fun cancel(id: Long) {
         alarmManager.cancel(buildIntent(id))
         alarmManager.cancel(buildSnoozePendingIntent(id))
+        appLogger.log("Scheduler", "בוטל: שעמור #$id")
     }
 
-    fun rescheduleAll(alarms: List<Alarm>) =
+    fun rescheduleAll(alarms: List<Alarm>) {
         alarms.forEach { cancel(it.id); if (it.isActive && !it.isRecurrenceExpired()) schedule(it) }
+        appLogger.log("Scheduler", "תוזמנו מחדש ${alarms.size} שעמורים")
+    }
 
     fun nextFireTime(alarm: Alarm): Long? {
         val now = System.currentTimeMillis()

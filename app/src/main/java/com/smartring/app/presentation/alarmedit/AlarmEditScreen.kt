@@ -11,6 +11,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.*
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.*
@@ -19,11 +20,13 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.*
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.*
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.smartring.app.domain.model.*
 import com.smartring.app.presentation.theme.*
+import com.smartring.app.util.formatDurationSeconds
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -143,7 +146,8 @@ fun AlarmEditScreen(
                 EditCard {
                     Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {
                         Column {
-                            Text("תאריך ושעה ספציפיים", fontWeight = FontWeight.SemiBold)
+                            FieldLabel("תאריך ושעה ספציפיים",
+                                info = "השעמור יצלצל פעם אחת בלבד, בתאריך ובשעה שתבחר, במקום לפי ימים קבועים.")
                             Text("הצלצול יהיה פעם אחת בלבד בתאריך שתבחר",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -212,8 +216,8 @@ fun AlarmEditScreen(
                 // Frequency
                 item {
                     EditCard {
-                        Text("תדירות", style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        FieldLabel("תדירות",
+                            info = "כל כמה זמן השעמור חוזר: כל שבוע, כל שבועיים, פעם בחודש, או ללא חזרה כלל.")
                         Spacer(Modifier.height(8.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             listOf(
@@ -257,12 +261,9 @@ fun AlarmEditScreen(
             item { SectionLabel("צלצול") }
             item {
                 EditCard {
-                    Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {
-                        Text("משך צלצול", fontWeight = FontWeight.SemiBold)
-                        ValueBadge("${s.ringDurationSeconds}שנ׳", Blue)
-                    }
-                    Slider(s.ringDurationSeconds.toFloat(), { vm.setRingDuration(it.toInt()) },
-                        valueRange = 5f..600f, steps = 118)
+                    LabeledSlider("משך צלצול", s.ringDurationSeconds, "שנ׳", 5f, 600f, 118, Blue,
+                        info = "כמה זמן השעמור ימשיך לצלצול לפני שהוא נעצר אוטומטית, אם לא תעצור אותו ידנית.",
+                        formatter = ::formatDurationSeconds, onChange = vm::setRingDuration)
                 }
             }
 
@@ -274,6 +275,9 @@ fun AlarmEditScreen(
             item { SectionLabel("רטט וצלצול") }
             item {
                 EditCard {
+                    FieldLabel("סוג צלצול",
+                        info = "בחר אם השעמור יצלצל בקול, ירטוט, שניהם יחד, או ירטוט לפני שיתחיל לצלצול.")
+                    Spacer(Modifier.height(6.dp))
                     Row(Modifier.fillMaxWidth(), Arrangement.spacedBy(6.dp)) {
                         listOf(
                             VibrationMode.SOUND_ONLY          to "צלצול",
@@ -287,13 +291,9 @@ fun AlarmEditScreen(
                     }
                     if (s.vibrationMode == VibrationMode.VIBRATION_THEN_SOUND) {
                         Spacer(Modifier.height(8.dp))
-                        Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {
-                            Text("רטט לפני צלצול", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-                            ValueBadge("${s.vibrationOnlySeconds}שנ׳", Red)
-                        }
-                        Slider(s.vibrationOnlySeconds.toFloat(), { vm.setVibrationOnlySeconds(it.toInt()) },
-                            valueRange = 3f..120f, steps = 39,
-                            colors = SliderDefaults.colors(thumbColor = Red, activeTrackColor = Red))
+                        LabeledSlider("רטט לפני צלצול", s.vibrationOnlySeconds, "שנ׳", 3f, 120f, 39, Red,
+                            info = "כמה זמן לרטוט לפני שהצליל מתחיל להתנגן.",
+                            formatter = ::formatDurationSeconds, onChange = vm::setVibrationOnlySeconds)
                     }
                 }
             }
@@ -307,17 +307,24 @@ fun AlarmEditScreen(
                             Icon(Icons.Rounded.TrendingUp, null, Modifier.size(18.dp),
                                 tint = MaterialTheme.colorScheme.primary)
                             Spacer(Modifier.width(8.dp))
-                            Text("צלצול מתחזק", fontWeight = FontWeight.SemiBold)
+                            FieldLabel("צלצול מתחזק",
+                                info = "העוצמה תעלה בהדרגה מנמוכה לגבוהה, במקום לצלצל בעוצמה מלאה מיד.")
                         }
                         Switch(s.crescendoEnabled, vm::setCrescendoEnabled)
                     }
                     if (s.crescendoEnabled) {
                         Spacer(Modifier.height(8.dp)); HorizontalDivider(); Spacer(Modifier.height(8.dp))
-                        LabeledSlider("עוצמה התחלתית",   s.crescendoStartVolume, "%",   5f,  80f, 15, Green, vm::setCrescendoStartVolume)
+                        LabeledSlider("עוצמה התחלתית", s.crescendoStartVolume, "%", 5f, 80f, 15, Green,
+                            info = "עוצמת הקול בתחילת הצלצול, לפני שהיא מתחילה לעלות.",
+                            onChange = vm::setCrescendoStartVolume)
                         Spacer(Modifier.height(6.dp))
-                        LabeledSlider("כל כמה שניות עולה", s.crescendoStepSeconds, "שנ׳", 5f, 60f, 11, Blue,  vm::setCrescendoStepSeconds)
+                        LabeledSlider("כל כמה שניות עולה", s.crescendoStepSeconds, "שנ׳", 5f, 60f, 11, Blue,
+                            info = "כל כמה שניות עוצמת הקול תעלה לשלב הבא.",
+                            formatter = ::formatDurationSeconds, onChange = vm::setCrescendoStepSeconds)
                         Spacer(Modifier.height(6.dp))
-                        LabeledSlider("עלייה בכל צעד",   s.crescendoStepPercent,  "%",   5f,  30f,  5, Gold,  vm::setCrescendoStepPercent)
+                        LabeledSlider("עלייה בכל צעד", s.crescendoStepPercent, "%", 5f, 30f, 5, Gold,
+                            info = "כמה אחוזים עוצמת הקול עולה בכל שלב.",
+                            onChange = vm::setCrescendoStepPercent)
                     }
                 }
             }
@@ -326,19 +333,48 @@ fun AlarmEditScreen(
             item { SectionLabel("נודניק") }
             item {
                 EditCard {
-                    LabeledSlider("משך נודניק", s.snoozeMinutes, "דק׳", 1f, 60f, 59, Gold, vm::setSnoozeMinutes)
-                    Spacer(Modifier.height(8.dp)); HorizontalDivider(); Spacer(Modifier.height(8.dp))
                     Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {
-                        Text("מקסימום נודניקים", fontWeight = FontWeight.SemiBold)
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            IconButton({ if (s.snoozeMaxCount > 1) vm.setSnoozeMaxCount(s.snoozeMaxCount - 1) }, Modifier.size(36.dp)) {
-                                Icon(Icons.Rounded.Remove, null)
-                            }
-                            Text("${s.snoozeMaxCount}", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold)
-                            IconButton({ if (s.snoozeMaxCount < 10) vm.setSnoozeMaxCount(s.snoozeMaxCount + 1) }, Modifier.size(36.dp)) {
-                                Icon(Icons.Rounded.Add, null)
+                        FieldLabel("אפשר נודניק לשעמור זה",
+                            info = "כאשר כבוי, לא תוצג אפשרות נודניק כלל עבור השעמור הזה — לא במסך הצלצול ולא בהתראה.")
+                        Switch(s.snoozeEnabled, vm::setSnoozeEnabled)
+                    }
+                    if (s.snoozeEnabled) {
+                        Spacer(Modifier.height(8.dp)); HorizontalDivider(); Spacer(Modifier.height(8.dp))
+                        LabeledSlider("משך נודניק", s.snoozeMinutes, "דק׳", 1f, 60f, 59, Gold,
+                            info = "כמה זמן השעמור יידחה כאשר לוחצים על נודניק.",
+                            onChange = vm::setSnoozeMinutes)
+                        Spacer(Modifier.height(8.dp)); HorizontalDivider(); Spacer(Modifier.height(8.dp))
+                        Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {
+                            FieldLabel("מקסימום נודניקים",
+                                info = "כמה פעמים ניתן ללחוץ על נודניק לפני שהאפשרות נעלמת.")
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                IconButton({ if (s.snoozeMaxCount > 1) vm.setSnoozeMaxCount(s.snoozeMaxCount - 1) }, Modifier.size(36.dp)) {
+                                    Icon(Icons.Rounded.Remove, null)
+                                }
+                                Text("${s.snoozeMaxCount}", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold)
+                                IconButton({ if (s.snoozeMaxCount < 10) vm.setSnoozeMaxCount(s.snoozeMaxCount + 1) }, Modifier.size(36.dp)) {
+                                    Icon(Icons.Rounded.Add, null)
+                                }
                             }
                         }
+                    }
+                }
+            }
+
+            // ── Shabbat mode ────────────────────────────────────────
+            item { SectionLabel("מצב שבת") }
+            item {
+                EditCard {
+                    Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            FieldLabel("שעמור שבת",
+                                info = "כאשר מופעל, כפתורי העצירה והנודניק יהיו מושבתים לגמרי בזמן שהשעמור מצלצל — " +
+                                    "לא ניתן יהיה ללחוץ עליהם, גם לא מההתראה. השעמור עדיין ייפסק אוטומטית לפי \"משך צלצול\" שהגדרת.")
+                            Text("כפתורי עצירה/נודניק יהיו מושבתים בזמן הצפצוף",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Switch(s.isShabbatMode, vm::setShabbatMode)
                     }
                 }
             }
@@ -482,15 +518,20 @@ private fun RingsSection(
                 Text(ringtoneDisplayName(context, ring.ringtoneUri), maxLines = 1)
             }
             Spacer(Modifier.height(8.dp))
-            LabeledSlider("משך", ring.durationSeconds, "שנ׳", 5f, 300f, 59, Blue) {
+            LabeledSlider("משך", ring.durationSeconds, "שנ׳", 5f, 300f, 59, Blue,
+                info = "כמה זמן הסבב הזה מנגן לפני שעובר לסבב הבא.",
+                formatter = ::formatDurationSeconds) {
                 onUpdate(i, ring.copy(durationSeconds = it))
             }
             Spacer(Modifier.height(6.dp))
-            LabeledSlider("עוצמה", ring.volumePercent, "%", 10f, 100f, 18, Green) {
+            LabeledSlider("עוצמה", ring.volumePercent, "%", 10f, 100f, 18, Green,
+                info = "עוצמת הקול של הסבב הזה, כאחוז מהעוצמה המקסימלית.") {
                 onUpdate(i, ring.copy(volumePercent = it))
             }
             Spacer(Modifier.height(6.dp))
-            LabeledSlider("השהיה אחרי סבב זה", ring.delayAfterSeconds, "שנ׳", 0f, 600f, 60, Gold) {
+            LabeledSlider("השהיה אחרי סבב זה", ring.delayAfterSeconds, "שנ׳", 0f, 600f, 60, Gold,
+                info = "כמה זמן להמתין בשקט אחרי שהסבב הזה מסתיים, לפני שהסבב הבא (או החזרה לסבב הראשון) מתחיל.",
+                formatter = ::formatDurationSeconds) {
                 onUpdate(i, ring.copy(delayAfterSeconds = it))
             }
             if (i < rings.size - 1) HorizontalDivider(Modifier.padding(vertical = 10.dp))
@@ -519,8 +560,8 @@ private fun ringtoneDisplayName(context: android.content.Context, uriString: Str
 private fun RecurrenceEndSection(s: AlarmEditUiState, vm: AlarmEditViewModel) {
     val fmt = remember { SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()) }
     EditCard {
-        Text("מתי מסתיימת החזרתיות?", style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant)
+        FieldLabel("מתי מסתיימת החזרתיות?",
+            info = "בחר מתי השעמור מפסיק לחזור: לעולם לא, אחרי מספר פעמים מסוים, או עד תאריך מסוים.")
         Spacer(Modifier.height(10.dp))
 
         // End type selector
@@ -667,20 +708,86 @@ fun EditCard(content: @Composable ColumnScope.() -> Unit) = Surface(
     modifier = Modifier.fillMaxWidth(),
 ) { Column(Modifier.padding(16.dp), content = content) }
 
+/**
+ * A value pill that opens a small numeric-entry dialog when tapped — the exact-value
+ * counterpart to dragging a slider. Shared by every duration/percent/count field so
+ * typing "90" is always available alongside drag-to-adjust.
+ */
 @Composable
-fun ValueBadge(text: String, color: androidx.compose.ui.graphics.Color) = Surface(
-    shape = RoundedCornerShape(999.dp), color = color.copy(.12f),
-    border = BorderStroke(1.dp, color.copy(.3f))) {
-    Text(text, Modifier.padding(horizontal = 10.dp, vertical = 3.dp),
-        style = MaterialTheme.typography.labelMedium, color = color, fontWeight = FontWeight.ExtraBold)
+fun EditableValueBadge(
+    value: Int, unit: String, color: androidx.compose.ui.graphics.Color,
+    min: Int, max: Int, onChange: (Int) -> Unit,
+    displayText: String = "$value $unit",
+) {
+    var showDialog by remember { mutableStateOf(false) }
+    Surface(
+        onClick = { showDialog = true },
+        shape = RoundedCornerShape(999.dp), color = color.copy(.12f),
+        border = BorderStroke(1.dp, color.copy(.3f)),
+    ) {
+        Text(displayText, Modifier.padding(horizontal = 10.dp, vertical = 3.dp),
+            style = MaterialTheme.typography.labelMedium, color = color, fontWeight = FontWeight.ExtraBold)
+    }
+    if (showDialog) {
+        var text by remember { mutableStateOf(value.toString()) }
+        AlertDialog(
+            onDismissRequest = { showDialog = false },
+            title = { Text("הזן ערך") },
+            text = {
+                OutlinedTextField(
+                    value = text,
+                    onValueChange = { text = it.filter(Char::isDigit).take(6) },
+                    singleLine = true,
+                    suffix = { Text(unit) },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    supportingText = { Text("טווח: $min–$max") },
+                )
+            },
+            confirmButton = {
+                TextButton({
+                    text.toIntOrNull()?.let { onChange(it.coerceIn(min, max)) }
+                    showDialog = false
+                }) { Text("אישור") }
+            },
+            dismissButton = { TextButton({ showDialog = false }) { Text("ביטול") } },
+        )
+    }
+}
+
+/** A field's label text with an optional (i) button opening a short explanation. */
+@Composable
+fun FieldLabel(text: String, info: String? = null, modifier: Modifier = Modifier) {
+    Row(modifier, verticalAlignment = Alignment.CenterVertically) {
+        Text(text, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
+        if (info != null) {
+            var show by remember { mutableStateOf(false) }
+            IconButton({ show = true }, Modifier.size(22.dp)) {
+                Icon(Icons.Rounded.Info, "מידע על $text", Modifier.size(15.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            if (show) {
+                AlertDialog(
+                    onDismissRequest = { show = false },
+                    title = { Text(text) },
+                    text  = { Text(info) },
+                    confirmButton = { TextButton({ show = false }) { Text("הבנתי") } },
+                )
+            }
+        }
+    }
 }
 
 @Composable
-fun LabeledSlider(label: String, value: Int, unit: String, min: Float, max: Float,
-    steps: Int, color: androidx.compose.ui.graphics.Color, onChange: (Int) -> Unit) {
+fun LabeledSlider(
+    label: String, value: Int, unit: String, min: Float, max: Float,
+    steps: Int, color: androidx.compose.ui.graphics.Color,
+    info: String? = null,
+    formatter: (Int) -> String = { "$it $unit" },
+    onChange: (Int) -> Unit,
+) {
     Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {
-        Text(label, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
-        ValueBadge("$value $unit", color)
+        FieldLabel(label, info)
+        EditableValueBadge(value, unit, color, min.toInt(), max.toInt(), onChange, displayText = formatter(value))
     }
     Slider(value.toFloat(), { onChange(it.toInt()) }, valueRange = min..max, steps = steps,
         colors = SliderDefaults.colors(thumbColor = color, activeTrackColor = color))

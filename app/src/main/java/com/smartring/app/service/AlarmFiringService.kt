@@ -10,6 +10,7 @@ import com.smartring.app.data.repository.AlarmRepository
 import com.smartring.app.domain.model.*
 import com.smartring.app.receiver.AlarmReceiver
 import com.smartring.app.util.AlarmScheduler
+import com.smartring.app.util.AppLogger
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.*
 import javax.inject.Inject
@@ -18,6 +19,7 @@ import javax.inject.Inject
 class AlarmFiringService : Service() {
     @Inject lateinit var repository: AlarmRepository
     @Inject lateinit var scheduler: AlarmScheduler
+    @Inject lateinit var appLogger: AppLogger
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var player: MediaPlayer? = null
@@ -46,6 +48,8 @@ class AlarmFiringService : Service() {
             getSystemService(NotificationManager::class.java)
                 .notify(NOTIF_ID, buildNotification(alarm))
             repository.log(id, alarm.name, scheduledFor, "FIRED")
+            appLogger.log("AlarmFiringService", "מצלצל: \"${alarm.name}\" (#$id)" +
+                if (alarm.isShabbatMode) " [מצב שבת]" else "")
             // A snooze re-fire is a continuation of the same occurrence, not a new
             // one: bumping occurrencesFired/rescheduling here too would advance a
             // COUNT-limited recurrence once per snooze instead of once per real day.
@@ -62,7 +66,9 @@ class AlarmFiringService : Service() {
     private suspend fun fireAlarm(alarm: Alarm) {
         autoStopJob = scope.launch {
             delay(alarm.ringDurationSeconds * 1_000L)
-            repository.log(alarm.id, alarm.name, System.currentTimeMillis(), "MISSED"); stopSelf()
+            repository.log(alarm.id, alarm.name, System.currentTimeMillis(), "MISSED")
+            appLogger.log("AlarmFiringService", "נעצר אוטומטית (הגיע למשך הצלצול): \"${alarm.name}\" (#${alarm.id})")
+            stopSelf()
         }
         when (alarm.vibrationMode) {
             VibrationMode.SOUND_ONLY          -> startAudioSequence(alarm, 0)
@@ -199,17 +205,26 @@ class AlarmFiringService : Service() {
             packageManager.getLaunchIntentForPackage(packageName)
                 ?.putExtra(AlarmReceiver.EXTRA_ALARM_ID, alarm.id) ?: Intent(),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-        return NotificationCompat.Builder(this, CH)
+        val builder = NotificationCompat.Builder(this, CH)
             .setSmallIcon(R.drawable.ic_alarm)
             .setContentTitle(alarm.name)
-            .setContentText(alarm.reminderText ?: alarm.timeFormatted)
+            .setContentText(
+                if (alarm.isShabbatMode) "מצב שבת — הצלצול ייפסק אוטומטית"
+                else alarm.reminderText ?: alarm.timeFormatted)
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setCategory(NotificationCompat.CATEGORY_ALARM)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setOngoing(true).setFullScreenIntent(openPi, true)
-            .addAction(R.drawable.ic_stop, "עצור", pi(StopAlarmReceiver::class.java, alarm.id, alarm.id.toInt()))
-            .addAction(R.drawable.ic_snooze, "נודניק", pi(SnoozeAlarmReceiver::class.java, alarm.id, (alarm.id+10000).toInt()))
-            .build()
+        // Shabbat mode: no actionable buttons anywhere, including the notification —
+        // the whole point is that nothing can be pressed. It still auto-stops via
+        // ringDurationSeconds (fireAlarm()'s autoStopJob), which isn't a user action.
+        if (alarm.acceptsInteraction) {
+            builder.addAction(R.drawable.ic_stop, "עצור", pi(StopAlarmReceiver::class.java, alarm.id, alarm.id.toInt()))
+            if (alarm.snoozeEnabled) {
+                builder.addAction(R.drawable.ic_snooze, "נודניק", pi(SnoozeAlarmReceiver::class.java, alarm.id, (alarm.id+10000).toInt()))
+            }
+        }
+        return builder.build()
     }
 
     companion object { const val CH = "smartring_alarm_channel"; const val NOTIF_ID = 1001 }

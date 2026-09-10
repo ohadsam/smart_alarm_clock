@@ -8,8 +8,9 @@ import androidx.room.RoomDatabase
         AlarmRingEntity::class,
         AlarmDateEntity::class,
         AlarmLogEntity::class,
+        AppLogEntity::class,
     ],
-    version = 2,        // bumped from 1 → 2 for new columns
+    version = 3,        // bumped 2 → 3: snoozeEnabled/isShabbatMode + app_logs table
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {

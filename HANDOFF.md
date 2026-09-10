@@ -14,7 +14,7 @@
 | שפה | Kotlin 2.0.0 |
 | UI | Jetpack Compose + Material 3 |
 | ארכיטקטורה | MVVM + Repository + Hilt DI |
-| DB | Room **v2** (migration מ-v1 קיים) |
+| DB | Room **v3** (migrations 1→2→3 קיימות) |
 | תזמון | AlarmManager (exact, wakeup) |
 | ווידג'ט | Glance API (4 גדלים) |
 | CI/CD | GitHub Actions – מייצר APK |
@@ -45,6 +45,14 @@
 | 16 | Dark/Light Mode | `SmartRingTheme`, `SettingsViewModel` |
 | 17 | FLAG_KEEP_SCREEN_ON | `AlarmRingScreen` + `DisposableEffect` |
 | 18 | Boot reschedule | `BootReceiver` → `RescheduleWorker` |
+| 19 | הפעלה/כיבוי נודניק לשעמור בודד | `Alarm.snoozeEnabled`, מתג ב-`AlarmEditScreen` (v1.2.0) |
+| 20 | מצב שבת (חוסם אינטראקציה בזמן צפצוף) | `Alarm.acceptsInteraction`, `AlarmRingScreen`, `buildNotification()` (v1.2.0) |
+| 21 | הזנת מספר מדויקת + תצוגת זמן קריאה | `EditableValueBadge`, `formatDurationSeconds()` (v1.2.0) |
+| 22 | כפתורי מידע (ⓘ) על שדות הגדרה | `FieldLabel` ב-`AlarmEditScreen` (v1.2.0) |
+| 23 | מסך לוגים טכני (צפייה/העתקה/הורדה/ניקוי) | `LogsScreen`, `AppLogger`, `LogCleanupWorker` (v1.2.0) |
+| 24 | בדיקות אמינות ברקע (התראות/שעמורים מדויקים/סוללה) | `ReliabilityChecks`, `SettingsScreen` (v1.2.0) |
+| 25 | חלון "מה חדש" אחרי עדכון גרסה | `WhatsNewDialog`, `WhatsNewViewModel` (v1.2.0) |
+| 26 | עדכון APK במקום (ללא הסרה+התקנה) | `signingConfigs` משותף ב-`build.gradle.kts` (v1.2.0) |
 
 ---
 
@@ -95,32 +103,35 @@ smartring-kotlin/
 ## 4. Routes
 
 ```
-/list       → AlarmListScreen
-/edit/{id}  → AlarmEditScreen  (id=0 = חדש)
+/list       → AlarmListScreen  (מציג WhatsNewDialog פעם אחת אחרי עדכון גרסה)
+/edit/{id}?name&hour&minute → AlarmEditScreen  (id=0 = חדש; name/hour/minute = prefill מהיסטוריה)
 /ring/{id}  → AlarmRingScreen
 /history    → HistoryScreen
 /settings   → SettingsScreen
+/logs       → LogsScreen  (v1.2.0)
 ```
 
 ---
 
-## 5. DB Schema – version 2
+## 5. DB Schema – version 3
 
 ```sql
--- alarms (עמודות חדשות ב-v2 מסומנות)
+-- alarms (עמודות חדשות ב-v2/v3 מסומנות)
 CREATE TABLE alarms (
   id INTEGER PRIMARY KEY,
   name TEXT, hour INTEGER, minute INTEGER,
-  specificDateTime INTEGER,      -- v2 NEW: epoch ms לצלצול חד-פעמי
+  specificDateTime INTEGER,      -- v2: epoch ms לצלצול חד-פעמי
   isEnabled INTEGER, isFrozen INTEGER,
   repeatDaysBitmask INTEGER,     -- bit0=Sun…bit6=Sat
   repeatFrequency TEXT,          -- NONE/WEEKLY/BIWEEKLY/MONTHLY
-  recurrenceEndType TEXT,        -- v2 NEW: FOREVER/UNTIL/COUNT
-  recurrenceUntilDate INTEGER,   -- v2 NEW
-  recurrenceCount INTEGER,       -- v2 NEW
-  occurrencesFired INTEGER,      -- v2 NEW: כמה פעמים הצלצול כבר הצלצל
+  recurrenceEndType TEXT,        -- v2: FOREVER/UNTIL/COUNT
+  recurrenceUntilDate INTEGER,   -- v2
+  recurrenceCount INTEGER,       -- v2
+  occurrencesFired INTEGER,      -- v2: כמה פעמים הצלצול כבר הצלצל
   ringDurationSeconds INTEGER,
+  snoozeEnabled INTEGER,         -- v3 NEW: נודניק פעיל לשעמור הזה
   snoozeMinutes INTEGER, snoozeMaxCount INTEGER,
+  isShabbatMode INTEGER,         -- v3 NEW: חוסם אינטראקציה בזמן צפצוף
   reminderText TEXT,
   vibrationMode TEXT, vibrationOnlySeconds INTEGER,
   crescendoEnabled INTEGER, crescendoStartVolume INTEGER,
@@ -130,14 +141,23 @@ CREATE TABLE alarms (
 -- alarm_rings (FK CASCADE on alarm delete)
 -- alarm_dates (FK CASCADE on alarm delete)
 
--- alarm_logs (FK SET_NULL on alarm delete – v2 changed)
+-- alarm_logs (FK SET_NULL on alarm delete – v2 changed) — user-facing ring history
 CREATE TABLE alarm_logs (
   id INTEGER PRIMARY KEY,
   alarmId INTEGER,               -- NULLABLE (SET_NULL כשהשעמור נמחק)
-  alarmName TEXT,                -- v2 NEW: שם נשמר גם אחרי מחיקת שעמור
+  alarmName TEXT,                -- v2: שם נשמר גם אחרי מחיקת שעמור
   firedAt INTEGER,
-  scheduledFor INTEGER,          -- v2 NEW
+  scheduledFor INTEGER,          -- v2
   action TEXT                    -- FIRED/STOPPED/SNOOZED/MISSED
+);
+
+-- app_logs (v3 NEW) — technical/diagnostic log, separate from alarm_logs; no FK,
+-- viewed/copied/downloaded/cleared from Settings → Logs, trimmed to 3 days by
+-- LogCleanupWorker (runs daily).
+CREATE TABLE app_logs (
+  id INTEGER PRIMARY KEY,
+  timestamp INTEGER,
+  tag TEXT, message TEXT
 );
 ```
 
@@ -172,6 +192,15 @@ val MIGRATION_2_3 = object : Migration(2, 3) { ... }
 
 // ✅ 8. PendingIntent.FLAG_IMMUTABLE תמיד
 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+
+// ✅ 9. בדיקת "מצב שבת" – תמיד דרך alarm.acceptsInteraction, לא isShabbatMode ישירות
+// (מקור אמת יחיד ב-Alarm.kt; אחרת קל לפספס מקום אחד מ-4: buildNotification,
+// StopAlarmReceiver, SnoozeAlarmReceiver, AlarmRingViewModel)
+if (!alarm.acceptsInteraction) return
+
+// ✅ 10. אל תיגע ב-signingConfigs ב-build.gradle.kts בלי סיבה מפורשת
+// keystore משותף אחד (app/smartring.keystore) לשני build types – זה מה שמאפשר
+// עדכון APK במקום. שינוי כאן שובר עדכון במקום לכל המשתמשים הקיימים.
 ```
 
 ---
@@ -219,6 +248,11 @@ PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
 - [x] ~~Widget deep link → AlarmListScreen~~ – **בוצע v1.1.0**: כל 4 הווידג'טים פותחים את האפליקציה בלחיצה.
 - [ ] Accessibility labels על Switch/IconButtons – רק המתג ברשימת השעמורים קיבל תווית (v1.1.0); ה-Switch/IconButtons במסך העריכה עדיין ללא.
 - [ ] Unit tests ל-AlarmScheduler.nextFireTime()
+- [x] ~~הזנת מספר מדויקת לצד סליידרים~~ – **בוצע v1.2.0**: `EditableValueBadge` (לחיצה על התג פותחת דיאלוג הזנת מספר) בכל הסליידרים.
+- [x] ~~כפתורי מידע על שדות הגדרה~~ – **בוצע v1.2.0**: `FieldLabel` עם אייקון ⓘ ברוב שדות מסך העריכה.
+- [x] ~~מסך לוגים~~ – **בוצע v1.2.0**: `LogsScreen` בהגדרות, עם ניקוי אוטומטי יומי (retention 3 ימים).
+- [x] ~~בדיקות אמינות ברקע~~ – **בוצע v1.2.0**: התראות/שעמורים מדויקים/סוללה, עם קישור לתיקון.
+- [x] ~~עדכון APK ללא הסרה מחדש~~ – **בוצע v1.2.0**: keystore קבוע משותף ל-debug/release.
 
 ### עדיפות נמוכה
 - [ ] Export/Import JSON של שעמורים
@@ -250,8 +284,9 @@ PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
 4. data/db/AlarmDao.kt
 5. presentation/navigation/NavGraph.kt
 
-מצב נוכחי: גרסה v5-final, DB version 2, כל הפיצ'רים ב-HANDOFF.md סעיף 2 מיושמים.
-עברו 4 סיבובי code review ע"י UI/UX/Architect/DevOps experts – הכל תקין.
+מצב נוכחי: v1.2.0, DB version 3, כל הפיצ'רים ב-HANDOFF.md סעיף 2 מיושמים (כולל מצב שבת,
+נודניק ניתן-לכיבוי, לוגים, בדיקות אמינות, What's New, ועדכון APK במקום).
+עברו מספר סיבובי code review – הכל תקין.
 
 כללים שאסור לשכוח (ראה HANDOFF.md סעיף 6):
 - ksp{} תמיד top-level

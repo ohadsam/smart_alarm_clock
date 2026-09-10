@@ -7,6 +7,7 @@ import com.smartring.app.presentation.alarmedit.AlarmEditScreen
 import com.smartring.app.presentation.alarmlist.AlarmListScreen
 import com.smartring.app.presentation.alarmring.AlarmRingScreen
 import com.smartring.app.presentation.history.HistoryScreen
+import com.smartring.app.presentation.logs.LogsScreen
 import com.smartring.app.presentation.settings.SettingsScreen
 
 sealed class Screen(val route: String) {
@@ -26,6 +27,7 @@ sealed class Screen(val route: String) {
     object Ring     : Screen("ring/{alarmId}") { fun go(id: Long) = "ring/$id" }
     object History  : Screen("history")
     object Settings : Screen("settings")
+    object Logs     : Screen("logs")
 }
 
 @Composable
@@ -81,7 +83,13 @@ fun SmartRingNavGraph(alarmTrigger: Pair<Long, Long> = 0L to -1L) {
             )
         }
         composable(Screen.Settings.route) {
-            SettingsScreen(onBack = { nav.popBackStack() })
+            SettingsScreen(
+                onBack = { nav.popBackStack() },
+                onOpenLogs = { nav.navigate(Screen.Logs.route) },
+            )
+        }
+        composable(Screen.Logs.route) {
+            LogsScreen(onBack = { nav.popBackStack() })
         }
     }
 }

@@ -39,6 +39,10 @@ bug; see "Known gotchas" below for concrete examples from this repo's own histor
      expect).
    - Every new/changed `PendingIntent` uses an explicit `Intent(context, X::class.java)` (never
      an implicit intent) and `FLAG_IMMUTABLE`.
+   - Never remove or change `app/build.gradle.kts`'s `signingConfigs { create("shared") { ... } }`
+     or the `signingConfig = signingConfigs.getByName("shared")` lines on both `debug` and
+     `release` build types — see "Known gotchas" below for why this specific setup (one committed
+     keystore, shared by both build types) is load-bearing for in-place updates, not incidental.
 2. **Functional/integration.** Trace how the change interacts with existing flows, not just in
    isolation: does it survive a snooze cycle (the ring screen/ViewModel gets torn down and
    recreated on every snooze — anything relying on in-memory ViewModel state across that boundary
@@ -72,13 +76,24 @@ bug; see "Known gotchas" below for concrete examples from this repo's own histor
 
 Fix everything found before moving on.
 
-## 2. Version bump
+## 2. Version bump + What's New
 
 - Bump `versionCode` (always +1) and `versionName` (semver: features → minor, fixes-only → patch)
-  in `app/build.gradle.kts`.
-- There is no separate "What's New" surface in this app (no in-app changelog UI) — the
-  user-facing summary is `docs/CHANGELOG.md` (see step 4) and, for a batch that changes what's
-  implemented, `HANDOFF.md` §2/§9/§10.
+  in `app/build.gradle.kts`. `versionCode` **must** strictly increase or the signed APK won't
+  install as an update at all (Android rejects a same-or-lower versionCode as a "downgrade").
+  `versionName` is what's shown in Settings → About (`BuildConfig.VERSION_NAME`, requires
+  `buildFeatures.buildConfig = true`, already set) — it updates automatically from this bump,
+  nothing else to touch for that.
+- Add a matching entry to `WHATS_NEW_HISTORY` in
+  `app/src/main/java/com/smartring/app/presentation/whatsnew/WhatsNew.kt` — `versionCode` must
+  equal the one just set above. `WhatsNewDialog` (shown once from `AlarmListScreen` after an
+  upgrade, never on a fresh install) reads this list, so a batch that bumps the version without
+  adding an entry ships silently — no user-visible "what's new" for real changes. Write it from
+  the user's point of view (what they'd notice), matching the tone of existing entries, not an
+  implementation-detail file list.
+- `docs/CHANGELOG.md` (step 4) is the parallel *developer-facing* record of the same batch — keep
+  both in sync, but they're not required to read identically (CHANGELOG can go into more
+  technical depth than the in-app dialog should).
 
 ## 3. HANDOFF.md — keep it honest, not just present
 
@@ -203,6 +218,20 @@ If the user asks for a PR-based workflow going forward, follow that instead and 
   `.firstOrNull()`/`.first()` on something documented as a list is a strong signal the rest of the
   feature isn't wired up.
 
+- **An Android APK's signing certificate must be identical across installs for an "update" to
+  install in place** — a mismatched (or missing/unsigned) signature makes the OS refuse the
+  install with `INSTALL_FAILED_UPDATE_INCOMPATIBLE`, forcing an uninstall (which deletes every
+  saved alarm) before the new APK can go on. Two ways this broke before it was fixed: (1) the
+  `release` build type had no `signingConfig` at all, so AGP produced an *unsigned* APK
+  (`app-release-unsigned.apk`) — unsigned APKs don't install on a real device at all, signed or
+  not; (2) `debug` builds are auto-signed with a debug keystore that, unless pinned to a specific
+  committed file, defaults to `~/.android/debug.keystore` — regenerated fresh on every GitHub
+  Actions run (no persistent `$HOME` between runs), so two CI-built debug APKs a user installed a
+  week apart had two different signatures despite being "the same app". Fixed by generating one
+  keystore (`app/smartring.keystore`, committed — see `signingConfigs` in `app/build.gradle.kts`
+  for why a plaintext committed password is the deliberate right call here, not an oversight) and
+  pointing both build types at it.
+
 ## Known limitations (don't re-report these as new findings unless you're the batch fixing them)
 
 - **Settings' English toggle doesn't change any visible UI text.** Every screen hardcodes Hebrew
@@ -220,7 +249,11 @@ If the user asks for a PR-based workflow going forward, follow that instead and 
 
 - Code review ran 3 times — technical, functional, and UI/UX+RTL, as genuinely separate passes —
   and every finding was fixed, not just noted.
-- `app/build.gradle.kts`'s `versionCode`/`versionName` bumped.
+- `app/build.gradle.kts`'s `versionCode`/`versionName` bumped, and a matching `WHATS_NEW_HISTORY`
+  entry added in `WhatsNew.kt` — both, not just one.
+- `signingConfigs`/`signingConfig` in `app/build.gradle.kts` still point both build types at the
+  committed `app/smartring.keystore` (unchanged unless this batch had a deliberate reason to
+  touch it) — the whole point is that this *doesn't* need touching every release.
 - `HANDOFF.md` re-verified against the actual code for anything this batch touched (feature
   table, backlog, known bugs) — not just left as-is.
 - `docs/CHANGELOG.md`, and any of `ARCHITECTURE.md`/`FEATURES.md`/`CLAUDE_CODE.md`/`README.md`

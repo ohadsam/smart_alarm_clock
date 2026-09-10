@@ -4,6 +4,7 @@ import androidx.lifecycle.viewModelScope
 import com.smartring.app.data.repository.AlarmRepository
 import com.smartring.app.domain.model.*
 import com.smartring.app.util.AlarmScheduler
+import com.smartring.app.util.AppLogger
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -29,8 +30,11 @@ data class AlarmEditUiState(
     val ringDurationSeconds: Int           = 60,
     val rings: List<AlarmRing>             = listOf(AlarmRing(volumePercent = 100)),
     // Snooze
+    val snoozeEnabled: Boolean             = true,
     val snoozeMinutes: Int                 = 10,
     val snoozeMaxCount: Int                = 3,
+    // Shabbat mode
+    val isShabbatMode: Boolean             = false,
     // Misc
     val reminderText: String               = "",
     val vibrationMode: VibrationMode       = VibrationMode.SOUND_AND_VIBRATION,
@@ -57,6 +61,7 @@ data class AlarmEditUiState(
 class AlarmEditViewModel @Inject constructor(
     private val repository: AlarmRepository,
     private val scheduler: AlarmScheduler,
+    private val appLogger: AppLogger,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(AlarmEditUiState())
@@ -82,8 +87,10 @@ class AlarmEditViewModel @Inject constructor(
                     specificDates        = a.specificDates,
                     ringDurationSeconds  = a.ringDurationSeconds,
                     rings                = a.rings.ifEmpty { listOf(AlarmRing(volumePercent = 100)) },
+                    snoozeEnabled        = a.snoozeEnabled,
                     snoozeMinutes        = a.snoozeMinutes,
                     snoozeMaxCount       = a.snoozeMaxCount,
+                    isShabbatMode        = a.isShabbatMode,
                     reminderText         = a.reminderText.orEmpty(),
                     vibrationMode        = a.vibrationMode,
                     vibrationOnlySeconds = a.vibrationOnlySeconds,
@@ -120,8 +127,10 @@ class AlarmEditViewModel @Inject constructor(
     fun setTime(h: Int, m: Int)                   = _state.update { it.copy(hour = h, minute = m).also { updateNextFireHintLater() } }
     fun setSpecificDateTime(dt: Long?)            = _state.update { it.copy(specificDateTime = dt) }
     fun setReminderText(v: String)                = _state.update { it.copy(reminderText = v) }
+    fun setSnoozeEnabled(v: Boolean)               = _state.update { it.copy(snoozeEnabled = v) }
     fun setSnoozeMinutes(v: Int)                  = _state.update { it.copy(snoozeMinutes = v) }
     fun setSnoozeMaxCount(v: Int)                 = _state.update { it.copy(snoozeMaxCount = v) }
+    fun setShabbatMode(v: Boolean)                = _state.update { it.copy(isShabbatMode = v) }
     fun setRingDuration(v: Int)                   = _state.update { it.copy(ringDurationSeconds = v) }
     fun setRepeatFrequency(v: RepeatFrequency)    = _state.update { it.copy(repeatFrequency = v).also { updateNextFireHintLater() } }
     fun setRecurrenceEndType(v: RecurrenceEndType)= _state.update { it.copy(recurrenceEndType = v) }
@@ -200,6 +209,8 @@ class AlarmEditViewModel @Inject constructor(
             val alarm = buildAlarm(s)
             val savedId = repository.saveAlarm(alarm)
             scheduler.schedule(alarm.copy(id = savedId))
+            appLogger.log("AlarmEdit", (if (editingId > 0L) "שעמור עודכן: " else "שעמור חדש נוצר: ") +
+                "\"${alarm.name}\" (#$savedId) ל-%02d:%02d".format(alarm.hour, alarm.minute))
             _state.update { it.copy(isSaving = false, isSaved = true) }
         }
     }
@@ -219,8 +230,10 @@ class AlarmEditViewModel @Inject constructor(
         specificDates        = s.specificDates,
         ringDurationSeconds  = s.ringDurationSeconds,
         rings                = s.rings,
+        snoozeEnabled        = s.snoozeEnabled,
         snoozeMinutes        = s.snoozeMinutes,
         snoozeMaxCount       = s.snoozeMaxCount,
+        isShabbatMode        = s.isShabbatMode,
         reminderText         = s.reminderText.takeIf { it.isNotBlank() },
         vibrationMode        = s.vibrationMode,
         vibrationOnlySeconds = s.vibrationOnlySeconds,

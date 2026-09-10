@@ -52,6 +52,15 @@ data class AlarmLog(
     val action: String = "FIRED",  // FIRED | STOPPED | SNOOZED | MISSED
 )
 
+/** A technical/diagnostic log line (scheduling, boot, background work) — separate
+ *  from [AlarmLog], which is the user-facing ring-history shown in HistoryScreen. */
+data class AppLogEntry(
+    val id: Long        = 0,
+    val timestamp: Long = 0L,
+    val tag: String     = "",
+    val message: String = "",
+)
+
 // ── Main Alarm model ──────────────────────────────────────────────
 
 data class Alarm(
@@ -75,8 +84,13 @@ data class Alarm(
     val ringDurationSeconds: Int        = 60,
     val rings: List<AlarmRing>          = emptyList(),
     // ── Snooze ────────────────────────────────────────────────────
+    val snoozeEnabled: Boolean          = true,
     val snoozeMinutes: Int              = 10,
     val snoozeMaxCount: Int             = 3,
+    // ── Shabbat mode: while ringing, Stop/Snooze are disabled (no notification
+    // actions either) so nothing can be pressed; the alarm still auto-stops via
+    // ringDurationSeconds. Off by default. ──────────────────────────
+    val isShabbatMode: Boolean          = false,
     // ── Reminder ─────────────────────────────────────────────────
     val reminderText: String?           = null,
     // ── Vibration ─────────────────────────────────────────────────
@@ -93,6 +107,13 @@ data class Alarm(
 
     val isActive: Boolean
         get() = isEnabled && !isFrozen
+
+    /** Shabbat mode: no Stop/Snooze interaction is accepted anywhere (ring screen,
+     *  notification actions) while this alarm is ringing. Single source of truth for
+     *  that check — every entry point (buildNotification, StopAlarmReceiver,
+     *  SnoozeAlarmReceiver, AlarmRingViewModel) reads this instead of re-deriving it. */
+    val acceptsInteraction: Boolean
+        get() = !isShabbatMode
 
     val isRecurring: Boolean
         get() = repeatDaysBitmask != 0 && repeatFrequency != RepeatFrequency.NONE
