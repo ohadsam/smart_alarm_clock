@@ -3,7 +3,6 @@ package com.smartring.app.presentation.settings
 import android.Manifest
 import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
@@ -24,7 +23,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -99,12 +97,12 @@ fun SettingsScreen(onBack: () -> Unit, onOpenLogs: () -> Unit = {}, vm: Settings
 private fun ReliabilitySection() {
     val context = LocalContext.current
 
-    var notifGranted by remember { mutableStateOf(isNotificationsGranted(context)) }
+    var notifGranted by remember { mutableStateOf(ReliabilityChecks.isNotificationsGranted(context)) }
     var exactGranted by remember { mutableStateOf(ReliabilityChecks.canScheduleExactAlarms(context)) }
     var batteryGranted by remember { mutableStateOf(ReliabilityChecks.isIgnoringBatteryOptimizations(context)) }
 
     fun refresh() {
-        notifGranted = isNotificationsGranted(context)
+        notifGranted = ReliabilityChecks.isNotificationsGranted(context)
         exactGranted = ReliabilityChecks.canScheduleExactAlarms(context)
         batteryGranted = ReliabilityChecks.isIgnoringBatteryOptimizations(context)
     }
@@ -158,11 +156,6 @@ private fun ReliabilitySection() {
         },
     )
 }
-
-private fun isNotificationsGranted(context: Context): Boolean =
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
-        ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
-    else true
 
 @Composable
 private fun ReliabilityRow(

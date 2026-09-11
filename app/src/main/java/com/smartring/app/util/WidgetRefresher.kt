@@ -8,11 +8,14 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Fire-and-forget widget refresh, called from every place that changes what the
- * home-screen widgets should show (AlarmScheduler.schedule/cancel/rescheduleAll —
- * the single choke point every alarm mutation already flows through). Reads live DB
- * state at execution time, so it doesn't matter that this fires before the caller's
- * own DB write has necessarily committed.
+ * Fire-and-forget widget refresh. Called directly from AlarmScheduler.scheduleAt()
+ * (snoozing) and rescheduleAll() (boot reschedule) — the two cases that change what
+ * the widgets should show without a corresponding alarms-table write for
+ * SmartRingApp's observeAlarms()-based fallback collector to react to on its own.
+ * Every other alarm mutation (schedule/cancel/cancelAll) relies on that fallback
+ * instead of calling this directly. Reads live DB state at execution time, so it
+ * doesn't matter that this fires before the caller's own DB write has necessarily
+ * committed.
  */
 @Singleton
 class WidgetRefresher @Inject constructor(

@@ -47,9 +47,28 @@ class AlarmFiringService : Service() {
         val scheduledFor = System.currentTimeMillis()
         scope.launch {
             val alarm = repository.getAlarm(id) ?: run { stopSelf(); return@launch }
+            // Log FIRED before posting the notification, not after: the notification's
+            // full-screen intent can launch the ring screen (AlarmRingViewModel reads
+            // this same "FIRED" row's timestamp to anchor its auto-dismiss timer)
+            // essentially immediately — logging afterward left a window where a
+            // recurring alarm's ring screen could read *yesterday's* FIRED timestamp
+            // (the row for today not committed yet) and see an already-elapsed
+            // duration on its very first tick, instantly dismissing itself. Failures
+            // other than cancellation are swallowed (a DB error here should cost a lost
+            // history row, not a lost alarm — notify()/fireAlarm() below must still
+            // run) but CancellationException is deliberately re-thrown: if the scope
+            // was already cancelled (e.g. onDestroy() mid-suspension), the coroutine
+            // must stop here too, not fall through to post a real alarm notification
+            // for a service already being torn down.
+            try {
+                repository.log(id, alarm.name, scheduledFor, "FIRED")
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                appLogger.log("AlarmFiringService", "כתיבת יומן 'מצלצל' נכשלה: ${e.message}")
+            }
             getSystemService(NotificationManager::class.java)
                 .notify(NOTIF_ID, buildNotification(alarm))
-            repository.log(id, alarm.name, scheduledFor, "FIRED")
             appLogger.log("AlarmFiringService", "מצלצל: \"${alarm.name}\" (#$id)" +
                 if (alarm.isShabbatMode) " [מצב שבת]" else "")
             // A snooze re-fire is a continuation of the same occurrence, not a new
@@ -57,10 +76,13 @@ class AlarmFiringService : Service() {
             // COUNT-limited recurrence once per snooze instead of once per real day.
             if (!isSnooze) repository.incrementOccurrences(id)
             fireAlarm(alarm)
-            // A regular fire reschedules (which also refreshes widgets); a snooze
-            // re-fire doesn't reschedule anything but still needs its own refresh —
-            // otherwise the widget keeps showing the now-elapsed snooze countdown
-            // until the next periodic WidgetRefreshWorker run, up to 15 minutes later.
+            // A regular fire reschedules; incrementOccurrences() above already writes
+            // to the alarms table, which SmartRingApp's observeAlarms() collector
+            // reacts to on its own, so schedule() doesn't need to refresh widgets
+            // itself here. A snooze re-fire doesn't touch the alarms table at all, so
+            // it still needs its own explicit refresh — otherwise the widget keeps
+            // showing the now-elapsed snooze countdown until the next periodic
+            // WidgetRefreshWorker run, up to 15 minutes later.
             if (!isSnooze) scheduler.schedule(alarm.copy(occurrencesFired = alarm.occurrencesFired + 1))
             else widgetRefresher.refresh()
         }
@@ -118,7 +140,15 @@ class AlarmFiringService : Service() {
         val uri = if (ring.ringtoneUri != "default") Uri.parse(ring.ringtoneUri)
                   else android.provider.Settings.System.DEFAULT_ALARM_ALERT_URI
         val base = ring.volumePercent / 100f
-        val start = if (alarm.crescendoEnabled) alarm.crescendoStartVolume / 100f else base
+        // Continue the ramp from wherever cumulative elapsed time says it should be,
+        // not always crescendoStartVolume: startAudioSequence() loops through
+        // alarm.rings repeatedly until stopped, and playOneRing() runs once per loop
+        // iteration — resetting to the floor volume every time (as if the crescendo
+        // were only ever a few seconds long) made it look like crescendo "didn't
+        // work" for anything but a single-ring, single-loop alarm.
+        val start = if (alarm.crescendoEnabled)
+            alarm.volumeAtSecond(ring.volumePercent, elapsedAtRingStart) / 100f
+        else base
 
         val mp = MediaPlayer()
         player = mp

@@ -22,8 +22,8 @@ data class AlarmEntity(
     val occurrencesFired: Int               = 0,
     // Ring
     val ringDurationSeconds: Int            = 60,
-    // Snooze
-    val snoozeEnabled: Boolean              = true,
+    // Snooze — off by default, matching Alarm.snoozeEnabled's default (v1.4.0)
+    val snoozeEnabled: Boolean              = false,
     val snoozeMinutes: Int                  = 10,
     val snoozeMaxCount: Int                 = 3,
     // Shabbat mode

@@ -244,14 +244,57 @@ If the user asks for a PR-based workflow going forward, follow that instead and 
   even though `isRecurrenceExpired()` is now true — check the pending snooze before filtering by
   recurrence-expiry, not after.
 - **A per-alarm loop that calls a single-alarm mutation (`schedule`/`cancel`) N times fires N
-  near-simultaneous side effects if that mutation has one** — `AlarmScheduler.schedule()`/`cancel()`
-  each trigger a widget refresh (v1.3.0); `disableAll()`/`freezeAll()`/`rescheduleAll()` used to
-  call them in a `forEach`, so one user action fired up to N (or 2N, for reschedule) full
-  four-widget re-renders. Fixed with `*Internal` no-side-effect variants
-  (`scheduleInternal`/`cancelInternal`) used inside the loop, plus a batch entry point
-  (`cancelAll(ids)`) that triggers the side effect exactly once after the loop. Whenever a new
-  single-alarm `AlarmScheduler` method gains a side effect, check every `forEach`/`.map` call site
-  that invokes it per-alarm and give it the same treatment.
+  near-simultaneous side effects if that mutation has one.** v1.3.0 first hit this with widget
+  refreshes and patched it with private `*Internal` no-side-effect variants; v1.4.0 replaced that
+  whole approach: `schedule()`/`cancel()`/`cancelAll()` don't refresh widgets themselves at all
+  anymore. `SmartRingApp.onCreate()` instead collects `AlarmRepository.observeAlarms()` for the
+  app's whole lifetime and refreshes widgets on any write to the `alarms` table — every real
+  call site of those three methods already writes to that table right before calling them, so this
+  fallback covers them for free with no per-call-site bookkeeping. Only `scheduleAt()` (a snooze
+  never writes to `alarms`, just `AlarmManager` + the `pending_snooze` SharedPreferences) and
+  `rescheduleAll()` (its `RescheduleWorker`/boot caller has no accompanying DB write either) still
+  refresh explicitly — `rescheduleAll()` takes a `refreshWidgets: Boolean = true` for this reason,
+  and `AlarmListViewModel.unfreezeAll()/enableAll()` (whose own repository write already triggers
+  the fallback) pass `false` to avoid a redundant second refresh. Lesson for a *new* single-alarm
+  `AlarmScheduler` method with a side effect: check whether it's always preceded by an `alarms`-table
+  write at every real call site before reaching for an explicit refresh — the DB-write-driven
+  fallback likely already covers it.
+
+- **`System.currentTimeMillis()` is the wrong clock for measuring "how much time has elapsed
+  since X" across a stretch of wall-clock time you don't control** (a DST change, an NTP resync,
+  a manual clock adjustment can all make it jump). `AlarmRingViewModel`'s ring-screen auto-dismiss
+  timer (v1.4.0) anchors to `SystemClock.elapsedRealtime()` instead — monotonic, immune to wall
+  clock changes — converting the DB's wall-clock `firedAt` timestamp to an elapsedRealtime-based
+  anchor once at load time (the one moment that still needs `currentTimeMillis()`), then only ever
+  comparing against `elapsedRealtime()` afterward. Any future "how long has this been ringing/open/
+  running" feature should follow the same pattern.
+- **A DB-derived "when did X last happen" query can return a *previous* occurrence's timestamp
+  instead of null if the write for the *current* occurrence hasn't landed yet** (a race, or a
+  failure being deliberately swallowed elsewhere so it doesn't block something more important) —
+  worse than getting null, since code that only checks `!= null` treats the stale value as valid
+  and derives wildly wrong durations from it. `AlarmRingViewModel.loadAlarm()` guards this by only
+  trusting a `lastFiredAt()` result taken within `STALE_FIRED_AT_THRESHOLD_MILLIS` of "now" (well
+  under the shortest legitimate gap between two real occurrences — here, the 1-minute snooze
+  minimum), falling back to the old, safer-but-imprecise behavior otherwise. When wrapping a write
+  in `runCatching`/`try-catch` so a DB failure there doesn't block something more critical (as
+  `AlarmFiringService` does for the `FIRED` log so a lost history row can't block the alarm from
+  ringing), check whether anything downstream trusts a *previous* successful write's data as a
+  proxy for "this write succeeded" — it usually needs the same staleness guard.
+- **A blanket `runCatching`/`catch (e: Exception)` around a suspend call silently swallows
+  `CancellationException` too**, letting a coroutine whose enclosing scope was already cancelled
+  keep running past the suspension point instead of stopping — re-throw it explicitly
+  (`catch (e: CancellationException) { throw e }` before the general catch) whenever you wrap a
+  suspend call this way, especially anywhere unwinding-on-cancellation matters (a Service's
+  `scope.cancel()` in `onDestroy()`, here).
+- **A default value can be logically correct yet visually misleading.** `Alarm`/`AlarmEditUiState`
+  kept `repeatFrequency = WEEKLY` as their default (needed so the recurrence-end section, gated on
+  `repeatFrequency != NONE`, still works once a user picks a day without ever touching the
+  frequency chips) — but showing the "שבועי" chip pre-selected before any weekday was chosen made a
+  brand-new, actually-one-time alarm look like "repeat weekly" had already been chosen. Fixed at the
+  UI layer only: `AlarmEditScreen`'s frequency `FilterChip` row shows nothing selected while
+  `repeatDaysBitmask == 0`, independent of the stored default. When a stored default needs to stay
+  as-is for downstream logic, check whether the *display* of that default is also telling the truth
+  before assuming the domain default is the only thing that can be wrong.
 
 - **`by someState.collectAsStateWithLifecycle()` needs `androidx.compose.runtime.getValue`
   imported explicitly** if the file doesn't already have `import androidx.compose.runtime.*` —

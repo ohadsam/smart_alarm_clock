@@ -29,7 +29,7 @@
 |---|-------|--------------|
 | 1 | שם לשעמור | `Alarm.name`, `AlarmEditScreen` |
 | 2 | תאריך + שעה ספציפיים | `Alarm.specificDateTime`, `DateTimePickerInline` |
-| 3 | חזרתיות עשירה (WEEKLY/BIWEEKLY/MONTHLY) | `Alarm.repeatDaysBitmask`, `AlarmScheduler.nextFireTime()` |
+| 3 | חזרתיות עשירה (WEEKLY/BIWEEKLY/MONTHLY) | `Alarm.repeatDaysBitmask`, `AlarmScheduler.nextFireTime()` — ברירת מחדל לשעמור חדש (0 ימים) מוצגת כחד-פעמי, לא כ"שבועי" נבחר (v1.4.0) |
 | 4 | סיום חזרתיות (FOREVER/UNTIL/COUNT) | `RecurrenceEnd`, `RecurrenceEndSection` |
 | 5 | צלצולים חוזרים (עד 10) | `AlarmRing`, `AlarmDao`, `AlarmFiringService.startAudioSequence()` (מנגן ברצף, v1.1.0), `RingsSection` ב-`AlarmEditScreen` (UI לעריכה, v1.1.0) |
 | 6 | רטט 4 מצבים | `VibrationMode`, `AlarmFiringService.fireAlarm()` |
@@ -45,17 +45,19 @@
 | 16 | Dark/Light Mode | `SmartRingTheme`, `SettingsViewModel` |
 | 17 | FLAG_KEEP_SCREEN_ON | `AlarmRingScreen` + `DisposableEffect` |
 | 18 | Boot reschedule | `BootReceiver` → `RescheduleWorker` |
-| 19 | הפעלה/כיבוי נודניק לשעמור בודד | `Alarm.snoozeEnabled`, מתג ב-`AlarmEditScreen` (v1.2.0) |
+| 19 | הפעלה/כיבוי נודניק לשעמור בודד | `Alarm.snoozeEnabled`, מתג ב-`AlarmEditScreen` (v1.2.0) — ברירת מחדל כבוי מ-v1.4.0 |
 | 20 | מצב שבת (חוסם אינטראקציה בזמן צפצוף) | `Alarm.acceptsInteraction`, `AlarmRingScreen`, `buildNotification()` (v1.2.0) |
 | 21 | הזנת מספר מדויקת + תצוגת זמן קריאה | `EditableValueBadge`, `formatDurationSeconds()` (v1.2.0) |
 | 22 | כפתורי מידע (ⓘ) על שדות הגדרה | `FieldLabel` ב-`AlarmEditScreen` (v1.2.0) |
 | 23 | מסך לוגים טכני (צפייה/העתקה/הורדה/ניקוי) | `LogsScreen`, `AppLogger`, `LogCleanupWorker` (v1.2.0) |
-| 24 | בדיקות אמינות ברקע (התראות/שעמורים מדויקים/סוללה) | `ReliabilityChecks`, `SettingsScreen` (v1.2.0) |
+| 24 | בדיקות אמינות ברקע (התראות/שעמורים מדויקים/סוללה) | `ReliabilityChecks`, `SettingsScreen` (v1.2.0); `ReliabilityGate` ב-`AlarmListScreen` מציע זאת פרואקטיבית בכניסה לאפליקציה (v1.4.0) |
 | 25 | חלון "מה חדש" אחרי עדכון גרסה | `WhatsNewDialog`, `WhatsNewViewModel` (v1.2.0) |
 | 26 | עדכון APK במקום (ללא הסרה+התקנה) | `signingConfigs` משותף ב-`build.gradle.kts` (v1.2.0) |
 | 27 | שעון חי בווידג'טים (ללא העיר את האפליקציה) | `widget_clock.xml` (TextClock) + `AndroidRemoteViews`, `SmartRingWidget.kt` (v1.3.0) |
 | 28 | אינדיקציית זמן עד לשעמור הבא בווידג'טים | `AlarmScheduler.effectiveNextFireTime()`/`pendingSnoozeUntil()`, `formatCountdownUntil()`, `WidgetRefresher` (v1.3.0) |
 | 29 | מסגרת דקה סביב הווידג'טים | `WidgetFrame()` ב-`SmartRingWidget.kt` (v1.3.0) |
+| 30 | מסך צלצול נסגר אוטומטית בתום משך הצלצול | `AlarmRingViewModel.tick()` (עוגן ל-`SystemClock.elapsedRealtime()` + timestamp אמיתי, לא ספירה מקומית) (v1.4.0) |
+| 31 | גלילה אוטומטית לשדה שם בשגיאת ולידציה | `AlarmEditViewModel.scrollToNameRequests`, `AlarmEditScreen` (v1.4.0) |
 
 ---
 
@@ -207,10 +209,22 @@ if (!alarm.acceptsInteraction) return
 
 // ✅ 11. "מתי מצלצל השעמור הבא" – תמיד דרך AlarmScheduler.effectiveNextFireTime(),
 // לא nextFireTime() ישירות – האחרון לא יודע על נודניק פעיל (מתוזמן דרך scheduleAt(),
-// לא נגזר מ-Alarm עצמו). כל שינוי בתזמון (schedule/cancel/cancelAll/rescheduleAll)
-// חייב לקרוא ל-widgetRefresher.refresh() בדיוק פעם אחת לכל פעולת משתמש (לא בלולאה
-// per-alarm) – v1.3.0 השתמשה ב-*Internal helpers (scheduleInternal/cancelInternal)
-// בדיוק בשביל זה.
+// לא נגזר מ-Alarm עצמו, נשמר ב-SharedPreferences pending_snooze).
+
+// ✅ 12. רענון ווידג'טים (v1.4.0) – schedule()/cancel()/cancelAll() לא קוראים
+// widgetRefresher.refresh() בעצמם: SmartRingApp.onCreate() מאזין ל-
+// AlarmRepository.observeAlarms() ומרענן על כל כתיבה לטבלת alarms, וכל קריאה
+// אמיתית ל-schedule/cancel/cancelAll כבר מלווה בכתיבה כזו. רק scheduleAt() (נודניק)
+// ו-rescheduleAll() (ל-RescheduleWorker בלבד; יש לו refreshWidgets: Boolean=true עבור
+// זה, ו-unfreezeAll/enableAll קוראים לו עם false) מרעננים בעצמם – הם לא תמיד מלווים
+// בכתיבה. הוספת שיטת AlarmScheduler חדשה עם side-effect? בדוק כל forEach שקורא לה
+// per-alarm ותן לו טיפול דומה (מונע N רענונים כמעט-בו-זמניים לפעולה אחת).
+
+// ✅ 13. "כמה זמן עבר מאז שהשעמור צלצל" (מסך הצלצול) – תמיד לפי
+// SystemClock.elapsedRealtime() מעוגן ל-alarm_logs (action='FIRED'), לא ספירת
+// טיקים מקומית של המסך (מתאפסת ב-rotation) ולא System.currentTimeMillis() חוזר
+// (רגיש לקפיצת שעון). AlarmFiringService כותב את רשומת ה-FIRED *לפני* פרסום
+// ההתראה, לא אחריה – אחרת מסך הצלצול עלול לקרוא timestamp ישן מצלצול קודם.
 ```
 
 ---
@@ -277,6 +291,7 @@ if (!alarm.acceptsInteraction) return
 | BIWEEKLY week parity בחצות שנה | `AlarmScheduler.nextFireTime()` | נמוכה |
 | Long.toInt() ל-id גדול | `AlarmScheduler.buildIntent()` | נמוכה |
 | MediaPlayer error ללא fallback | `AlarmFiringService.startAudio()` | בינונית |
+| מסך הצלצול (רשת ביטחון) עלול "לנצח" את טיימר השירות האמיתי אם `AlarmFiringService.onStartCommand()` איטי מ-GRACE_SECONDS (2 שניות) — במקרה כזה רשומת "MISSED" לא תיכתב | `AlarmRingViewModel.tick()`, `AlarmFiringService.fireAlarm()` | נמוכה (v1.4.0) |
 
 ---
 
@@ -294,10 +309,12 @@ if (!alarm.acceptsInteraction) return
 4. data/db/AlarmDao.kt
 5. presentation/navigation/NavGraph.kt
 
-מצב נוכחי: v1.3.0, DB version 3, כל הפיצ'רים ב-HANDOFF.md סעיף 2 מיושמים (כולל מצב שבת,
-נודניק ניתן-לכיבוי, לוגים, בדיקות אמינות, What's New, עדכון APK במקום, ושעון חי + אינדיקציית
-זמן לשעמור הבא + מסגרת בווידג'טים).
-עברו מספר סיבובי code review – הכל תקין.
+מצב נוכחי: v1.4.0, DB version 3, כל הפיצ'רים ב-HANDOFF.md סעיף 2 מיושמים (כולל מצב שבת,
+נודניק ניתן-לכיבוי, לוגים, בדיקות אמינות (כולל בקשה פרואקטיבית בכניסה), What's New, עדכון APK
+במקום, שעון חי + אינדיקציית זמן לשעמור הבא + מסגרת בווידג'טים, וסגירה אוטומטית אמינה של מסך
+הצלצול).
+עברו מספר סיבובי code review – הכל תקין. v1.4.0 היה batch של תיקוני באגים אמיתיים שנמצאו
+בבדיקה בפועל על מכשיר.
 
 כללים שאסור לשכוח (ראה HANDOFF.md סעיף 6):
 - ksp{} תמיד top-level

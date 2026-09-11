@@ -27,12 +27,14 @@ class AlarmScheduler @Inject constructor(
     // is in the past, so no explicit cleanup is needed once the snooze actually fires.
     private val snoozePrefs = context.getSharedPreferences("pending_snooze", Context.MODE_PRIVATE)
 
+    // schedule()/cancel()/cancelAll() below don't refresh widgets themselves: every
+    // real call site writes to the alarms table immediately before calling them
+    // (setEnabled/deleteAlarm/disableAll/freezeAll/saveAlarm/incrementOccurrences),
+    // which SmartRingApp.onCreate()'s observeAlarms() collector already reacts to —
+    // an explicit refresh() here on top of that just doubled every single alarm
+    // mutation's widget-rebuild work for no benefit. scheduleAt() and rescheduleAll()
+    // are the two exceptions that keep their own explicit refresh — see their comments.
     fun schedule(alarm: Alarm) {
-        scheduleInternal(alarm)
-        widgetRefresher.refresh()
-    }
-
-    private fun scheduleInternal(alarm: Alarm) {
         if (!alarm.isActive) return
         if (alarm.isRecurrenceExpired()) return
         val t = nextFireTime(alarm) ?: return
@@ -43,6 +45,10 @@ class AlarmScheduler @Inject constructor(
             fmt.get(Calendar.HOUR_OF_DAY), fmt.get(Calendar.MINUTE)))
     }
 
+    // Unlike schedule()/cancel(), a snooze never writes to the alarms table (it only
+    // arms a separate AlarmManager trigger and records the deadline in snoozePrefs
+    // below), so the observeAlarms()-based fallback can't see it — this must keep
+    // refreshing explicitly.
     fun scheduleAt(alarm: Alarm, at: Long) {
         alarmManager.setExactAndAllowWhileIdle(
             AlarmManager.RTC_WAKEUP, at, buildSnoozePendingIntent(alarm.id))
@@ -52,33 +58,33 @@ class AlarmScheduler @Inject constructor(
     }
 
     fun cancel(id: Long) {
-        cancelInternal(id)
-        widgetRefresher.refresh()
-    }
-
-    /** Cancels every id then refreshes widgets exactly once — use this instead of a
-     *  `forEach { cancel(it) }` loop when cancelling several alarms in one user
-     *  action (disable/freeze-all), which would otherwise fire one near-simultaneous
-     *  full widget refresh per alarm. */
-    fun cancelAll(ids: List<Long>) {
-        ids.forEach { cancelInternal(it) }
-        appLogger.log("Scheduler", "בוטלו ${ids.size} שעמורים")
-        widgetRefresher.refresh()
-    }
-
-    private fun cancelInternal(id: Long) {
-        alarmManager.cancel(buildIntent(id))
-        alarmManager.cancel(buildSnoozePendingIntent(id))
-        snoozePrefs.edit().remove(id.toString()).apply()
+        cancelQuiet(id)
         appLogger.log("Scheduler", "בוטל: שעמור #$id")
     }
 
-    fun rescheduleAll(alarms: List<Alarm>) {
-        // Uses the *Internal variants so cancelling+rescheduling N alarms triggers one
-        // widget refresh total instead of up to 2N near-simultaneous ones.
-        alarms.forEach { cancelInternal(it.id); if (it.isActive && !it.isRecurrenceExpired()) scheduleInternal(it) }
+    private fun cancelQuiet(id: Long) {
+        alarmManager.cancel(buildIntent(id))
+        alarmManager.cancel(buildSnoozePendingIntent(id))
+        snoozePrefs.edit().remove(id.toString()).apply()
+    }
+
+    /** Cancels every id with one combined log line instead of N separate ones. */
+    fun cancelAll(ids: List<Long>) {
+        ids.forEach { cancelQuiet(it) }
+        appLogger.log("Scheduler", "בוטלו ${ids.size} שעמורים")
+    }
+
+    // refreshWidgets defaults to true for RescheduleWorker's boot-reschedule call,
+    // which has no accompanying alarms-table write at all (it's just re-arming
+    // AlarmManager, which the OS wipes on every reboot) for the observeAlarms()-based
+    // fallback to react to. AlarmListViewModel.unfreezeAll()/enableAll() pass false:
+    // their own repository writes (unfreezeAll()/enableAll()) already trigger that
+    // fallback, so this would otherwise be a second, redundant full widget rebuild
+    // for the same user action.
+    fun rescheduleAll(alarms: List<Alarm>, refreshWidgets: Boolean = true) {
+        alarms.forEach { cancel(it.id); if (it.isActive && !it.isRecurrenceExpired()) schedule(it) }
         appLogger.log("Scheduler", "תוזמנו מחדש ${alarms.size} שעמורים")
-        widgetRefresher.refresh()
+        if (refreshWidgets) widgetRefresher.refresh()
     }
 
     /** The real AlarmManager trigger armed by a snooze (see [snoozePrefs]), if any is

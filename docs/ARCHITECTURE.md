@@ -40,9 +40,21 @@ Glance Widgets (SmartRingWidget.kt) → AlarmScheduler.effectiveNextFireTime() �
   (לא `nextFireTime()` הרגיל — זה לא מודע לנודניק פעיל, שמתוזמן בנפרד דרך `scheduleAt()`
   ונשמר ב-SharedPreferences `pending_snooze` כדי ש-`pendingSnoozeUntil()` יוכל לראות אותו).
 - `WidgetFrame()` — מסגרת דקה (Box מקונן, לא `border()` modifier, לתמיכה עקבית בין גרסאות Glance).
-- רענון: `WidgetRefresher.refresh()` נקרא מכל שינוי תזמון (schedule/cancel/cancelAll/rescheduleAll
-  ב-`AlarmScheduler`, וגם על re-fire של נודניק ב-`AlarmFiringService`), ובנוסף `WidgetRefreshWorker`
-  רץ כל 15 דקות כ-fallback.
+- רענון (v1.4.0): רוב שינויי התזמון (`schedule`/`cancel`/`cancelAll`) לא קוראים ל-`WidgetRefresher`
+  ישירות יותר — `SmartRingApp.onCreate()` מאזין ל-`AlarmRepository.observeAlarms()` ומרענן על כל
+  שינוי בטבלת `alarms`, מה שכל אחת מהפעולות האלה כבר כותבת אליה ממילא. `scheduleAt()` (נודניק)
+  ו-`rescheduleAll()` (רק לקריאה מ-`RescheduleWorker` אחרי ריבוט) עדיין מרעננים ישירות, כי הם לא
+  תמיד מלווים בכתיבה לטבלה. `WidgetRefreshWorker` רץ כל 15 דקות כ-fallback נוסף.
+
+## מסך הצלצול ואמינות (v1.4.0)
+- `AlarmRingViewModel` מחשב את הזמן שחלף מאז הצלצול לפי `SystemClock.elapsedRealtime()`,
+  מעוגן ל-timestamp האמיתי (`alarm_logs` action='FIRED'), ולא ספירת טיקים מקומית של המסך —
+  כך שהמסך נסגר בזמן אמיתי גם אם הוא נפתח מחדש (rotation) ולא מושפע מקפיצת שעון (DST/NTP).
+  משמש כרשת ביטחון (עם buffer של 2 שניות) לצד הטיימר האמיתי של `AlarmFiringService`, למקרה
+  שהשירות לא נסגר בזמן.
+- `AlarmFiringService` כותב את רשומת ה-`FIRED` ל-DB *לפני* פרסום ההתראה (לא אחריה) —
+  ה-full-screen intent יכול לפתוח את מסך הצלצול כמעט מיידית, וסדר הפוך השאיר חלון שבו
+  מסך הצלצול קורא timestamp ישן מצלצול קודם.
 
 ## Security
 allowBackup=false · exported=false · FLAG_IMMUTABLE · ProGuard · prepareAsync() · startForeground() ראשון

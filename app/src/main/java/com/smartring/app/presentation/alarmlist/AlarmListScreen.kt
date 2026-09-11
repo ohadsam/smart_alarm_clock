@@ -1,4 +1,8 @@
 package com.smartring.app.presentation.alarmlist
+import android.Manifest
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
@@ -9,9 +13,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.*
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -21,6 +27,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.smartring.app.domain.model.Alarm
 import com.smartring.app.presentation.theme.*
 import com.smartring.app.presentation.whatsnew.WhatsNewDialog
+import com.smartring.app.presentation.whatsnew.WhatsNewViewModel
+import com.smartring.app.util.ReliabilityChecks
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -29,7 +37,16 @@ fun AlarmListScreen(onAddAlarm: ()->Unit, onEditAlarm: (Long)->Unit, onOpenHisto
     val state by vm.uiState.collectAsStateWithLifecycle()
     var showControls by remember { mutableStateOf(false) }
 
-    WhatsNewDialog()
+    val whatsNewVm: WhatsNewViewModel = hiltViewModel()
+    val whatsNewState by whatsNewVm.state.collectAsStateWithLifecycle()
+    WhatsNewDialog(whatsNewVm)
+    // Don't compete with the What's New dialog (a system permission prompt popping up
+    // at the same time as a Compose AlertDialog is jarring and one can eat the other's
+    // input) — wait until it has genuinely resolved to "nothing to show" (`checked`,
+    // not just the default-empty initial state) before this one gets a turn.
+    if (whatsNewState.checked && whatsNewState.entriesToShow.isEmpty()) {
+        ReliabilityGate(onOpenSettings)
+    }
 
     Scaffold(
         topBar = {
@@ -174,6 +191,69 @@ private fun AlarmCardItem(alarm: Alarm, onToggle:(Boolean)->Unit, onEdit:()->Uni
     if (showDel) AlertDialog({showDel=false},title={Text("מחק שעמור")},text={Text("מחק את \"${alarm.name}\"?")},
         confirmButton={TextButton({showDel=false;onDelete()}){Text("מחק",color=MaterialTheme.colorScheme.error)}},
         dismissButton={TextButton({showDel=false}){Text("ביטול")}})
+}
+
+/**
+ * Proactively surfaces the reliability checks (Settings -> אמינות ברקע) on app
+ * entry instead of only when the user happens to open Settings themselves —
+ * notifications are requested directly (the only one of the three that can be
+ * silently asked for without leaving the app); exact-alarm/battery-optimization
+ * need a system settings screen, so this only nudges the user toward the existing
+ * Settings screen (which has the real per-item fix buttons) rather than duplicating
+ * that Intent-construction logic here.
+ */
+@Composable
+private fun ReliabilityGate(onOpenSettings: () -> Unit) {
+    val context = LocalContext.current
+    var alreadyChecked by rememberSaveable { mutableStateOf(false) }
+    // rememberSaveable, matching alreadyChecked: a plain remember here reset to false
+    // across a config change (e.g. rotation) while alreadyChecked survived it, so the
+    // dialog silently vanished on rotation and — since alreadyChecked already being
+    // true skips LaunchedEffect's re-check — never came back for the rest of the
+    // session even though the underlying issue was never resolved.
+    var showSettingsPrompt by rememberSaveable { mutableStateOf(false) }
+    // Notifications denied still routes to the same Settings prompt (its "אמינות
+    // ברקע" section has the real fix action for it), so a denied notification
+    // permission isn't silently dropped just because it's the one check resolved
+    // via a direct system dialog instead of the other two's Settings redirect.
+    var missingNotif by rememberSaveable { mutableStateOf(false) }
+
+    fun checkAllItems() {
+        missingNotif = !ReliabilityChecks.isNotificationsGranted(context)
+        val missingExact = !ReliabilityChecks.canScheduleExactAlarms(context)
+        val missingBattery = !ReliabilityChecks.isIgnoringBatteryOptimizations(context)
+        if (missingNotif || missingExact || missingBattery) showSettingsPrompt = true
+    }
+
+    val notifLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
+        checkAllItems()
+    }
+
+    LaunchedEffect(Unit) {
+        if (alreadyChecked) return@LaunchedEffect
+        alreadyChecked = true
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !ReliabilityChecks.isNotificationsGranted(context)) {
+            notifLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else {
+            checkAllItems()
+        }
+    }
+
+    if (showSettingsPrompt) {
+        AlertDialog(
+            onDismissRequest = { showSettingsPrompt = false },
+            title = { Text("הגדרות מומלצות לאמינות") },
+            text = {
+                Text(
+                    "כדי שהשעמורים יצלצלו באמינות ברקע" +
+                    (if (missingNotif) " ושתראה כשהם מצלצלים" else "") +
+                    ", כדאי לאשר התראות, הרשאת שעמורים מדויקים, ולכבות אופטימיזציית סוללה לאפליקציה. אפשר לעשות זאת בהגדרות."
+                )
+            },
+            confirmButton = { TextButton({ showSettingsPrompt = false; onOpenSettings() }) { Text("עבור להגדרות") } },
+            dismissButton = { TextButton({ showSettingsPrompt = false }) { Text("אחר כך") } },
+        )
+    }
 }
 
 @Composable

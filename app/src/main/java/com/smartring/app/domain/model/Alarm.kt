@@ -74,6 +74,16 @@ data class Alarm(
     val isEnabled: Boolean              = true,
     val isFrozen: Boolean               = false,
     // ── Recurrence ────────────────────────────────────────────────
+    // repeatDaysBitmask defaults to 0 (no days picked) — a fresh alarm with no days
+    // selected fires once (nextFireTime()'s "simple time-of-day" fallback), not on a
+    // schedule, regardless of repeatFrequency; the latter only matters once the user
+    // actually picks a day. Keep the default WEEKLY (not NONE): the recurrence-end
+    // section (AlarmEditScreen) is gated on `repeatFrequency != NONE`, so a user who
+    // taps a weekday without ever touching the frequency chips must still land on a
+    // real repeating cadence with a working "when does this stop repeating" UI --
+    // AlarmEditScreen instead shows the frequency chip row as all-unselected while
+    // repeatDaysBitmask == 0, so a brand-new alarm doesn't visually look like
+    // "weekly" was already chosen.
     val repeatDaysBitmask: Int          = 0,          // bit0=Sun … bit6=Sat
     val repeatFrequency: RepeatFrequency = RepeatFrequency.WEEKLY,
     val recurrenceEnd: RecurrenceEnd    = RecurrenceEnd(),
@@ -84,7 +94,9 @@ data class Alarm(
     val ringDurationSeconds: Int        = 60,
     val rings: List<AlarmRing>          = emptyList(),
     // ── Snooze ────────────────────────────────────────────────────
-    val snoozeEnabled: Boolean          = true,
+    // Off by default (v1.4.0): most users don't want a stray notification snooze
+    // action on every alarm unless they opt in explicitly.
+    val snoozeEnabled: Boolean          = false,
     val snoozeMinutes: Int              = 10,
     val snoozeMaxCount: Int             = 3,
     // ── Shabbat mode: while ringing, Stop/Snooze are disabled (no notification
@@ -131,8 +143,14 @@ data class Alarm(
 
     fun volumeAtSecond(base: Int, elapsed: Int): Int {
         if (!crescendoEnabled) return base
-        val steps = elapsed / crescendoStepSeconds
-        return (crescendoStartVolume + steps * crescendoStepPercent).coerceIn(crescendoStartVolume, base)
+        // Defensive clamps: coerceIn(min, max) throws if min > max, which is reachable
+        // in practice — the ring-volume and crescendo-start-volume sliders are edited
+        // independently, so a ring can end up quieter than the alarm's crescendo start
+        // (e.g. a 10%-volume ring with a 50% crescendo start). Without this, playing
+        // that ring crashed the firing coroutine instead of just clamping down to it.
+        val floor = crescendoStartVolume.coerceAtMost(base)
+        val steps = elapsed / crescendoStepSeconds.coerceAtLeast(1)
+        return (floor + steps * crescendoStepPercent).coerceIn(floor, base)
     }
 
     fun soundActiveAt(e: Int) = when (vibrationMode) {

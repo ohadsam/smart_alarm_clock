@@ -1,5 +1,40 @@
 # SmartRing – Changelog
 
+## v1.4.0 (2026-09-11)
+
+A bug-fix batch driven directly by real on-device testing feedback (ring not stopping,
+crescendo not audible, widget not updating, confusing defaults, buried validation error,
+permissions not requested proactively, blank ring screen).
+
+**Fixes:**
+- The ring screen had no way to know when `AlarmFiringService`'s own `ringDurationSeconds`
+  timer auto-stopped the ringtone/vibration, so it stayed on screen (Stop/Snooze buttons and
+  all) indefinitely afterward — read by the user as "the alarm didn't stop". `AlarmRingViewModel`
+  now independently tracks elapsed time from the alarm's actual "FIRED" timestamp (not a
+  screen-local counter, which reset on rotation/reopening and could drift arbitrarily) and
+  self-dismisses a couple of seconds after `ringDurationSeconds`, as a safety net alongside the
+  service's own timer (which still normally wins the race and logs the "MISSED" history entry).
+- Crescendo (gradually increasing volume) reset back to the floor volume every time the ring
+  sequence looped through `alarm.rings`, instead of continuing from wherever the ramp had
+  reached — for any alarm whose configured ring duration was shorter than the full crescendo
+  ramp, this looked like crescendo wasn't working at all.
+- The ring screen could get stuck on its loading spinner forever if the alarm lookup raced a
+  concurrent write; it now retries briefly and dismisses instead of hanging.
+- Snooze is now off by default for a new alarm (was on).
+- A new alarm's frequency chips no longer show "שבועי" (weekly) pre-selected while zero
+  weekdays are chosen — a fresh alarm now visibly reads as one-time, matching how it actually
+  behaves.
+- Tapping Save with a blank name now auto-scrolls to the name field, instead of leaving the red
+  "נדרש שם" error off-screen with no visible explanation for why saving silently did nothing.
+- Notifications/exact-alarm/battery-optimization are now requested proactively on app launch
+  (notifications directly; the other two via a prompt pointing at Settings), instead of only
+  ever surfacing if the user happened to open Settings themselves.
+- Widgets now also refresh reactively on any change to the alarms table (not only through each
+  mutation site remembering to call `WidgetRefresher`), fixing cases where a widget could miss
+  an update; `AlarmScheduler.effectiveNextFireTime()`/`pendingSnoozeUntil()` are also now used
+  for the edit screen's "next fire" hint, not just the widgets, so a just-snoozed alarm shows
+  the right time there too.
+
 ## v1.3.0 (2026-09-11)
 
 **New capabilities:**

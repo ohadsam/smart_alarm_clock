@@ -10,6 +10,7 @@ import androidx.compose.foundation.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.*
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -82,7 +83,17 @@ fun AlarmEditScreen(
         },
         containerColor = MaterialTheme.colorScheme.background,
     ) { pad ->
+        val listState = rememberLazyListState()
+        // The name field is item index 0; without this, tapping Save while scrolled
+        // past it just silently fails from the user's point of view — the red error
+        // text appears off-screen at the top with nothing visible to explain why
+        // saving didn't work. A one-shot event (not s.nameError itself) so a second
+        // Save tap while still blank scrolls again too, not just the first failure.
+        LaunchedEffect(Unit) {
+            vm.scrollToNameRequests.collect { listState.animateScrollToItem(0) }
+        }
         LazyColumn(
+            state                 = listState,
             contentPadding        = PaddingValues(start=16.dp, end=16.dp, top=pad.calculateTopPadding()+8.dp, bottom=80.dp),
             verticalArrangement   = Arrangement.spacedBy(12.dp),
         ) {
@@ -226,7 +237,13 @@ fun AlarmEditScreen(
                                 RepeatFrequency.MONTHLY   to "חודשי",
                                 RepeatFrequency.NONE      to "ללא",
                             ).forEach { (f, l) ->
-                                FilterChip(s.repeatFrequency == f, { vm.setRepeatFrequency(f) }, { Text(l, fontSize = 11.sp) })
+                                // No chip shows selected while no weekday is picked yet
+                                // (repeatDaysBitmask == 0) — the stored repeatFrequency
+                                // default is WEEKLY, but showing it pre-selected here
+                                // made a brand-new, still one-time alarm look like a
+                                // recurring "weekly" pattern had already been chosen.
+                                val selected = s.repeatDaysBitmask != 0 && s.repeatFrequency == f
+                                FilterChip(selected, { vm.setRepeatFrequency(f) }, { Text(l, fontSize = 11.sp) })
                             }
                         }
                     }

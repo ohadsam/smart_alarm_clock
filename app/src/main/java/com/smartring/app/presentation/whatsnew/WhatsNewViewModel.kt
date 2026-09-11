@@ -15,7 +15,14 @@ import javax.inject.Inject
 
 private val Context.whatsNewDataStore: DataStore<Preferences> by preferencesDataStore("whats_new")
 
-data class WhatsNewUiState(val entriesToShow: List<WhatsNewEntry> = emptyList())
+data class WhatsNewUiState(
+    val entriesToShow: List<WhatsNewEntry> = emptyList(),
+    // False until the async fresh-install-vs-upgrade determination below completes —
+    // lets other on-launch prompts (ReliabilityGate in AlarmListScreen) tell "nothing
+    // to show" apart from "haven't checked yet" instead of racing this ViewModel's
+    // init and possibly firing before a real What's New would have shown.
+    val checked: Boolean = false,
+)
 
 /**
  * Shows "what's new" once per upgrade — not on a brand-new install (nothing to
@@ -42,12 +49,15 @@ class WhatsNewViewModel @Inject constructor(
                 // alarm already exists. An existing user gets the full history since
                 // we don't know exactly which version they were actually on.
                 if (repository.observeAlarms().first().isNotEmpty()) {
-                    _state.update { it.copy(entriesToShow = WHATS_NEW_HISTORY) }
+                    _state.update { it.copy(entriesToShow = WHATS_NEW_HISTORY, checked = true) }
                 } else {
                     ctx.whatsNewDataStore.edit { it[kLastSeen] = BuildConfig.VERSION_CODE }
+                    _state.update { it.copy(checked = true) }
                 }
             } else if (lastSeen < BuildConfig.VERSION_CODE) {
-                _state.update { it.copy(entriesToShow = WHATS_NEW_HISTORY.filter { e -> e.versionCode > lastSeen }) }
+                _state.update { it.copy(entriesToShow = WHATS_NEW_HISTORY.filter { e -> e.versionCode > lastSeen }, checked = true) }
+            } else {
+                _state.update { it.copy(checked = true) }
             }
         }
     }

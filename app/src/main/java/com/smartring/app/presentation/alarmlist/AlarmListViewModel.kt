@@ -28,9 +28,6 @@ class AlarmListViewModel @Inject constructor(
         appLogger.log("AlarmList", "\"${alarm.name}\" (#${alarm.id}) ${if (enabled) "הופעל" else "כובה"}")
     }
     fun delete(alarm: Alarm) = viewModelScope.launch {
-        // DB write before cancel(): cancel() triggers an async widget refresh that
-        // reads getActiveAlarms() on its own coroutine, so deleting first avoids a
-        // race where that read still sees the alarm being deleted.
         repository.deleteAlarm(alarm.id); scheduler.cancel(alarm.id)
         appLogger.log("AlarmList", "נמחק: \"${alarm.name}\" (#${alarm.id})")
     }
@@ -47,11 +44,13 @@ class AlarmListViewModel @Inject constructor(
         appLogger.log("AlarmList", "כל השעמורים הוקפאו (${alarms.size})")
     }
     fun unfreezeAll() = viewModelScope.launch {
-        repository.unfreezeAll(); scheduler.rescheduleAll(repository.getActiveAlarms())
+        // refreshWidgets=false: unfreezeAll()'s own write above already triggers
+        // SmartRingApp's observeAlarms()-based widget refresh.
+        repository.unfreezeAll(); scheduler.rescheduleAll(repository.getActiveAlarms(), refreshWidgets = false)
         appLogger.log("AlarmList", "הקפאה בוטלה לכל השעמורים")
     }
     fun enableAll() = viewModelScope.launch {
-        repository.enableAll(); scheduler.rescheduleAll(repository.getActiveAlarms())
+        repository.enableAll(); scheduler.rescheduleAll(repository.getActiveAlarms(), refreshWidgets = false)
         appLogger.log("AlarmList", "כל השעמורים הופעלו")
     }
 }

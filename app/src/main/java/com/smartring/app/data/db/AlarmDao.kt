@@ -67,6 +67,9 @@ interface AlarmDao {
     @Query("DELETE FROM alarm_logs")
     suspend fun deleteAllLogs()
 
+    @Query("SELECT MAX(firedAt) FROM alarm_logs WHERE alarmId = :id AND action = 'FIRED'")
+    suspend fun lastFiredAt(id: Long): Long?
+
     @Query("""
         SELECT COUNT(*) FROM alarm_logs
         WHERE alarmId = :id AND action = 'SNOOZED'

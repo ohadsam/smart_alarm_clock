@@ -18,7 +18,10 @@ data class AlarmEditUiState(
     val minute: Int                        = 0,
     // DateTime-specific
     val specificDateTime: Long?            = null,
-    // Recurrence
+    // Recurrence: see the matching comment on Alarm.repeatDaysBitmask/repeatFrequency
+    // for why the default is WEEKLY even though a fresh alarm (0 days picked) fires
+    // only once — AlarmEditScreen's frequency chip row shows nothing selected until
+    // repeatDaysBitmask != 0, so this default doesn't visually contradict "one-time".
     val repeatDaysBitmask: Int             = 0,
     val repeatFrequency: RepeatFrequency   = RepeatFrequency.WEEKLY,
     val recurrenceEndType: RecurrenceEndType = RecurrenceEndType.FOREVER,
@@ -29,8 +32,8 @@ data class AlarmEditUiState(
     // Ring
     val ringDurationSeconds: Int           = 60,
     val rings: List<AlarmRing>             = listOf(AlarmRing(volumePercent = 100)),
-    // Snooze
-    val snoozeEnabled: Boolean             = true,
+    // Snooze — off by default, see Alarm.snoozeEnabled
+    val snoozeEnabled: Boolean             = false,
     val snoozeMinutes: Int                 = 10,
     val snoozeMaxCount: Int                = 3,
     // Shabbat mode
@@ -68,6 +71,15 @@ class AlarmEditViewModel @Inject constructor(
     val state: StateFlow<AlarmEditUiState> = _state.asStateFlow()
     private var editingId = 0L
     private var originalState: AlarmEditUiState? = null
+
+    // A one-shot event (not part of AlarmEditUiState) rather than a boolean/nonce
+    // pair to keep in sync: isDirty compares the whole state against originalState by
+    // structural equality, so any ever-changing field added there would permanently
+    // read as "dirty" the moment it changed. The event itself carries the intent
+    // ("scroll to the name field now"), so the screen doesn't need to separately
+    // track "was this the same nameError value as last time".
+    private val _scrollToNameRequests = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    val scrollToNameRequests: SharedFlow<Unit> = _scrollToNameRequests.asSharedFlow()
 
     fun loadAlarm(id: Long) {
         if (id <= 0L) return
@@ -203,7 +215,11 @@ class AlarmEditViewModel @Inject constructor(
     // ── Save ──────────────────────────────────────────────────────
     fun save() {
         val s = _state.value
-        if (s.name.isBlank()) { _state.update { it.copy(nameError = true) }; return }
+        if (s.name.isBlank()) {
+            _state.update { it.copy(nameError = true) }
+            _scrollToNameRequests.tryEmit(Unit)
+            return
+        }
         _state.update { it.copy(isSaving = true) }
         viewModelScope.launch {
             val alarm = buildAlarm(s)
