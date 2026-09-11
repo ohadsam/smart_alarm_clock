@@ -180,7 +180,7 @@ class AlarmEditViewModel @Inject constructor(
     private fun updateNextFireHint() {
         val s = _state.value
         val alarm = buildAlarm(s)
-        val next = scheduler.nextFireTime(alarm)
+        val next = scheduler.effectiveNextFireTime(alarm)
         val hint = if (next == null) null else {
             val cal = Calendar.getInstance().apply { timeInMillis = next }
             val today = Calendar.getInstance()

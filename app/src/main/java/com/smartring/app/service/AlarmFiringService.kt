@@ -11,6 +11,7 @@ import com.smartring.app.domain.model.*
 import com.smartring.app.receiver.AlarmReceiver
 import com.smartring.app.util.AlarmScheduler
 import com.smartring.app.util.AppLogger
+import com.smartring.app.util.WidgetRefresher
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.*
 import javax.inject.Inject
@@ -20,6 +21,7 @@ class AlarmFiringService : Service() {
     @Inject lateinit var repository: AlarmRepository
     @Inject lateinit var scheduler: AlarmScheduler
     @Inject lateinit var appLogger: AppLogger
+    @Inject lateinit var widgetRefresher: WidgetRefresher
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var player: MediaPlayer? = null
@@ -55,7 +57,12 @@ class AlarmFiringService : Service() {
             // COUNT-limited recurrence once per snooze instead of once per real day.
             if (!isSnooze) repository.incrementOccurrences(id)
             fireAlarm(alarm)
+            // A regular fire reschedules (which also refreshes widgets); a snooze
+            // re-fire doesn't reschedule anything but still needs its own refresh —
+            // otherwise the widget keeps showing the now-elapsed snooze countdown
+            // until the next periodic WidgetRefreshWorker run, up to 15 minutes later.
             if (!isSnooze) scheduler.schedule(alarm.copy(occurrencesFired = alarm.occurrencesFired + 1))
+            else widgetRefresher.refresh()
         }
         return START_NOT_STICKY
     }

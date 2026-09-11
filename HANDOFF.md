@@ -53,6 +53,9 @@
 | 24 | בדיקות אמינות ברקע (התראות/שעמורים מדויקים/סוללה) | `ReliabilityChecks`, `SettingsScreen` (v1.2.0) |
 | 25 | חלון "מה חדש" אחרי עדכון גרסה | `WhatsNewDialog`, `WhatsNewViewModel` (v1.2.0) |
 | 26 | עדכון APK במקום (ללא הסרה+התקנה) | `signingConfigs` משותף ב-`build.gradle.kts` (v1.2.0) |
+| 27 | שעון חי בווידג'טים (ללא העיר את האפליקציה) | `widget_clock.xml` (TextClock) + `AndroidRemoteViews`, `SmartRingWidget.kt` (v1.3.0) |
+| 28 | אינדיקציית זמן עד לשעמור הבא בווידג'טים | `AlarmScheduler.effectiveNextFireTime()`/`pendingSnoozeUntil()`, `formatCountdownUntil()`, `WidgetRefresher` (v1.3.0) |
+| 29 | מסגרת דקה סביב הווידג'טים | `WidgetFrame()` ב-`SmartRingWidget.kt` (v1.3.0) |
 
 ---
 
@@ -201,6 +204,13 @@ if (!alarm.acceptsInteraction) return
 // ✅ 10. אל תיגע ב-signingConfigs ב-build.gradle.kts בלי סיבה מפורשת
 // keystore משותף אחד (app/smartring.keystore) לשני build types – זה מה שמאפשר
 // עדכון APK במקום. שינוי כאן שובר עדכון במקום לכל המשתמשים הקיימים.
+
+// ✅ 11. "מתי מצלצל השעמור הבא" – תמיד דרך AlarmScheduler.effectiveNextFireTime(),
+// לא nextFireTime() ישירות – האחרון לא יודע על נודניק פעיל (מתוזמן דרך scheduleAt(),
+// לא נגזר מ-Alarm עצמו). כל שינוי בתזמון (schedule/cancel/cancelAll/rescheduleAll)
+// חייב לקרוא ל-widgetRefresher.refresh() בדיוק פעם אחת לכל פעולת משתמש (לא בלולאה
+// per-alarm) – v1.3.0 השתמשה ב-*Internal helpers (scheduleInternal/cancelInternal)
+// בדיוק בשביל זה.
 ```
 
 ---
@@ -284,8 +294,9 @@ if (!alarm.acceptsInteraction) return
 4. data/db/AlarmDao.kt
 5. presentation/navigation/NavGraph.kt
 
-מצב נוכחי: v1.2.0, DB version 3, כל הפיצ'רים ב-HANDOFF.md סעיף 2 מיושמים (כולל מצב שבת,
-נודניק ניתן-לכיבוי, לוגים, בדיקות אמינות, What's New, ועדכון APK במקום).
+מצב נוכחי: v1.3.0, DB version 3, כל הפיצ'רים ב-HANDOFF.md סעיף 2 מיושמים (כולל מצב שבת,
+נודניק ניתן-לכיבוי, לוגים, בדיקות אמינות, What's New, עדכון APK במקום, ושעון חי + אינדיקציית
+זמן לשעמור הבא + מסגרת בווידג'טים).
 עברו מספר סיבובי code review – הכל תקין.
 
 כללים שאסור לשכוח (ראה HANDOFF.md סעיף 6):

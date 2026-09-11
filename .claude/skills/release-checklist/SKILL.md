@@ -232,6 +232,37 @@ If the user asks for a PR-based workflow going forward, follow that instead and 
   for why a plaintext committed password is the deliberate right call here, not an oversight) and
   pointing both build types at it.
 
+- **`AlarmScheduler.nextFireTime()` only knows the regular recurrence schedule, not an
+  in-flight snooze** — `scheduleAt()` (called from `SnoozeAlarmReceiver`/`AlarmRingViewModel.snooze()`)
+  arms a real, separate `AlarmManager` trigger a few minutes out, but nothing about that is visible
+  to `nextFireTime()`, which only computes from `Alarm`'s own recurrence fields. Any new "when does
+  this next ring" UI (the v1.3.0 widget countdown, the pre-existing edit-screen hint) must go
+  through `AlarmScheduler.effectiveNextFireTime()` instead, which also checks the persisted snooze
+  deadline (`pendingSnoozeUntil()`, backed by the `pending_snooze` SharedPreferences) — otherwise a
+  just-snoozed alarm shows its regular next occurrence (e.g. tomorrow) instead of the imminent
+  re-fire. Same category: a COUNT/UNTIL-limited alarm's snoozed *last* occurrence must still count
+  even though `isRecurrenceExpired()` is now true — check the pending snooze before filtering by
+  recurrence-expiry, not after.
+- **A per-alarm loop that calls a single-alarm mutation (`schedule`/`cancel`) N times fires N
+  near-simultaneous side effects if that mutation has one** — `AlarmScheduler.schedule()`/`cancel()`
+  each trigger a widget refresh (v1.3.0); `disableAll()`/`freezeAll()`/`rescheduleAll()` used to
+  call them in a `forEach`, so one user action fired up to N (or 2N, for reschedule) full
+  four-widget re-renders. Fixed with `*Internal` no-side-effect variants
+  (`scheduleInternal`/`cancelInternal`) used inside the loop, plus a batch entry point
+  (`cancelAll(ids)`) that triggers the side effect exactly once after the loop. Whenever a new
+  single-alarm `AlarmScheduler` method gains a side effect, check every `forEach`/`.map` call site
+  that invokes it per-alarm and give it the same treatment.
+
+- **`by someState.collectAsStateWithLifecycle()` needs `androidx.compose.runtime.getValue`
+  imported explicitly** if the file doesn't already have `import androidx.compose.runtime.*` —
+  every screen in this app uses the wildcard import except `WhatsNewDialog.kt` did not when first
+  written, which compiled locally-looking-fine but failed CI with a `has no method
+  'getValue(...)'` error on the `by` line, cascading into unrelated-looking "unresolved reference"
+  errors on every later line that touched the delegated value. When adding a new file with `by
+  ...collectAsStateWithLifecycle()`, either use the `androidx.compose.runtime.*` wildcard import
+  (matches every other screen) or add `getValue` explicitly — don't assume `Composable`/`State`
+  imports alone are enough.
+
 ## Known limitations (don't re-report these as new findings unless you're the batch fixing them)
 
 - **Settings' English toggle doesn't change any visible UI text.** Every screen hardcodes Hebrew

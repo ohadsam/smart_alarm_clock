@@ -28,19 +28,22 @@ class AlarmListViewModel @Inject constructor(
         appLogger.log("AlarmList", "\"${alarm.name}\" (#${alarm.id}) ${if (enabled) "הופעל" else "כובה"}")
     }
     fun delete(alarm: Alarm) = viewModelScope.launch {
-        scheduler.cancel(alarm.id); repository.deleteAlarm(alarm.id)
+        // DB write before cancel(): cancel() triggers an async widget refresh that
+        // reads getActiveAlarms() on its own coroutine, so deleting first avoids a
+        // race where that read still sees the alarm being deleted.
+        repository.deleteAlarm(alarm.id); scheduler.cancel(alarm.id)
         appLogger.log("AlarmList", "נמחק: \"${alarm.name}\" (#${alarm.id})")
     }
     fun disableAll() = viewModelScope.launch {
         val alarms = repository.getActiveAlarms()
         repository.disableAll()
-        alarms.forEach { scheduler.cancel(it.id) }
+        scheduler.cancelAll(alarms.map { it.id })
         appLogger.log("AlarmList", "כל השעמורים כובו (${alarms.size})")
     }
     fun freezeAll() = viewModelScope.launch {
         val alarms = repository.getActiveAlarms()
         repository.freezeAll()
-        alarms.forEach { scheduler.cancel(it.id) }
+        scheduler.cancelAll(alarms.map { it.id })
         appLogger.log("AlarmList", "כל השעמורים הוקפאו (${alarms.size})")
     }
     fun unfreezeAll() = viewModelScope.launch {

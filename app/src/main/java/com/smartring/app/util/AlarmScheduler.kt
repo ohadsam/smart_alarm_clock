@@ -16,10 +16,23 @@ import javax.inject.Singleton
 class AlarmScheduler @Inject constructor(
     @ApplicationContext private val context: Context,
     private val appLogger: AppLogger,
+    private val widgetRefresher: WidgetRefresher,
 ) {
     private val alarmManager = context.getSystemService(AlarmManager::class.java)
 
+    // A snooze's real AlarmManager trigger (armed by scheduleAt()) isn't otherwise
+    // recorded anywhere nextFireTime() can see, so a just-snoozed alarm would appear
+    // to next fire at its regular time (e.g. tomorrow) instead of in a few minutes.
+    // Keyed by alarm id; self-expiring in effectiveNextFireTime() once the timestamp
+    // is in the past, so no explicit cleanup is needed once the snooze actually fires.
+    private val snoozePrefs = context.getSharedPreferences("pending_snooze", Context.MODE_PRIVATE)
+
     fun schedule(alarm: Alarm) {
+        scheduleInternal(alarm)
+        widgetRefresher.refresh()
+    }
+
+    private fun scheduleInternal(alarm: Alarm) {
         if (!alarm.isActive) return
         if (alarm.isRecurrenceExpired()) return
         val t = nextFireTime(alarm) ?: return
@@ -33,19 +46,55 @@ class AlarmScheduler @Inject constructor(
     fun scheduleAt(alarm: Alarm, at: Long) {
         alarmManager.setExactAndAllowWhileIdle(
             AlarmManager.RTC_WAKEUP, at, buildSnoozePendingIntent(alarm.id))
+        snoozePrefs.edit().putLong(alarm.id.toString(), at).apply()
         appLogger.log("Scheduler", "נודניק תוזמן: \"${alarm.name}\" (#${alarm.id})")
+        widgetRefresher.refresh()
     }
 
     fun cancel(id: Long) {
+        cancelInternal(id)
+        widgetRefresher.refresh()
+    }
+
+    /** Cancels every id then refreshes widgets exactly once — use this instead of a
+     *  `forEach { cancel(it) }` loop when cancelling several alarms in one user
+     *  action (disable/freeze-all), which would otherwise fire one near-simultaneous
+     *  full widget refresh per alarm. */
+    fun cancelAll(ids: List<Long>) {
+        ids.forEach { cancelInternal(it) }
+        appLogger.log("Scheduler", "בוטלו ${ids.size} שעמורים")
+        widgetRefresher.refresh()
+    }
+
+    private fun cancelInternal(id: Long) {
         alarmManager.cancel(buildIntent(id))
         alarmManager.cancel(buildSnoozePendingIntent(id))
+        snoozePrefs.edit().remove(id.toString()).apply()
         appLogger.log("Scheduler", "בוטל: שעמור #$id")
     }
 
     fun rescheduleAll(alarms: List<Alarm>) {
-        alarms.forEach { cancel(it.id); if (it.isActive && !it.isRecurrenceExpired()) schedule(it) }
+        // Uses the *Internal variants so cancelling+rescheduling N alarms triggers one
+        // widget refresh total instead of up to 2N near-simultaneous ones.
+        alarms.forEach { cancelInternal(it.id); if (it.isActive && !it.isRecurrenceExpired()) scheduleInternal(it) }
         appLogger.log("Scheduler", "תוזמנו מחדש ${alarms.size} שעמורים")
+        widgetRefresher.refresh()
     }
+
+    /** The real AlarmManager trigger armed by a snooze (see [snoozePrefs]), if any is
+     *  still in the future — null once it has fired or none is pending. Exposed
+     *  separately from [effectiveNextFireTime] so callers that need to show an alarm
+     *  even when its regular recurrence has expired (a COUNT-limited alarm's very
+     *  last, now-snoozed occurrence) can check this first. */
+    fun pendingSnoozeUntil(alarm: Alarm): Long? =
+        snoozePrefs.getLong(alarm.id.toString(), -1L).takeIf { it > System.currentTimeMillis() }
+
+    /** [nextFireTime] plus awareness of an in-flight snooze — see [snoozePrefs]. Used
+     *  anywhere "when does this alarm next ring" is shown to the user (widgets, the
+     *  edit screen's next-fire hint), so a just-snoozed alarm doesn't show its regular
+     *  schedule while it's actually about to re-ring in a few minutes. */
+    fun effectiveNextFireTime(alarm: Alarm): Long? =
+        listOfNotNull(pendingSnoozeUntil(alarm), nextFireTime(alarm)).minOrNull()
 
     fun nextFireTime(alarm: Alarm): Long? {
         val now = System.currentTimeMillis()

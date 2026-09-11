@@ -1,5 +1,40 @@
 # SmartRing – Changelog
 
+## v1.3.0 (2026-09-11)
+
+**New capabilities:**
+- All 4 home-screen widgets now show a live-updating clock (a real `android.widget.TextClock`
+  embedded via `AndroidRemoteViews`, ticking inside the widget-host process — the app never wakes
+  up to redraw it) instead of only the next alarm's fixed time.
+- A "בעוד X שע' Y דק'" countdown to the true next alarm, computed from
+  `AlarmScheduler.effectiveNextFireTime()` — recurrence/specific-date-aware, and aware of an
+  in-flight snooze, not just the DB's hour/minute ordering.
+- A thin, elegant accent-tinted frame around every widget (a nested-Box border rather than a
+  Glance `border()` modifier, for consistent rendering across Glance versions).
+- Widgets now refresh immediately on every alarm mutation (via `AlarmScheduler` → `WidgetRefresher`)
+  and every 15 minutes as a fallback (`WidgetRefreshWorker`), instead of only on the OS's own
+  30-minute `updatePeriodMillis` tick.
+
+**Fixed while building the above** (found by 3 rounds of code review on this batch):
+- `nextFireTime()` alone has no notion of an active snooze (armed separately via `scheduleAt()`),
+  so right after snoozing, the widget/edit-screen "next fire" hint would show the alarm's regular
+  next occurrence (e.g. tomorrow) instead of the imminent snooze re-fire a few minutes away — fixed
+  by persisting the snooze deadline (`AlarmScheduler`'s `pending_snooze` SharedPreferences) and
+  reading it first via the new `effectiveNextFireTime()`/`pendingSnoozeUntil()`.
+- A COUNT/UNTIL-limited alarm's very last occurrence, if snoozed, would still disappear from the
+  widget entirely (its regular recurrence is already expired) — fixed to check the pending snooze
+  before filtering by recurrence-expiry.
+- A snoozed alarm's re-fire (the `isSnooze` path in `AlarmFiringService`) didn't trigger any widget
+  refresh, leaving a stale/elapsed countdown on screen for up to 15 minutes.
+- `disableAll()`/`freezeAll()`/`rescheduleAll()` each cancelling N alarms in a loop used to fire up
+  to N (or 2N) near-simultaneous full widget refreshes for one user action — added `cancelInternal`/
+  `scheduleInternal`/`cancelAll` so each such action refreshes widgets exactly once.
+- `AlarmListViewModel.delete()` called `scheduler.cancel()` (which now triggers an async widget
+  refresh reading live DB state) before the DB delete had completed, risking a refresh that still
+  showed the alarm being deleted — reordered to delete first.
+- `WidgetRefresher` silently swallowed any refresh failure; now logs it via `AppLogger` like every
+  other background operation in this codebase.
+
 ## v1.2.0 (2026-09-10)
 
 **New capabilities:**

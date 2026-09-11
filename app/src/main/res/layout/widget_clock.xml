@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    A real android.widget.TextClock, embedded into the Glance widgets via
+    AndroidRemoteViews. Unlike a Glance Text() showing a value computed at
+    provideGlance() time, TextClock ticks on its own inside the widget host
+    process (registered against the system's own per-minute time tick) — the
+    displayed time stays live without the app ever waking up to re-render it.
+    Text size/color are overridden per placement at runtime with
+    RemoteViews.setTextViewTextSize()/setTextColor(); the values here are just
+    safe defaults.
+-->
+<TextClock xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_clock"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:format12Hour="HH:mm"
+    android:format24Hour="HH:mm"
+    android:fontFamily="sans-serif-medium"
+    android:textStyle="bold"
+    android:textSize="14sp"
+    android:textColor="#FFFFFFFF" />
