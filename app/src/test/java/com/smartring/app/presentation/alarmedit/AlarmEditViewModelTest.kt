@@ -13,6 +13,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
@@ -51,9 +52,14 @@ class AlarmEditViewModelTest {
     fun `save with a blank name sets nameError and emits a scroll request, without saving`() = runTest(testDispatcher) {
         var scrollRequested = false
         // backgroundScope (not a plain launch{}) so this indefinitely-collecting job is
-        // cancelled automatically when the test ends — a plain launch{} left running past
-        // the test body, even if cancel()ed, can fail runTest with UncompletedCoroutinesError.
+        // cancelled automatically when the test ends instead of needing job.cancel().
+        // runCurrent() right after starting it is required too: on StandardTestDispatcher,
+        // launch{} only *schedules* the collector — it isn't actually subscribed to the
+        // SharedFlow until the dispatcher is pumped, so an emit() before that pump is
+        // missed entirely (replay = 0, and the extra buffer doesn't back-fill a
+        // not-yet-subscribed collector).
         backgroundScope.launch { vm.scrollToNameRequests.collect { scrollRequested = true } }
+        runCurrent()
         vm.setName("   ") // blank after trim
 
         vm.save()
@@ -93,6 +99,7 @@ class AlarmEditViewModelTest {
     fun `a repeated failed save re-emits the scroll request, not just the first time`() = runTest(testDispatcher) {
         val events = mutableListOf<Unit>()
         backgroundScope.launch { vm.scrollToNameRequests.collect { events += it } }
+        runCurrent()
 
         vm.save()
         advanceUntilIdle()
