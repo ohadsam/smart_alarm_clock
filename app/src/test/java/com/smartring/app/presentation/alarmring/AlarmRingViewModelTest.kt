@@ -63,6 +63,38 @@ class AlarmRingViewModelTest {
     }
 
     @Test
+    fun `loadAlarm seeds the snooze count from history, not from zero`() = runTest(testDispatcher) {
+        // This ViewModel is rebuilt from scratch on every snooze re-fire, so a counter
+        // starting at 0 kept offering the full "(3 נותרו)" every time — and then
+        // silently just stopped the alarm instead of snoozing, once snooze()'s own
+        // history-derived cap check (which was always right) disagreed with the label.
+        val alarm = Alarm(id = 1, name = "Test", snoozeEnabled = true, snoozeMaxCount = 3)
+        coEvery { repository.getAlarm(1) } returns alarm
+        coEvery { repository.lastFiredAt(1) } returns System.currentTimeMillis()
+        coEvery { repository.snoozeCountSinceLastFire(1) } returns 2
+
+        vm.loadAlarm(1)
+        advanceUntilIdle()
+
+        assertEquals(2, vm.state.value.snoozeCount)
+    }
+
+    @Test
+    fun `loadAlarm still shows the alarm if the snooze count can't be read`() = runTest(testDispatcher) {
+        val alarm = Alarm(id = 1, name = "Test")
+        coEvery { repository.getAlarm(1) } returns alarm
+        coEvery { repository.lastFiredAt(1) } returns System.currentTimeMillis()
+        coEvery { repository.snoozeCountSinceLastFire(1) } throws IllegalStateException("db down")
+
+        vm.loadAlarm(1)
+        advanceUntilIdle()
+
+        assertEquals(alarm, vm.state.value.alarm)
+        assertEquals(0, vm.state.value.snoozeCount)
+        assertFalse(vm.state.value.isDismissed)
+    }
+
+    @Test
     fun `loadAlarm dismisses instead of hanging forever if the alarm is never found`() = runTest(testDispatcher) {
         coEvery { repository.getAlarm(any()) } returns null
 

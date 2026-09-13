@@ -3,6 +3,8 @@ import android.app.AlarmManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.os.Build
+import com.smartring.app.MainActivity
 import com.smartring.app.domain.model.*
 import com.smartring.app.receiver.AlarmReceiver
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -38,20 +40,58 @@ class AlarmScheduler @Inject constructor(
         if (!alarm.isActive) return
         if (alarm.isRecurrenceExpired()) return
         val t = nextFireTime(alarm) ?: return
-        alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, t, buildIntent(alarm.id))
+        armExact(t, buildIntent(alarm.id), "\"${alarm.name}\" (#${alarm.id})")
         val fmt = Calendar.getInstance().apply { timeInMillis = t }
         appLogger.log("Scheduler", "תוזמן: \"${alarm.name}\" (#${alarm.id}) ל-%02d/%02d %02d:%02d".format(
             fmt.get(Calendar.DAY_OF_MONTH), fmt.get(Calendar.MONTH) + 1,
             fmt.get(Calendar.HOUR_OF_DAY), fmt.get(Calendar.MINUTE)))
     }
 
+    /**
+     * Arms one exact trigger, preferring [AlarmManager.setAlarmClock] over
+     * `setExactAndAllowWhileIdle`. Both survive Doze, but only `setAlarmClock` is
+     * fully exempt from it: `setExactAndAllowWhileIdle` is rate-limited to roughly
+     * one delivery per app per 9 minutes while the device is idle, which is enough
+     * to make a short snooze (the minutes slider goes down to 1) land late. It also
+     * registers the alarm with the OS as a user-facing alarm clock, which is what
+     * puts the next-alarm indicator in the status bar and on the lock screen.
+     *
+     * Falls back to the (inexact, but never-throwing) `setAndAllowWhileIdle` if the
+     * exact-alarm permission has been revoked — on API 31/32 SCHEDULE_EXACT_ALARM is
+     * user-revocable and every exact-alarm call throws SecurityException once it is,
+     * which would otherwise crash whatever happened to be scheduling at the time
+     * (saving an alarm, the boot reschedule, a snooze) instead of degrading. The
+     * user-visible fix for that state is surfaced separately in Settings → אמינות
+     * ברקע and on launch (ReliabilityGate).
+     */
+    private fun armExact(triggerAt: Long, operation: PendingIntent, label: String) {
+        val canExact = Build.VERSION.SDK_INT < Build.VERSION_CODES.S || alarmManager.canScheduleExactAlarms()
+        if (canExact) {
+            runCatching {
+                alarmManager.setAlarmClock(AlarmManager.AlarmClockInfo(triggerAt, showIntent()), operation)
+            }.onFailure {
+                appLogger.log("Scheduler", "setAlarmClock נכשל עבור $label (${it.message}) — נעשה שימוש בתזמון חלופי")
+                alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, operation)
+            }
+        } else {
+            appLogger.log("Scheduler",
+                "אין הרשאת שעמורים מדויקים — $label תוזמן בתזמון מקורב, ייתכן איחור. יש לאשר בהגדרות → אמינות ברקע")
+            alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, operation)
+        }
+    }
+
+    /** Opens the app when the user taps the system's next-alarm indicator. */
+    private fun showIntent(): PendingIntent = PendingIntent.getActivity(
+        context, 0,
+        Intent(context, MainActivity::class.java),
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+
     // Unlike schedule()/cancel(), a snooze never writes to the alarms table (it only
     // arms a separate AlarmManager trigger and records the deadline in snoozePrefs
     // below), so the observeAlarms()-based fallback can't see it — this must keep
     // refreshing explicitly.
     fun scheduleAt(alarm: Alarm, at: Long) {
-        alarmManager.setExactAndAllowWhileIdle(
-            AlarmManager.RTC_WAKEUP, at, buildSnoozePendingIntent(alarm.id))
+        armExact(at, buildSnoozePendingIntent(alarm.id), "נודניק \"${alarm.name}\" (#${alarm.id})")
         snoozePrefs.edit().putLong(alarm.id.toString(), at).apply()
         appLogger.log("Scheduler", "נודניק תוזמן: \"${alarm.name}\" (#${alarm.id})")
         widgetRefresher.refresh()
@@ -82,9 +122,47 @@ class AlarmScheduler @Inject constructor(
     // fallback, so this would otherwise be a second, redundant full widget rebuild
     // for the same user action.
     fun rescheduleAll(alarms: List<Alarm>, refreshWidgets: Boolean = true) {
-        alarms.forEach { cancel(it.id); if (it.isActive && !it.isRecurrenceExpired()) schedule(it) }
+        alarms.forEach { alarm ->
+            // A snooze armed before a reboot is gone from AlarmManager (the OS drops
+            // every alarm on shutdown) but its deadline is still in snoozePrefs — read
+            // it *before* cancelQuiet() clears it, and re-arm it below if it hasn't
+            // already passed. Without this, rebooting during a snooze silently dropped
+            // that wake-up entirely: the regular schedule re-armed for the alarm's next
+            // ordinary occurrence (often the next morning), and the snooze the user was
+            // actually relying on in a few minutes never rang.
+            val pendingSnooze = snoozePrefs.getLong(alarm.id.toString(), -1L)
+                .takeIf { it > System.currentTimeMillis() }
+            cancelQuiet(alarm.id)
+            if (alarm.isActive && !alarm.isRecurrenceExpired()) schedule(alarm)
+            if (pendingSnooze != null && alarm.isActive) scheduleAt(alarm, pendingSnooze)
+        }
         appLogger.log("Scheduler", "תוזמנו מחדש ${alarms.size} שעמורים")
         if (refreshWidgets) widgetRefresher.refresh()
+    }
+
+    /**
+     * The next fire time that comes from a schedule the user actually declared — a
+     * weekday mask, a specific-dates list, or a specific datetime — as opposed to
+     * [nextFireTime]'s plain "same time tomorrow" fallback, which exists so a
+     * brand-new alarm with nothing configured but a time still rings once.
+     *
+     * Null therefore means "this alarm has no occurrence left after the one that just
+     * fired", which is what [com.smartring.app.service.AlarmFiringService] uses to
+     * decide between re-arming the alarm and switching it off. Re-arming
+     * unconditionally (what it used to do) silently turned every one-time alarm into
+     * a daily one, because that same fallback answered "tomorrow" forever.
+     */
+    fun nextRecurringFireTime(alarm: Alarm, now: Long = System.currentTimeMillis()): Long? {
+        if (alarm.specificDateTime != null) return alarm.specificDateTime.takeIf { it > now }
+        alarm.specificDates
+            .map { localDateTimeFor(it.date, alarm.hour, alarm.minute) }
+            .filter { it > now }
+            .minOrNull()?.let { return it }
+        // isRecurring (mask + a real frequency), not just a non-zero mask: picking
+        // weekdays but setting the frequency to "ללא" means "fire on the next one of
+        // those days, once", which the rest of the app already treats as non-recurring.
+        if (alarm.isRecurring) return nextFireTime(alarm, now)
+        return null
     }
 
     /** The real AlarmManager trigger armed by a snooze (see [snoozePrefs]), if any is

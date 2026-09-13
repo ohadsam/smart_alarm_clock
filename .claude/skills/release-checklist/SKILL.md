@@ -154,12 +154,19 @@ say so explicitly.
 
 ## 6. Build verification (compile + tests, via CI — there's no other way here)
 
-There is no local Android SDK (and no local JDK+Gradle either) in this environment, so neither
-`./gradlew test` nor `assembleDebug`/`assembleRelease` can be run directly — the GitHub Actions
-build is the only thing that actually compiles and tests this code end to end. It now runs the
-`app/src/test/` suite (`testDebugUnitTest`, see HANDOFF.md §13) as its own step *before* either
-APK is assembled, so a test failure fails the build before wasting time packaging an APK from
-code that doesn't work. After pushing (step 7), watch the triggered "Build SmartRing APK" run to
+There is no local Android SDK in this environment (see the note at the top about why a local
+Gradle run can't even configure), so the GitHub Actions build is the only thing that actually
+compiles and tests this code end to end. Two things must be green, and they run as two
+*separate jobs* in parallel:
+
+- **`build`** — runs the `app/src/test/` JVM suite (`testDebugUnitTest`, see HANDOFF.md §13) as
+  its own step *before* either APK is assembled, so a test failure fails fast instead of
+  spending build time packaging an APK from code that doesn't work.
+- **`instrumented`** — runs `connectedDebugAndroidTest` on a real API 30 emulator
+  (`reactivecircus/android-emulator-runner`), covering the `app/src/androidTest/` suite added in
+  v1.5.0. Slower (~10-15 min including boot) and the only place framework-level behaviour is
+  actually verified. A red emulator job is a real failure, not flakiness, unless the log shows
+  the emulator itself never booted. After pushing (step 7), watch the triggered "Build SmartRing APK" run to
 completion:
 
 ```
@@ -445,6 +452,75 @@ If the user asks for a PR-based workflow going forward, follow that instead and 
   can accidentally match the "nothing changed" case and hide a bug that only
   shows up against real data.
 
+- **Instrumented tests exist as of v1.5.0 (`app/src/androidTest/`) and run on a real
+  emulator in their own CI job** — use them for anything where the *framework's* real
+  behaviour is the thing in question, and keep using JVM/Robolectric for logic. The
+  division that batch settled on: date arithmetic, ViewModels and SQL → JVM (fast,
+  every push); "does the real AlarmManager/NotificationManager/SQLite actually accept
+  and report this back" and "does the app boot through the real Hilt graph" → emulator.
+  Concretely, the switch to `setAlarmClock()` is only provable on a device
+  (`AlarmManager.getNextAlarmClock()` returns nothing for a `setExactAndAllowWhileIdle`
+  alarm), and a silenced NotificationChannel can only be verified by asking the real
+  NotificationManager for the channel back. Watch two things when adding to that suite:
+  an emulator has battery optimization on and permissions ungranted, so any test that
+  launches the UI must tolerate `ReliabilityGate`'s prompt (the existing one dismisses
+  it in `@Before`); and never pin an alarm to a fixed time of day — compute it relative
+  to `now` (see `dailyAlarmTwelveHoursOut()`) or the assertions start depending on what
+  time CI happened to start.
+- **`setExactAndAllowWhileIdle()` is the wrong API for a user-facing alarm and is no
+  longer used here** — it survives Doze but is rate-limited to roughly one delivery per
+  app per 9 minutes while idle, which is enough to make a 1-minute snooze land late.
+  `AlarmScheduler.armExact()` uses `setAlarmClock()` and is the single place any alarm is
+  armed; route anything new through it rather than calling AlarmManager directly, so the
+  exact-alarm-permission fallback and the logging stay in one place. Related: on API
+  31/32 `SCHEDULE_EXACT_ALARM` is user-revocable and every exact call throws
+  `SecurityException` once it is — an unguarded call crashes whatever was scheduling
+  (saving an alarm, the boot reschedule, a snooze), so never add one without the
+  `canScheduleExactAlarms()` check.
+- **`nextFireTime()` answers "same time tomorrow" for an alarm with no declared
+  schedule, forever.** That fallback is needed to arm a brand-new alarm, but it means
+  "is this alarm finished?" cannot be asked of it — using it that way is what silently
+  turned every one-time alarm into a daily one for four releases.
+  `AlarmScheduler.nextRecurringFireTime()` is the question to ask instead (null = nothing
+  left after the ring that just happened), and `AlarmFiringService` switches the alarm
+  off when it's null. Any new "should this stay armed?" logic belongs there, not in
+  `nextFireTime()`.
+- **A counter derived from history needs to be anchored to something that actually ends
+  the thing being counted.** `snoozeCountSinceLastFire` counted snoozes "since the last
+  FIRED row" — but a snooze re-fire writes its own FIRED row, so it reset to zero on
+  every snooze and `snoozeMaxCount` was never once enforced in four releases. It now
+  counts since the last *terminal* action (STOPPED/MISSED). When a query's anchor row is
+  written by the same flow it is supposed to bound, it isn't an anchor. The matching UI
+  trap came with it: the ring screen's "snoozes remaining" label started from zero on
+  every re-fire, so it disagreed with the (correct) cap check in `snooze()` and pressing
+  the button silently stopped the alarm instead — seed on-screen counters from the same
+  source the action checks.
+- **Two things firing at once is a real case for a service that can be started
+  repeatedly.** `AlarmFiringService.onStartCommand` used to stack a second set of jobs
+  on the first: the previous `MediaPlayer` was still looping but no longer reachable
+  through `player`, so nothing released it and it played until the process died, while
+  the *previous* alarm's auto-stop timer cut the new ring short. Any new per-ring state
+  in that service needs tearing down at the top of `onStartCommand` (it calls
+  `stopAll()`), and anything holding a native resource across a suspension point needs a
+  `finally` — cancellation otherwise skips the release entirely.
+- **A foreground service does not keep the CPU awake.** With the screen off — the normal
+  state for an alarm — `delay()`-based timing inside the service (the ring sequence, the
+  ring-duration auto-stop) drifts by however long the device dozes. The service holds a
+  bounded `PARTIAL_WAKE_LOCK` for the duration of a ring and sets
+  `MediaPlayer.setWakeMode`; don't add a new timed background step there without
+  checking it's covered by that.
+- **Anything that reschedules work after the OS has thrown alarms away must also cover
+  the clock moving.** Alarms are absolute timestamps derived from local time, so
+  TIME_SET/TIMEZONE_CHANGED invalidate every one of them exactly like a reboot does —
+  `BootReceiver` handles all four actions. Note `Intent.ACTION_TIME_CHANGED`'s *value*
+  is `"android.intent.action.TIME_SET"`; the manifest filter must use the string, the
+  code the constant.
+- **`setExpedited()` on a `CoroutineWorker` throws on API < 31** unless the worker
+  implements `getForegroundInfo()` (WorkManager runs expedited work as a foreground
+  service there). `BootReceiver` only sets it on API 31+ for that reason — minSdk here
+  is 26, so an unconditional `setExpedited()` would break the boot reschedule on exactly
+  the older devices that need it most.
+
 ## Known limitations (don't re-report these as new findings unless you're the batch fixing them)
 
 - **Settings' English toggle doesn't change any visible UI text.** Every screen hardcodes Hebrew
@@ -468,6 +544,9 @@ If the user asks for a PR-based workflow going forward, follow that instead and 
 - The GitHub Actions run's "Run unit tests" step green, not just the two assemble steps —
   a batch that touches `AlarmScheduler`, a ViewModel, or the DAO should have new/updated
   tests in `app/src/test/` covering it, per HANDOFF.md §13.
+- The separate `instrumented` job (emulator) green too. A batch that changes how the app
+  talks to AlarmManager, NotificationManager, Room-on-device, or app startup should have
+  new/updated tests in `app/src/androidTest/` covering it.
 - `signingConfigs`/`signingConfig` in `app/build.gradle.kts` still point both build types at the
   committed `app/smartring.keystore` (unchanged unless this batch had a deliberate reason to
   touch it) — the whole point is that this *doesn't* need touching every release.

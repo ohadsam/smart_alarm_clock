@@ -313,7 +313,7 @@ fun AlarmEditScreen(
                     }
                     if (s.vibrationMode == VibrationMode.VIBRATION_THEN_SOUND) {
                         Spacer(Modifier.height(8.dp))
-                        LabeledSlider("רטט לפני צלצול", s.vibrationOnlySeconds, "שנ׳", 3f, 120f, 39, Red,
+                        LabeledSlider("רטט לפני צלצול", s.vibrationOnlySeconds, "שנ׳", 3f, 120f, 38, Red,
                             info = "כמה זמן לרטוט לפני שהצליל מתחיל להתנגן.",
                             formatter = ::formatDurationSeconds, onChange = vm::setVibrationOnlySeconds)
                     }
@@ -336,15 +336,15 @@ fun AlarmEditScreen(
                     }
                     if (s.crescendoEnabled) {
                         Spacer(Modifier.height(8.dp)); HorizontalDivider(); Spacer(Modifier.height(8.dp))
-                        LabeledSlider("עוצמה התחלתית", s.crescendoStartVolume, "%", 5f, 80f, 15, Green,
+                        LabeledSlider("עוצמה התחלתית", s.crescendoStartVolume, "%", 5f, 80f, 14, Green,
                             info = "עוצמת הקול בתחילת הצלצול, לפני שהיא מתחילה לעלות.",
                             onChange = vm::setCrescendoStartVolume)
                         Spacer(Modifier.height(6.dp))
-                        LabeledSlider("כל כמה שניות עולה", s.crescendoStepSeconds, "שנ׳", 5f, 60f, 11, Blue,
+                        LabeledSlider("כל כמה שניות עולה", s.crescendoStepSeconds, "שנ׳", 5f, 60f, 10, Blue,
                             info = "כל כמה שניות עוצמת הקול תעלה לשלב הבא.",
                             formatter = ::formatDurationSeconds, onChange = vm::setCrescendoStepSeconds)
                         Spacer(Modifier.height(6.dp))
-                        LabeledSlider("עלייה בכל צעד", s.crescendoStepPercent, "%", 5f, 30f, 5, Gold,
+                        LabeledSlider("עלייה בכל צעד", s.crescendoStepPercent, "%", 5f, 30f, 4, Gold,
                             info = "כמה אחוזים עוצמת הקול עולה בכל שלב.",
                             onChange = vm::setCrescendoStepPercent)
                     }
@@ -362,7 +362,7 @@ fun AlarmEditScreen(
                     }
                     if (s.snoozeEnabled) {
                         Spacer(Modifier.height(8.dp)); HorizontalDivider(); Spacer(Modifier.height(8.dp))
-                        LabeledSlider("משך נודניק", s.snoozeMinutes, "דק׳", 1f, 60f, 59, Gold,
+                        LabeledSlider("משך נודניק", s.snoozeMinutes, "דק׳", 1f, 60f, 58, Gold,
                             info = "כמה זמן השעמור יידחה כאשר לוחצים על נודניק.",
                             onChange = vm::setSnoozeMinutes)
                         Spacer(Modifier.height(8.dp)); HorizontalDivider(); Spacer(Modifier.height(8.dp))
@@ -540,18 +540,18 @@ private fun RingsSection(
                 Text(ringtoneDisplayName(context, ring.ringtoneUri), maxLines = 1)
             }
             Spacer(Modifier.height(8.dp))
-            LabeledSlider("משך", ring.durationSeconds, "שנ׳", 5f, 300f, 59, Blue,
+            LabeledSlider("משך", ring.durationSeconds, "שנ׳", 5f, 300f, 58, Blue,
                 info = "כמה זמן הסבב הזה מנגן לפני שעובר לסבב הבא.",
                 formatter = ::formatDurationSeconds) {
                 onUpdate(i, ring.copy(durationSeconds = it))
             }
             Spacer(Modifier.height(6.dp))
-            LabeledSlider("עוצמה", ring.volumePercent, "%", 10f, 100f, 18, Green,
+            LabeledSlider("עוצמה", ring.volumePercent, "%", 10f, 100f, 17, Green,
                 info = "עוצמת הקול של הסבב הזה, כאחוז מהעוצמה המקסימלית.") {
                 onUpdate(i, ring.copy(volumePercent = it))
             }
             Spacer(Modifier.height(6.dp))
-            LabeledSlider("השהיה אחרי סבב זה", ring.delayAfterSeconds, "שנ׳", 0f, 600f, 60, Gold,
+            LabeledSlider("השהיה אחרי סבב זה", ring.delayAfterSeconds, "שנ׳", 0f, 600f, 59, Gold,
                 info = "כמה זמן להמתין בשקט אחרי שהסבב הזה מסתיים, לפני שהסבב הבא (או החזרה לסבב הראשון) מתחיל.",
                 formatter = ::formatDurationSeconds) {
                 onUpdate(i, ring.copy(delayAfterSeconds = it))
@@ -811,6 +811,9 @@ fun LabeledSlider(
         FieldLabel(label, info)
         EditableValueBadge(value, unit, color, min.toInt(), max.toInt(), onChange, displayText = formatter(value))
     }
-    Slider(value.toFloat(), { onChange(it.toInt()) }, valueRange = min..max, steps = steps,
+    // Math.round, not toInt(): toInt() truncates, so any step position that doesn't
+    // land exactly on an integer (most of them, for ranges that don't divide evenly by
+    // the step count) resolved one unit *below* the value the slider was showing.
+    Slider(value.toFloat(), { onChange(Math.round(it)) }, valueRange = min..max, steps = steps,
         colors = SliderDefaults.colors(thumbColor = color, activeTrackColor = color))
 }

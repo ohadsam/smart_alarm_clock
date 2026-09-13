@@ -1,8 +1,10 @@
 package com.smartring.app.util
 import android.Manifest
 import android.app.AlarmManager
+import android.app.NotificationManager
 import android.content.Context
 import android.content.pm.PackageManager
+import android.media.AudioManager
 import android.os.Build
 import android.os.PowerManager
 import androidx.core.content.ContextCompat
@@ -32,4 +34,28 @@ object ReliabilityChecks {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
         else true
+
+    /**
+     * Whether the alarm's full-screen notification may actually take over the screen.
+     * Android 14 stopped granting USE_FULL_SCREEN_INTENT at install time to every app
+     * that merely declares it; without it an alarm going off on a locked phone shows a
+     * heads-up banner instead of the ring screen.
+     */
+    fun canUseFullScreenIntent(context: Context): Boolean =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
+            context.getSystemService(NotificationManager::class.java)?.canUseFullScreenIntent() ?: true
+        else true
+
+    /**
+     * Whether the device's *alarm* stream is audible at all. Each ring's volume
+     * percentage scales the player within that stream, so with the system alarm volume
+     * at zero every alarm is silent regardless of what the app is set to. Surfaced to
+     * the user rather than silently overridden: an alarm clock quietly rewriting the
+     * device's volume behind their back (and possibly leaving it changed if the
+     * process dies mid-ring) is worse than telling them.
+     */
+    fun isAlarmVolumeAudible(context: Context): Boolean {
+        val am = context.getSystemService(AudioManager::class.java) ?: return true
+        return am.getStreamVolume(AudioManager.STREAM_ALARM) > 0
+    }
 }

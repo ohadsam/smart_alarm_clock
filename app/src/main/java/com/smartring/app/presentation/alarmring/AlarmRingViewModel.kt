@@ -74,7 +74,13 @@ class AlarmRingViewModel @Inject constructor(
                 firedAtElapsedRealtime = repository.lastFiredAt(id)
                     ?.takeIf { now - it < STALE_FIRED_AT_THRESHOLD_MILLIS }
                     ?.let { firedAtWallClock -> SystemClock.elapsedRealtime() - (now - firedAtWallClock) }
-                _state.update { it.copy(alarm = alarm) }
+                // Seeded from history, like snooze()'s own cap check: this ViewModel is
+                // built from scratch every time the ring screen reopens for a snooze
+                // re-fire, so a counter starting at 0 made the button keep offering the
+                // full "(3 נותרו)" on every wake-up — and then silently just stop the
+                // alarm instead of snoozing once the real cap was reached.
+                val alreadySnoozed = runCatching { repository.snoozeCountSinceLastFire(id) }.getOrDefault(0)
+                _state.update { it.copy(alarm = alarm, snoozeCount = alreadySnoozed) }
                 return@launch
             }
             if (attempt < 4) delay(200)

@@ -100,11 +100,15 @@ private fun ReliabilitySection() {
     var notifGranted by remember { mutableStateOf(ReliabilityChecks.isNotificationsGranted(context)) }
     var exactGranted by remember { mutableStateOf(ReliabilityChecks.canScheduleExactAlarms(context)) }
     var batteryGranted by remember { mutableStateOf(ReliabilityChecks.isIgnoringBatteryOptimizations(context)) }
+    var fullScreenGranted by remember { mutableStateOf(ReliabilityChecks.canUseFullScreenIntent(context)) }
+    var volumeAudible by remember { mutableStateOf(ReliabilityChecks.isAlarmVolumeAudible(context)) }
 
     fun refresh() {
         notifGranted = ReliabilityChecks.isNotificationsGranted(context)
         exactGranted = ReliabilityChecks.canScheduleExactAlarms(context)
         batteryGranted = ReliabilityChecks.isIgnoringBatteryOptimizations(context)
+        fullScreenGranted = ReliabilityChecks.canUseFullScreenIntent(context)
+        volumeAudible = ReliabilityChecks.isAlarmVolumeAudible(context)
     }
 
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -154,6 +158,34 @@ private fun ReliabilitySection() {
                 data = Uri.parse("package:${context.packageName}")
             })
         },
+    )
+    // Android 14+ only: below that the permission is granted at install time and the
+    // check always passes, so the row would just be permanent noise.
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+        HorizontalDivider(Modifier.padding(horizontal = 16.dp))
+        ReliabilityRow(
+            icon = Icons.Rounded.Fullscreen,
+            title = "מסך מלא בזמן צלצול",
+            subtitle = "בלי זה השעמור יופיע כהתראה בלבד במקום לפתוח את מסך הצלצול על מסך נעול",
+            granted = fullScreenGranted,
+            actionLabel = "אפשר",
+            onAction = {
+                context.startActivity(Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT).apply {
+                    data = Uri.fromParts("package", context.packageName, null)
+                })
+            },
+        )
+    }
+    HorizontalDivider(Modifier.padding(horizontal = 16.dp))
+    ReliabilityRow(
+        icon = Icons.Rounded.VolumeUp,
+        title = "עוצמת שעמור במכשיר",
+        // Phrased as a condition, not a statement: this row keeps its subtitle when the
+        // check passes, and "the volume is 0" next to a green check mark reads as a bug.
+        subtitle = "אם עוצמת ערוץ השעמורים במכשיר היא 0, כל שעמור יהיה שקט — ללא קשר לעוצמה שהוגדרה באפליקציה",
+        granted = volumeAudible,
+        actionLabel = "פתח צליל",
+        onAction = { context.startActivity(Intent(Settings.ACTION_SOUND_SETTINGS)) },
     )
 }
 

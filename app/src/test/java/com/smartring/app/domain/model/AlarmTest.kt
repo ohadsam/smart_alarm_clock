@@ -4,6 +4,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.util.Calendar
 
 /** Pure-Kotlin logic on [Alarm] — no Android dependencies, runs as a plain JVM test. */
 class AlarmTest {
@@ -128,5 +129,51 @@ class AlarmTest {
         assertFalse(Alarm(repeatDaysBitmask = 0, repeatFrequency = RepeatFrequency.WEEKLY).isRecurring)
         assertFalse(Alarm(repeatDaysBitmask = 0b1, repeatFrequency = RepeatFrequency.NONE).isRecurring)
         assertTrue(Alarm(repeatDaysBitmask = 0b1, repeatFrequency = RepeatFrequency.WEEKLY).isRecurring)
+    }
+
+    // ── timeFormatted / scheduleSummary: what the alarm list and widgets show ──
+
+    @Test
+    fun `timeFormatted uses the hour and minute fields for an ordinary alarm`() {
+        assertEquals("07:05", Alarm(hour = 7, minute = 5).timeFormatted)
+    }
+
+    @Test
+    fun `timeFormatted follows the specific datetime, not the hour and minute fields`() {
+        // A specific-datetime alarm rings at that datetime, but hour/minute are what
+        // every display outside the edit screen reads — so an unsynced pair (the
+        // untouched 07:00 default here) showed a time the alarm never rings at.
+        val ninePmThirty = Calendar.getInstance().apply {
+            set(2025, Calendar.MARCH, 12, 21, 30, 0); set(Calendar.MILLISECOND, 0)
+        }.timeInMillis
+        assertEquals("21:30", Alarm(hour = 7, minute = 0, specificDateTime = ninePmThirty).timeFormatted)
+    }
+
+    @Test
+    fun `scheduleSummary describes a one-time alarm`() {
+        assertEquals("חד־פעמי", Alarm(repeatDaysBitmask = 0).scheduleSummary())
+    }
+
+    @Test
+    fun `scheduleSummary describes every-day and partial weekday selections`() {
+        assertEquals("כל יום", Alarm(repeatDaysBitmask = 0b1111111).scheduleSummary())
+        assertEquals("ימי חול", Alarm(repeatDaysBitmask = 0b0011111).scheduleSummary())
+        assertEquals("סוף שבוע", Alarm(repeatDaysBitmask = 0b1100000).scheduleSummary())
+        // bit0 = Sunday, bit2 = Tuesday
+        assertEquals("א׳, ג׳", Alarm(repeatDaysBitmask = 0b0000101).scheduleSummary())
+    }
+
+    @Test
+    fun `scheduleSummary spells out a non-weekly cadence`() {
+        assertEquals("כל יום · כל שבועיים",
+            Alarm(repeatDaysBitmask = 0b1111111, repeatFrequency = RepeatFrequency.BIWEEKLY).scheduleSummary())
+        assertEquals("כל יום · פעם בחודש",
+            Alarm(repeatDaysBitmask = 0b1111111, repeatFrequency = RepeatFrequency.MONTHLY).scheduleSummary())
+    }
+
+    @Test
+    fun `scheduleSummary counts extra specific dates when no weekday is picked`() {
+        val alarm = Alarm(repeatDaysBitmask = 0, specificDates = listOf(AlarmDate(date = 1L), AlarmDate(date = 2L)))
+        assertEquals("2 תאריכים", alarm.scheduleSummary())
     }
 }

@@ -5,6 +5,7 @@ import androidx.work.*
 import com.smartring.app.data.repository.AlarmRepository
 import com.smartring.app.service.LogCleanupWorker
 import com.smartring.app.service.WidgetRefreshWorker
+import com.smartring.app.util.AlarmNotifications
 import com.smartring.app.util.AppLogger
 import com.smartring.app.util.WidgetRefresher
 import dagger.hilt.android.HiltAndroidApp
@@ -30,6 +31,12 @@ class SmartRingApp : Application(), Configuration.Provider {
 
     override fun onCreate() {
         super.onCreate()
+        // Created up front, in every process that hosts this Application (the alarm
+        // receiver's included), so nothing can ever post to a channel that doesn't
+        // exist yet — a notification to a missing channel is dropped silently on
+        // API 26+, which would take the receiver's "couldn't start the service"
+        // fallback notification down with it on a fresh install.
+        AlarmNotifications.ensureChannel(this)
         // Runs daily (not every 3 days) so a log written right after one cleanup pass
         // is trimmed within ~1 day of crossing the 3-day retention line, not ~3 more.
         WorkManager.getInstance(this).enqueueUniquePeriodicWork(

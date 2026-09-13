@@ -9,6 +9,7 @@ import com.smartring.app.R
 import com.smartring.app.data.repository.AlarmRepository
 import com.smartring.app.domain.model.*
 import com.smartring.app.receiver.AlarmReceiver
+import com.smartring.app.util.AlarmNotifications
 import com.smartring.app.util.AlarmScheduler
 import com.smartring.app.util.AppLogger
 import com.smartring.app.util.WidgetRefresher
@@ -26,9 +27,11 @@ class AlarmFiringService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var player: MediaPlayer? = null
     private var vibrator: Vibrator? = null
+    private var wakeLock: PowerManager.WakeLock? = null
     private var crescendoJob: Job? = null
     private var autoStopJob: Job? = null
     private var ringSequenceJob: Job? = null
+    private var fireJob: Job? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -44,8 +47,25 @@ class AlarmFiringService : Service() {
         // Start foreground immediately (within 5-second ANR window)
         startForeground(NOTIF_ID, buildPlaceholderNotification())
 
+        // The CPU is not guaranteed to stay awake just because a foreground service is
+        // running: with the screen off (the normal case for an alarm) the device can go
+        // back to sleep between the delivery of the alarm broadcast and everything this
+        // service schedules afterwards, which delays the ring sequence's delay()s and
+        // the auto-stop timer by however long it stays asleep. Held for the service's
+        // whole lifetime and released in onDestroy().
+        acquireWakeLock()
+
+        // A second fire arriving while one is already ringing (two alarms set to the
+        // same minute, or a snooze re-fire racing the previous ring's teardown) used to
+        // start a second, parallel set of jobs on top of the first: the previous
+        // MediaPlayer was still looping but no longer reachable through `player`, so
+        // nothing ever released it and it kept playing until the process died, while
+        // the *previous* alarm's autoStopJob went on to stopSelf() partway through the
+        // new alarm. Tear the previous ring down first so only one is ever active.
+        stopAll()
+
         val scheduledFor = System.currentTimeMillis()
-        scope.launch {
+        fireJob = scope.launch {
             val alarm = repository.getAlarm(id) ?: run { stopSelf(); return@launch }
             // Log FIRED before posting the notification, not after: the notification's
             // full-screen intent can launch the ring screen (AlarmRingViewModel reads
@@ -74,23 +94,61 @@ class AlarmFiringService : Service() {
             // A snooze re-fire is a continuation of the same occurrence, not a new
             // one: bumping occurrencesFired/rescheduling here too would advance a
             // COUNT-limited recurrence once per snooze instead of once per real day.
-            if (!isSnooze) repository.incrementOccurrences(id)
+            //
+            // Done *before* fireAlarm() rather than after it: fireAlarm() suspends for
+            // vibrationOnlySeconds in VIBRATION_THEN_SOUND mode, and anything after it
+            // is lost if the service is torn down first (the user pressing Stop during
+            // those seconds, or the process being killed mid-ring) — which silently
+            // left a recurring alarm with no next occurrence armed at all. Nothing
+            // below needs the ring to have started.
+            if (!isSnooze) {
+                repository.incrementOccurrences(id)
+                val advanced = alarm.copy(occurrencesFired = alarm.occurrencesFired + 1)
+                // Only re-arm an alarm that genuinely has another occurrence coming.
+                // Re-arming unconditionally (the previous behaviour) turned every
+                // one-time alarm into a daily one, since nextFireTime()'s fallback for
+                // an alarm with no declared schedule answers "same time tomorrow"
+                // forever — the opposite of the one-time default a new alarm is
+                // documented (and shown in the UI) to have.
+                if (!advanced.isRecurrenceExpired() && scheduler.nextRecurringFireTime(advanced) != null) {
+                    scheduler.schedule(advanced)
+                } else {
+                    repository.setEnabled(id, false)
+                    appLogger.log("AlarmFiringService",
+                        "\"${alarm.name}\" (#$id) היה חד-פעמי — כובה אוטומטית לאחר הצלצול")
+                }
+                // Both branches above write to the alarms table, which SmartRingApp's
+                // observeAlarms() collector reacts to on its own, so neither needs to
+                // refresh widgets here. A snooze re-fire doesn't touch that table at
+                // all, so it still needs its own explicit refresh — otherwise the
+                // widget keeps showing the now-elapsed snooze countdown until the next
+                // periodic WidgetRefreshWorker run, up to 15 minutes later.
+            } else widgetRefresher.refresh()
             fireAlarm(alarm)
-            // A regular fire reschedules; incrementOccurrences() above already writes
-            // to the alarms table, which SmartRingApp's observeAlarms() collector
-            // reacts to on its own, so schedule() doesn't need to refresh widgets
-            // itself here. A snooze re-fire doesn't touch the alarms table at all, so
-            // it still needs its own explicit refresh — otherwise the widget keeps
-            // showing the now-elapsed snooze countdown until the next periodic
-            // WidgetRefreshWorker run, up to 15 minutes later.
-            if (!isSnooze) scheduler.schedule(alarm.copy(occurrencesFired = alarm.occurrencesFired + 1))
-            else widgetRefresher.refresh()
         }
         return START_NOT_STICKY
     }
 
-    override fun onDestroy() { stopAll(); scope.cancel(); super.onDestroy() }
+    override fun onDestroy() { stopAll(); releaseWakeLock(); scope.cancel(); super.onDestroy() }
     override fun onBind(intent: Intent?) = null
+
+    private fun acquireWakeLock() {
+        if (wakeLock?.isHeld == true) return
+        wakeLock = getSystemService(PowerManager::class.java)
+            ?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, WAKE_LOCK_TAG)
+            ?.apply {
+                setReferenceCounted(false)
+                // Bounded so a wake lock can never outlive its usefulness and drain the
+                // battery if some path manages to skip onDestroy(); the longest a ring
+                // can legitimately last is the ring-duration slider's 600s maximum.
+                runCatching { acquire(WAKE_LOCK_TIMEOUT_MILLIS) }
+            }
+    }
+
+    private fun releaseWakeLock() {
+        runCatching { wakeLock?.takeIf { it.isHeld }?.release() }
+        wakeLock = null
+    }
 
     private suspend fun fireAlarm(alarm: Alarm) {
         autoStopJob = scope.launch {
@@ -152,48 +210,65 @@ class AlarmFiringService : Service() {
 
         val mp = MediaPlayer()
         player = mp
-        val prepared = CompletableDeferred<Unit>()
-        mp.apply {
-            setAudioAttributes(
-                AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_ALARM)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                    .build()
-            )
-            setDataSource(applicationContext, uri)
-            isLooping = true
-            setVolume(start, start)
-            // Use prepareAsync() to avoid blocking the main thread
-            setOnPreparedListener { it.start(); prepared.complete(Unit) }
-            setOnErrorListener { _, _, _ ->
-                // Fallback: fall through silently for this ring rather than getting
-                // stuck waiting on `prepared` forever; the next ring (or vibration)
-                // still runs.
-                prepared.complete(Unit)
-                true
+        // try/finally around everything after the player exists: without it, a
+        // cancellation landing on either suspension point below (the user pressing
+        // Stop, the auto-stop timer, a second alarm taking over) skipped the
+        // stop/release entirely and left a looping, USAGE_ALARM MediaPlayer playing
+        // with no owner — audible until the process itself died, and unstoppable from
+        // inside the app.
+        try {
+            val prepared = CompletableDeferred<Unit>()
+            mp.apply {
+                setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_ALARM)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .build()
+                )
+                // Keeps the CPU running while this plays with the screen off, on top of
+                // the service's own wake lock — MediaPlayer releases it by itself when
+                // playback stops, so it also covers the window between rings.
+                setWakeMode(applicationContext, PowerManager.PARTIAL_WAKE_LOCK)
+                setDataSource(applicationContext, uri)
+                isLooping = true
+                setVolume(start, start)
+                // Use prepareAsync() to avoid blocking the main thread
+                setOnPreparedListener { it.start(); prepared.complete(Unit) }
+                setOnErrorListener { _, _, _ ->
+                    // Fallback: fall through silently for this ring rather than getting
+                    // stuck waiting on `prepared` forever; the next ring (or vibration)
+                    // still runs.
+                    prepared.complete(Unit)
+                    true
+                }
+                prepareAsync()
             }
-            prepareAsync()
+            prepared.await()
+
+            if (alarm.crescendoEnabled) startCrescendo(alarm, mp, base, elapsedAtRingStart)
+
+            delay(ring.durationSeconds * 1_000L)
+        } finally {
+            crescendoJob?.cancel()
+            runCatching { mp.stop() }
+            runCatching { mp.release() }
+            if (player === mp) player = null
         }
-        prepared.await()
-
-        if (alarm.crescendoEnabled) startCrescendo(alarm, base, elapsedAtRingStart)
-
-        delay(ring.durationSeconds * 1_000L)
-
-        crescendoJob?.cancel()
-        runCatching { mp.stop() }
-        runCatching { mp.release() }
-        if (player === mp) player = null
     }
 
-    private fun startCrescendo(alarm: Alarm, targetVol: Float, elapsedAtStart: Int) {
+    /** Ramps [mp] specifically, rather than whatever `player` happens to point at when
+     *  each tick runs — the ring sequence can move on to the next round (replacing
+     *  `player`, releasing this one) between ticks, and setVolume() on a released
+     *  MediaPlayer throws. */
+    private fun startCrescendo(alarm: Alarm, mp: MediaPlayer, targetVol: Float, elapsedAtStart: Int) {
         var e = elapsedAtStart
         crescendoJob = scope.launch {
             while (isActive) {
                 delay(1_000L)
                 e++
                 val v = alarm.volumeAtSecond(Math.round(targetVol * 100), e) / 100f
-                player?.setVolume(v, v)
+                if (player !== mp) break
+                runCatching { mp.setVolume(v, v) }.onFailure { return@launch }
                 if (v >= targetVol) break
             }
         }
@@ -207,6 +282,10 @@ class AlarmFiringService : Service() {
     }
 
     private fun stopAll() {
+        // fireJob included: a previous fire can still be suspended somewhere before it
+        // even reaches fireAlarm() (the DB read, the FIRED log write), and letting it
+        // resume afterwards would start a second ring sequence behind the new one.
+        fireJob?.cancel()
         autoStopJob?.cancel(); crescendoJob?.cancel(); ringSequenceJob?.cancel()
         // Separate runCatching per call: if stop() throws (e.g. player still in the
         // Initialized/Prepared-but-not-started state), release() must still run or
@@ -217,12 +296,7 @@ class AlarmFiringService : Service() {
         vibrator?.cancel()
     }
 
-    private fun createChannel() {
-        getSystemService(NotificationManager::class.java).createNotificationChannel(
-            NotificationChannel(CH, "SmartRing Alarms", NotificationManager.IMPORTANCE_HIGH).apply {
-                lockscreenVisibility = Notification.VISIBILITY_PUBLIC
-            })
-    }
+    private fun createChannel() = AlarmNotifications.ensureChannel(this)
 
     private fun buildPlaceholderNotification(): Notification =
         NotificationCompat.Builder(this, CH)
@@ -264,5 +338,15 @@ class AlarmFiringService : Service() {
         return builder.build()
     }
 
-    companion object { const val CH = "smartring_alarm_channel"; const val NOTIF_ID = 1001 }
+    companion object {
+        /** Defined (and silenced — this service plays the alarm's own sound and
+         *  vibration itself) in [AlarmNotifications]; shared with the receiver's
+         *  fallback notification. */
+        const val CH = AlarmNotifications.CHANNEL_ID
+        const val NOTIF_ID = 1001
+        private const val WAKE_LOCK_TAG = "SmartRing:alarm"
+        // The ring-duration slider's maximum (600s) plus room for the pre-ring
+        // vibration window and teardown.
+        private const val WAKE_LOCK_TIMEOUT_MILLIS = 15 * 60 * 1000L
+    }
 }

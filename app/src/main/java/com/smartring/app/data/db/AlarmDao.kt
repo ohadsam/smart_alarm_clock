@@ -70,10 +70,23 @@ interface AlarmDao {
     @Query("SELECT MAX(firedAt) FROM alarm_logs WHERE alarmId = :id AND action = 'FIRED'")
     suspend fun lastFiredAt(id: Long): Long?
 
+    /**
+     * Snoozes belonging to the occurrence that is ringing right now, i.e. those logged
+     * since this alarm last *finished* — STOPPED (dismissed) or MISSED (ran out its
+     * ring duration, or hit the snooze cap).
+     *
+     * Deliberately not "since the last FIRED row": every snooze re-fire logs its own
+     * FIRED row (the ring screen anchors its auto-dismiss timer to that timestamp), so
+     * counting from there reset to 0 on every single snooze and snoozeMaxCount was
+     * never actually reached — the alarm could be snoozed forever regardless of the
+     * configured maximum. A terminal action is the only thing that really ends an
+     * occurrence's snooze chain.
+     */
     @Query("""
         SELECT COUNT(*) FROM alarm_logs
         WHERE alarmId = :id AND action = 'SNOOZED'
-        AND firedAt > (SELECT COALESCE(MAX(firedAt), 0) FROM alarm_logs WHERE alarmId = :id AND action = 'FIRED')
+        AND firedAt > (SELECT COALESCE(MAX(firedAt), 0) FROM alarm_logs
+                       WHERE alarmId = :id AND action IN ('STOPPED', 'MISSED'))
     """)
     suspend fun snoozeCountSinceLastFire(id: Long): Int
 

@@ -109,14 +109,46 @@ class AlarmDaoTest {
     }
 
     @Test
-    fun `snoozeCountSinceLastFire only counts SNOOZED entries after the latest FIRED`() = runTest {
+    fun `snoozeCountSinceLastFire keeps counting across the snooze's own re-fires`() = runTest {
+        // The regression this guards: every snooze re-fire logs its own FIRED row (the
+        // ring screen anchors its auto-dismiss timer to that timestamp). Counting
+        // snoozes "since the last FIRED" therefore reset to 0 on every single snooze,
+        // so snoozeMaxCount was never actually reached and an alarm could be snoozed
+        // forever regardless of the configured maximum.
         val id = dao.saveAlarmTransaction(AlarmEntity(name = "A"), emptyList(), emptyList())
-        dao.insertLog(AlarmLogEntity(alarmId = id, alarmName = "A", firedAt = 1_000L, action = "SNOOZED")) // before any FIRED -> ignored
-        dao.insertLog(AlarmLogEntity(alarmId = id, alarmName = "A", firedAt = 2_000L, action = "FIRED"))
-        dao.insertLog(AlarmLogEntity(alarmId = id, alarmName = "A", firedAt = 3_000L, action = "SNOOZED"))
+        dao.insertLog(AlarmLogEntity(alarmId = id, alarmName = "A", firedAt = 1_000L, action = "FIRED"))
+        dao.insertLog(AlarmLogEntity(alarmId = id, alarmName = "A", firedAt = 2_000L, action = "SNOOZED"))
+        dao.insertLog(AlarmLogEntity(alarmId = id, alarmName = "A", firedAt = 3_000L, action = "FIRED")) // the snooze re-firing
         dao.insertLog(AlarmLogEntity(alarmId = id, alarmName = "A", firedAt = 4_000L, action = "SNOOZED"))
+        dao.insertLog(AlarmLogEntity(alarmId = id, alarmName = "A", firedAt = 5_000L, action = "FIRED"))
 
-        assertEquals(2, dao.snoozeCountSinceLastFire(id))
+        assertEquals("both snoozes belong to the same occurrence", 2, dao.snoozeCountSinceLastFire(id))
+    }
+
+    @Test
+    fun `snoozeCountSinceLastFire resets once the occurrence actually ends`() = runTest {
+        val id = dao.saveAlarmTransaction(AlarmEntity(name = "A"), emptyList(), emptyList())
+        // Yesterday's occurrence: snoozed twice, then dismissed.
+        dao.insertLog(AlarmLogEntity(alarmId = id, alarmName = "A", firedAt = 1_000L, action = "FIRED"))
+        dao.insertLog(AlarmLogEntity(alarmId = id, alarmName = "A", firedAt = 2_000L, action = "SNOOZED"))
+        dao.insertLog(AlarmLogEntity(alarmId = id, alarmName = "A", firedAt = 3_000L, action = "SNOOZED"))
+        dao.insertLog(AlarmLogEntity(alarmId = id, alarmName = "A", firedAt = 4_000L, action = "STOPPED"))
+        assertEquals(0, dao.snoozeCountSinceLastFire(id))
+
+        // Today's occurrence starts with a fresh budget.
+        dao.insertLog(AlarmLogEntity(alarmId = id, alarmName = "A", firedAt = 5_000L, action = "FIRED"))
+        dao.insertLog(AlarmLogEntity(alarmId = id, alarmName = "A", firedAt = 6_000L, action = "SNOOZED"))
+        assertEquals(1, dao.snoozeCountSinceLastFire(id))
+    }
+
+    @Test
+    fun `snoozeCountSinceLastFire also resets after an alarm runs out its ring duration`() = runTest {
+        val id = dao.saveAlarmTransaction(AlarmEntity(name = "A"), emptyList(), emptyList())
+        dao.insertLog(AlarmLogEntity(alarmId = id, alarmName = "A", firedAt = 1_000L, action = "FIRED"))
+        dao.insertLog(AlarmLogEntity(alarmId = id, alarmName = "A", firedAt = 2_000L, action = "SNOOZED"))
+        dao.insertLog(AlarmLogEntity(alarmId = id, alarmName = "A", firedAt = 3_000L, action = "MISSED"))
+
+        assertEquals(0, dao.snoozeCountSinceLastFire(id))
     }
 
     @Test

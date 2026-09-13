@@ -14,8 +14,11 @@ android {
         applicationId   = "com.smartring.app"
         minSdk          = 26
         targetSdk       = 34
-        versionCode     = 7
-        versionName     = "1.4.2"
+        versionCode     = 8
+        versionName     = "1.5.0"
+        // Hilt's own runner, so @HiltAndroidTest instrumented tests get a real DI
+        // graph on the device instead of the app's @HiltAndroidApp Application.
+        testInstrumentationRunner = "com.smartring.app.HiltTestRunner"
     }
 
     // A single committed keystore, reused for both build types, so every APK built
@@ -125,4 +128,24 @@ dependencies {
     testImplementation(libs.mockk)
     testImplementation(libs.coroutines.test)
     testImplementation(libs.androidx.test.core)
+
+    // ── Instrumented tests: run on a real emulator in CI (see the "instrumented
+    // tests" job in .github/workflows/build-apk.yml). These cover what Robolectric
+    // deliberately can't: the real AlarmManager actually accepting an alarm-clock
+    // registration, real SQLite, the real notification channel, and the real Compose
+    // UI starting up through the real Hilt graph.
+    androidTestImplementation(libs.junit)
+    androidTestImplementation(libs.androidx.test.junit)
+    androidTestImplementation(libs.androidx.test.runner)
+    androidTestImplementation(libs.androidx.test.rules)
+    androidTestImplementation(libs.androidx.test.core)
+    androidTestImplementation(libs.espresso.core)
+    androidTestImplementation(libs.coroutines.test)
+    androidTestImplementation(platform(libs.compose.bom))
+    androidTestImplementation(libs.compose.ui.test.junit4)
+    androidTestImplementation(libs.hilt.android.testing)
+    kspAndroidTest(libs.hilt.compiler)
+    // Supplies the empty Activity that createAndroidComposeRule/createComposeRule
+    // hosts the composable under test in; without it they fail to launch at runtime.
+    debugImplementation(libs.compose.ui.test.manifest)
 }

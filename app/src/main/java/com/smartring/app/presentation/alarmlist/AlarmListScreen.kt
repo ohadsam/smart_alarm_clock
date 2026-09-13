@@ -164,6 +164,11 @@ private fun AlarmCardItem(alarm: Alarm, onToggle:(Boolean)->Unit, onEdit:()->Uni
                 Text(alarm.timeFormatted,style=MaterialTheme.typography.headlineMedium,fontWeight=FontWeight.ExtraBold,
                     color=if(alarm.isActive)MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant)
                 Text(alarm.name,style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant,maxLines=1)
+                // Which days this actually rings on. Without it two alarms at the same
+                // time — one every weekday, one a single next-Tuesday reminder — looked
+                // completely identical in the list.
+                Text(alarm.scheduleSummary(), style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold, maxLines = 1)
                 alarm.reminderText?.takeIf{it.isNotBlank()}?.let{
                     Spacer(Modifier.height(2.dp))
                     Text("📝 $it",style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.tertiary,maxLines=1)
@@ -222,7 +227,11 @@ private fun ReliabilityGate(onOpenSettings: () -> Unit) {
         missingNotif = !ReliabilityChecks.isNotificationsGranted(context)
         val missingExact = !ReliabilityChecks.canScheduleExactAlarms(context)
         val missingBattery = !ReliabilityChecks.isIgnoringBatteryOptimizations(context)
-        if (missingNotif || missingExact || missingBattery) showSettingsPrompt = true
+        // Android 14+ can withhold the full-screen-intent permission, which silently
+        // downgrades every alarm from "takes over the locked screen" to "heads-up
+        // banner" — worth the same nudge as the other three.
+        val missingFullScreen = !ReliabilityChecks.canUseFullScreenIntent(context)
+        if (missingNotif || missingExact || missingBattery || missingFullScreen) showSettingsPrompt = true
     }
 
     val notifLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {

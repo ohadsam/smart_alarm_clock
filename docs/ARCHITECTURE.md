@@ -56,11 +56,38 @@ Glance Widgets (SmartRingWidget.kt) → AlarmScheduler.effectiveNextFireTime() �
   ה-full-screen intent יכול לפתוח את מסך הצלצול כמעט מיידית, וסדר הפוך השאיר חלון שבו
   מסך הצלצול קורא timestamp ישן מצלצול קודם.
 
-## בדיקות אוטומטיות (v1.4.1)
+## תזמון ואמינות ברקע (v1.5.0)
+- `AlarmScheduler.armExact()` היא הנקודה היחידה שבה מזוינת אזעקה: מעדיפה
+  `AlarmManager.setAlarmClock()` (פטור מ-Doze לחלוטין, ומציג את סמל השעמור הבא במכשיר)
+  ונופלת ל-`setAndAllowWhileIdle()` כשאין הרשאת שעמורים מדויקים — במקום לזרוק
+  `SecurityException` ולהפיל את מי שקרא לה. `setExactAndAllowWhileIdle()` לא בשימוש
+  יותר: הוא מוגבל ל-~פעם ב-9 דקות במצב idle, מה שמאחר נודניק קצר.
+- `AlarmScheduler.nextRecurringFireTime()` = "האם נשאר משהו אחרי הצלצול הזה?" — נפרדת
+  מ-`nextFireTime()`, שה-fallback שלה ("אותה שעה מחר") נחוץ כדי לזיין שעמור חדש אבל
+  היה מה שהפך כל שעמור חד-פעמי ליומי. `AlarmFiringService` מחליט לפיה בין תזמון מחדש
+  לכיבוי השעמור.
+- `AlarmFiringService`: אוחז `PARTIAL_WAKE_LOCK` לכל אורך הצלצול (+ `MediaPlayer.setWakeMode`)
+  כי foreground service לבדו לא מבטיח CPU ער; קורא ל-`stopAll()` בתחילת כל
+  `onStartCommand` כדי שצלצול שני לא ירוץ במקביל ויותיר `MediaPlayer` דלוף שממשיך לנגן;
+  משחרר את ה-player ב-`finally`; ומתזמן את המופע הבא *לפני* תחילת הצלצול.
+- `BootReceiver` מאזין גם ל-TIME_SET/TIMEZONE_CHANGED (אזעקות הן timestamp מוחלט שנגזר
+  מהשעון המקומי), ו-`RescheduleWorker` מחזיר `retry()` במקום להיכשל.
+- ערוץ ההתראות (`AlarmNotifications`) מושתק (`setSound(null,null)`, `enableVibration(false)`)
+  כי השירות מנגן את הצליל והרטט בעצמו; מזהה חדש (`_v2`) כי הגדרות ערוץ אינן ניתנות
+  לשינוי אחרי יצירה.
+- `snoozeCountSinceLastFire` נמדד מהפעם האחרונה שהמופע *הסתיים* (STOPPED/MISSED) ולא
+  מ-FIRED האחרון — כל צלצול-מחדש של נודניק כותב FIRED בעצמו, ולכן המגבלה מעולם לא נאכפה.
+
+## בדיקות אוטומטיות (v1.4.1, הורחב ב-v1.5.0)
 `app/src/test/` — JUnit4 + Robolectric (סביבת אנדרואיד על ה-JVM, לא אמולטור אמיתי) + mockk,
 רץ ב-CI לפני assembleDebug/Release. `AlarmScheduler.nextFireTime()` מקבל `now: Long`
 אופציונלי (ברירת מחדל: השעון האמיתי) בדיוק כדי לאפשר בדיקה דטרמיניסטית של חישובי
-WEEKLY/BIWEEKLY/MONTHLY. פירוט מלא ב-HANDOFF.md סעיף 13.
+WEEKLY/BIWEEKLY/MONTHLY.
+
+`app/src/androidTest/` (v1.5.0) — בדיקות instrumented על אמולטור API 30 ב-job נפרד
+ב-CI, למה ש-Robolectric לא יכול לאמת: ש-`AlarmManager` האמיתי אכן רושם alarm-clock,
+SQLite אמיתי, הגדרות ערוץ ההתראות האמיתי, ועליית האפליקציה דרך גרף Hilt אמיתי.
+פירוט מלא ב-HANDOFF.md סעיף 13.
 
 ## Security
 allowBackup=false · exported=false · FLAG_IMMUTABLE · ProGuard · prepareAsync() · startForeground() ראשון

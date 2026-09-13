@@ -15,7 +15,7 @@
 | UI | Jetpack Compose + Material 3 |
 | ארכיטקטורה | MVVM + Repository + Hilt DI |
 | DB | Room **v3** (migrations 1→2→3 קיימות) |
-| תזמון | AlarmManager (exact, wakeup) |
+| תזמון | AlarmManager `setAlarmClock()` (פטור מ-Doze, מציג את סמל השעמור הבא; v1.5.0) |
 | ווידג'ט | Glance API (4 גדלים) |
 | CI/CD | GitHub Actions – מייצר APK |
 | minSdk | 26 (Android 8.0) |
@@ -29,12 +29,12 @@
 |---|-------|--------------|
 | 1 | שם לשעמור | `Alarm.name`, `AlarmEditScreen` |
 | 2 | תאריך + שעה ספציפיים | `Alarm.specificDateTime`, `DateTimePickerInline` |
-| 3 | חזרתיות עשירה (WEEKLY/BIWEEKLY/MONTHLY) | `Alarm.repeatDaysBitmask`, `AlarmScheduler.nextFireTime()` — ברירת מחדל לשעמור חדש (0 ימים) מוצגת כחד-פעמי, לא כ"שבועי" נבחר (v1.4.0) |
+| 3 | חזרתיות עשירה (WEEKLY/BIWEEKLY/MONTHLY) | `Alarm.repeatDaysBitmask`, `AlarmScheduler.nextFireTime()` — ברירת מחדל לשעמור חדש (0 ימים) מוצגת כחד-פעמי, לא כ"שבועי" נבחר (v1.4.0), ובאמת מכובה אוטומטית אחרי צלצול אחד (`nextRecurringFireTime()`, v1.5.0) |
 | 4 | סיום חזרתיות (FOREVER/UNTIL/COUNT) | `RecurrenceEnd`, `RecurrenceEndSection` |
 | 5 | צלצולים חוזרים (עד 10) | `AlarmRing`, `AlarmDao`, `AlarmFiringService.startAudioSequence()` (מנגן ברצף, v1.1.0), `RingsSection` ב-`AlarmEditScreen` (UI לעריכה, v1.1.0) |
 | 6 | רטט 4 מצבים | `VibrationMode`, `AlarmFiringService.fireAlarm()` |
 | 7 | Crescendo | `Alarm.volumeAtSecond()`, `startCrescendo()` |
-| 8 | נודניק (עם reschedule מהמסך) | `AlarmRingViewModel.snooze()` + `AlarmScheduler.scheduleAt()` |
+| 8 | נודניק (עם reschedule מהמסך) | `AlarmRingViewModel.snooze()` + `AlarmScheduler.scheduleAt()`; מגבלת `snoozeMaxCount` נאכפת מההיסטוריה (`snoozeCountSinceLastFire`, תוקן v1.5.0) ושורד ריבוט (`rescheduleAll`, v1.5.0) |
 | 9 | טקסט תזכורת | `Alarm.reminderText` |
 | 10 | ניהול גלובלי | GlobalControls BottomSheet, freeze/unfreeze toggle חכם |
 | 11 | מסך היסטוריה | `HistoryScreen`, `HistoryViewModel`, `AlarmLog` |
@@ -50,7 +50,7 @@
 | 21 | הזנת מספר מדויקת + תצוגת זמן קריאה | `EditableValueBadge`, `formatDurationSeconds()` (v1.2.0) |
 | 22 | כפתורי מידע (ⓘ) על שדות הגדרה | `FieldLabel` ב-`AlarmEditScreen` (v1.2.0) |
 | 23 | מסך לוגים טכני (צפייה/העתקה/הורדה/ניקוי) | `LogsScreen`, `AppLogger`, `LogCleanupWorker` (v1.2.0) |
-| 24 | בדיקות אמינות ברקע (התראות/שעמורים מדויקים/סוללה) | `ReliabilityChecks`, `SettingsScreen` (v1.2.0); `ReliabilityGate` ב-`AlarmListScreen` מציע זאת פרואקטיבית בכניסה לאפליקציה (v1.4.0) |
+| 24 | בדיקות אמינות ברקע (התראות/שעמורים מדויקים/סוללה/מסך מלא/עוצמת שעמור) | `ReliabilityChecks`, `SettingsScreen` (v1.2.0; מסך מלא + עוצמה נוספו v1.5.0); `ReliabilityGate` ב-`AlarmListScreen` מציע זאת פרואקטיבית בכניסה לאפליקציה (v1.4.0) |
 | 25 | חלון "מה חדש" אחרי עדכון גרסה | `WhatsNewDialog`, `WhatsNewViewModel` (v1.2.0) |
 | 26 | עדכון APK במקום (ללא הסרה+התקנה) | `signingConfigs` משותף ב-`build.gradle.kts` (v1.2.0) |
 | 27 | שעון חי בווידג'טים (ללא העיר את האפליקציה) | `widget_clock.xml` (TextClock) + `AndroidRemoteViews`, `SmartRingWidget.kt` (v1.3.0) |
@@ -58,6 +58,10 @@
 | 29 | מסגרת דקה סביב הווידג'טים | `WidgetFrame()` ב-`SmartRingWidget.kt` (v1.3.0) |
 | 30 | מסך צלצול נסגר אוטומטית בתום משך הצלצול | `AlarmRingViewModel.tick()` (עוגן ל-`SystemClock.elapsedRealtime()` + timestamp אמיתי, לא ספירה מקומית) (v1.4.0) |
 | 31 | גלילה אוטומטית לשדה שם בשגיאת ולידציה | `AlarmEditViewModel.scrollToNameRequests`, `AlarmEditScreen` (v1.4.0) |
+| 32 | סיכום ימי חזרה בכרטיס ברשימה ("כל יום"/"ימי חול"/"חד־פעמי"/תאריך) | `Alarm.scheduleSummary()`, `AlarmListScreen` (v1.5.0) |
+| 33 | תזמון מחדש אחרי שינוי אזור זמן/שעת מכשיר | `BootReceiver` (TIME_SET/TIMEZONE_CHANGED) → `RescheduleWorker` (v1.5.0) |
+| 34 | wake lock + `setWakeMode` בזמן צלצול (מסך כבוי) | `AlarmFiringService.acquireWakeLock()`, `playOneRing()` (v1.5.0) |
+| 35 | התראה חלופית אם המערכת חוסמת הפעלת שירות הצלצול | `AlarmNotifications.postFallback()`, `AlarmReceiver` (v1.5.0) |
 
 ---
 
@@ -288,10 +292,11 @@ if (!alarm.acceptsInteraction) return
 
 | בעיה | מקום | חומרה |
 |------|-------|--------|
-| BIWEEKLY week parity בחצות שנה | `AlarmScheduler.nextFireTime()` | נמוכה |
+| BIWEEKLY parity נגזרת מתאריך מוחלט (`daysSinceEpoch/7`) ולא מהשבוע שבו המשתמש יצר את השעמור — קצב "כל שבועיים" יציב, אבל הצלצול הראשון עלול להיות שבוע אחרי הצפוי | `AlarmScheduler.nextFireTime()` | נמוכה |
 | Long.toInt() ל-id גדול | `AlarmScheduler.buildIntent()` | נמוכה |
-| MediaPlayer error ללא fallback | `AlarmFiringService.startAudio()` | בינונית |
 | מסך הצלצול (רשת ביטחון) עלול "לנצח" את טיימר השירות האמיתי אם `AlarmFiringService.onStartCommand()` איטי מ-GRACE_SECONDS (2 שניות) — במקרה כזה רשומת "MISSED" לא תיכתב | `AlarmRingViewModel.tick()`, `AlarmFiringService.fireAlarm()` | נמוכה (v1.4.0) |
+| `recurrenceUntilDate` של שעמורים שנשמרו לפני v1.5.0 עדיין מכיל חצות UTC (מסתיים יום מוקדם). לא מנורמל בטעינה בכוונה — זה היה מסמן את המסך כ"עם שינויים שלא נשמרו" עוד לפני שהמשתמש נגע במשהו. נפתר ברגע שהמשתמש בוחר תאריך סיום מחדש | `AlarmEditViewModel.setRecurrenceUntilDate()` | נמוכה (v1.5.0) |
+| עוצמת הצלצול היא אחוז מתוך עוצמת ערוץ השעמורים של המכשיר; אם היא 0 הצלצול שקט. בכוונה לא נכתבת מחדש על ידי האפליקציה (אפליקציה שמשנה את עוצמת המכשיר בלי לשאול, ועלולה להשאיר אותה משונה אם התהליך נהרג באמצע צלצול, גרועה יותר) — רק מוצגת כבדיקת אמינות | `ReliabilityChecks.isAlarmVolumeAudible()` | נמוכה (v1.5.0) |
 
 ---
 
@@ -309,7 +314,7 @@ if (!alarm.acceptsInteraction) return
 4. data/db/AlarmDao.kt
 5. presentation/navigation/NavGraph.kt
 
-מצב נוכחי: v1.4.2, DB version 3, כל הפיצ'רים ב-HANDOFF.md סעיף 2 מיושמים (כולל מצב שבת,
+מצב נוכחי: v1.5.0, DB version 3, כל הפיצ'רים ב-HANDOFF.md סעיף 2 מיושמים (כולל מצב שבת,
 נודניק ניתן-לכיבוי, לוגים, בדיקות אמינות (כולל בקשה פרואקטיבית בכניסה), What's New, עדכון APK
 במקום, שעון חי + אינדיקציית זמן לשעמור הבא + מסגרת בווידג'טים, וסגירה אוטומטית אמינה של מסך
 הצלצול). מ-v1.4.1 יש גם סוויטת בדיקות אוטומטיות שרצה ב-CI (ראה סעיף 13), וה-CI ירוק.
@@ -348,11 +353,15 @@ datastore    = "1.1.1"
 junit        = "4.13.2"
 robolectric  = "4.16.1"
 mockk        = "1.14.2"   # לא לעדכן ל->1.14.4+ בלי לבדוק — ראה סעיף 13
+androidx-test-junit  = "1.2.1"   # androidTest (אמולטור)
+androidx-test-runner = "1.6.2"
+androidx-test-rules  = "1.6.1"
+espresso             = "3.6.1"
 ```
 
 ---
 
-## 13. בדיקות אוטומטיות (v1.4.1)
+## 13. בדיקות אוטומטיות (v1.4.1, הורחב ב-v1.5.0)
 
 `app/src/test/` — בדיקות JVM (חלקן Robolectric: סביבת אנדרואיד קלה על ה-JVM, **לא**
 אמולטור אמיתי — הרבה יותר מהיר ואמין ב-CI). רץ אוטומטית ב-CI לפני assembleDebug/Release
@@ -366,6 +375,24 @@ mockk        = "1.14.2"   # לא לעדכן ל->1.14.4+ בלי לבדוק — ר
 | `presentation/alarmring/AlarmRingViewModelTest.kt` | טיימר סגירה אוטומטית (`ShadowSystemClock.advanceBy()`), מצב שבת, נודניק שמתדרדר לעצירה |
 | `presentation/alarmedit/AlarmEditViewModelTest.kt` | ולידציית שם ריק + אירוע הגלילה, ו-`isDirty` לא נשאר "מלוכלך" לצמיתות אחרי ולידציה כושלת, וגם לא נהיה "מלוכלך" באופן שגוי מיד אחרי טעינה (v1.4.2) |
 | `data/db/AlarmDaoTest.kt` | `saveAlarmTransaction()` (insert מול update, לא REPLACE), `lastFiredAt`, `snoozeCountSinceLastFire`, SET_NULL FK במחיקה |
+
+### בדיקות על אמולטור אמיתי (`app/src/androidTest/`, v1.5.0)
+
+רצות ב-CI ב-job נפרד (`instrumented` ב-`build-apk.yml`) על אמולטור API 30 דרך
+`reactivecircus/android-emulator-runner`, במקביל לבניית ה-APK. מכסות בדיוק את מה
+ש-Robolectric *לא* יכול: shadow ישמח לרשום קריאה שהמערכת האמיתית הייתה דוחה או מטפלת
+בה אחרת.
+
+| קובץ | מכסה |
+|------|------|
+| `util/AlarmSchedulerInstrumentedTest.kt` | ש-`schedule()` באמת נרשם ב-`AlarmManager.getNextAlarmClock()` — ההוכחה היחידה שהמעבר ל-`setAlarmClock()` (v1.5.0) אכן קרה; ביטול, נודניק, ושחזור נודניק אחרי ריבוט |
+| `data/AlarmRepositoryInstrumentedTest.kt` | Room מול SQLite אמיתי: round-trip של שעמור + סבבים, שעריכה לא מוחקת היסטוריה, וסמנטיקת `snoozeCountSinceLastFire` |
+| `util/AlarmNotificationsInstrumentedTest.kt` | שערוץ ההתראות קיים, IMPORTANCE_HIGH, **ובלי** צליל/רטט משל עצמו (הבאג של צליל כפול), ושהערוץ הישן נמחק |
+| `presentation/AlarmListScreenInstrumentedTest.kt` | smoke end-to-end: MainActivity האמיתי עולה ומצייר דרך גרף Hilt אמיתי + Room אמיתי |
+
+`HiltTestRunner` (`app/src/androidTest/.../HiltTestRunner.kt`) מחליף את `SmartRingApp`
+ב-`HiltTestApplication`, כך שתופעות הלוואי של `onCreate()` בפרודקשן (WorkManager
+periodic, ה-collector של `observeAlarms()`) לא רצות מתחת לכל בדיקה.
 
 **החלטות עיצוב:**
 - `app/src/test/resources/robolectric.properties` מגדיר `application=android.app.Application`
@@ -382,10 +409,15 @@ mockk        = "1.14.2"   # לא לעדכן ל->1.14.4+ בלי לבדוק — ר
   שה-KSP מייצא (`app/schemas/*.json`, לפי `room.schemaLocation` ב-`build.gradle.kts`),
   שעדיין לא נוצרו/הוצמדו כי אין build מקומי בסביבה הזו. ברגע שיש build ראשון עם schema
   מיוצא, שווה להוסיף `androidx.room:room-testing` + `MigrationTestHelper`.
-- אין בדיקות אמולטור/Compose UI אמיתיות (androidTest) — הוחלט במכוון לטובת
-  Robolectric בגלל המהירות/היציבות ב-CI; שווה לשקול מחדש אם צריך לבדוק רינדור Compose
-  אמיתי, לא רק לוגיקה. (זה בדיוק מה שהיה מזהה את באג חיתוך עיגול "ש" ב-v1.4.2 מוקדם
-  יותר — הלוגיקה הייתה תקינה, הבעיה הייתה רק בפריסה/רוחב.)
+- **v1.5.0: יש עכשיו בדיקות אמולטור** (ראה מעלה) לצד Robolectric — לא במקומו. החלוקה:
+  לוגיקה, חישובי תאריכים, ViewModels ושאילתות → JVM (מהיר, רץ על כל push); אינטגרציה
+  עם ה-framework האמיתי (AlarmManager, NotificationManager, SQLite, עליית האפליקציה) →
+  אמולטור. בדיקת *רינדור* Compose ברזולוציות שונות עדיין לא מכוסה (באג חיתוך עיגול
+  "ש" ב-v1.4.2 היה מסוג כזה) — screenshot testing יהיה הצעד הבא אם זה יחזור.
+- אין בדיקה אוטומטית של `AlarmFiringService` עצמו מקצה לקצה (צלצול אמיתי + MediaPlayer
+  על אמולטור ללא אודיו) — במקום זה מכוסים החלקים הניתנים לבדיקה דטרמיניסטית: הגדרות
+  ערוץ ההתראות, `nextRecurringFireTime()` (הכלל שלפיו השירות מחליט לכבות שעמור
+  חד-פעמי), וחישובי ה-crescendo/משך ב-JVM.
 - **מ-mockk 1.14.4 ואילך `kotlin-stdlib` שנמשך טרנזיטיבית עולה מ-`2.0.0` ל-`2.1.20`+**
   (וב-1.14.11 ל-`2.2.21`) — לא תואם ל-`kotlin`/`ksp` הנעוצים ב-`2.0.0` בפרויקט הזה,
   ונכשל דווקא ב-`kspDebugUnitTestKotlin` בלי שגיאה ברורה על "mockk" בשם. `mockk-jvm`

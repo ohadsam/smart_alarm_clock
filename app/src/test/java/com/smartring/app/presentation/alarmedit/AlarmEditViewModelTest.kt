@@ -19,9 +19,12 @@ import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import java.util.Calendar
+import java.util.TimeZone
 
 /**
  * Plain JUnit (no Robolectric/Android environment needed): AlarmEditViewModel's
@@ -154,6 +157,64 @@ class AlarmEditViewModelTest {
         vm.setName("Changed")
 
         assertTrue(vm.isDirty)
+    }
+
+    // ── Specific datetime / until-date normalisation ─────────────────
+
+    @Test
+    fun `setSpecificDateTime syncs hour and minute to the picked time`() = runTest(testDispatcher) {
+        // hour/minute are what the alarm list, the widgets and the notification all
+        // read; leaving them at the 07:00 default while the alarm actually rings at
+        // 21:30 showed the wrong time everywhere outside this screen.
+        val at = Calendar.getInstance().apply {
+            set(2030, Calendar.MARCH, 12, 21, 30, 0); set(Calendar.MILLISECOND, 0)
+        }.timeInMillis
+
+        vm.setSpecificDateTime(at)
+
+        assertEquals(21, vm.state.value.hour)
+        assertEquals(30, vm.state.value.minute)
+        assertEquals(at, vm.state.value.specificDateTime)
+    }
+
+    @Test
+    fun `clearing the specific datetime leaves the time fields alone`() = runTest(testDispatcher) {
+        vm.setTime(6, 15)
+        vm.setSpecificDateTime(null)
+        assertEquals(6, vm.state.value.hour)
+        assertEquals(15, vm.state.value.minute)
+        assertNull(vm.state.value.specificDateTime)
+    }
+
+    @Test
+    fun `setRecurrenceUntilDate stores the end of the chosen local day`() = runTest(testDispatcher) {
+        // Compose's DatePicker reports UTC midnight. isRecurrenceExpired() treats the
+        // stored value as a hard cutoff, so storing it raw expired the alarm in the
+        // small hours of the chosen day (UTC midnight is 02:00/03:00 local here) and
+        // skipped that morning's ring — one day earlier than the user asked for.
+        val utcMidnight = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply {
+            set(2030, Calendar.MARCH, 20, 0, 0, 0); set(Calendar.MILLISECOND, 0)
+        }.timeInMillis
+
+        vm.setRecurrenceUntilDate(utcMidnight)
+
+        val stored = Calendar.getInstance().apply { timeInMillis = vm.state.value.recurrenceUntilDate!! }
+        assertEquals(2030, stored.get(Calendar.YEAR))
+        assertEquals(Calendar.MARCH, stored.get(Calendar.MONTH))
+        assertEquals(20, stored.get(Calendar.DAY_OF_MONTH))
+        assertEquals(23, stored.get(Calendar.HOUR_OF_DAY))
+        assertEquals(59, stored.get(Calendar.MINUTE))
+        // The whole point: an alarm ringing that same morning is still in range.
+        val thatMorning = Calendar.getInstance().apply {
+            set(2030, Calendar.MARCH, 20, 7, 0, 0); set(Calendar.MILLISECOND, 0)
+        }.timeInMillis
+        assertTrue(vm.state.value.recurrenceUntilDate!! > thatMorning)
+    }
+
+    @Test
+    fun `setRecurrenceUntilDate accepts null for clearing the end date`() = runTest(testDispatcher) {
+        vm.setRecurrenceUntilDate(null)
+        assertNull(vm.state.value.recurrenceUntilDate)
     }
 
     @Test

@@ -220,6 +220,83 @@ class AlarmSchedulerTest {
         assertNull(shadow.peekNextScheduledAlarm())
     }
 
+    // ── nextRecurringFireTime: "is there anything after the ring that just ended?" ──
+    // This is what AlarmFiringService consults to decide between re-arming an alarm
+    // and switching it off. It used to re-arm unconditionally, and since nextFireTime()
+    // answers "same time tomorrow" for an alarm with no declared schedule, every
+    // one-time alarm quietly became a daily one.
+
+    @Test
+    fun `nextRecurringFireTime is null for a plain one-time alarm`() {
+        val alarm = Alarm(hour = 8, minute = 0, repeatDaysBitmask = 0)
+        val now = utcMillis(2025, 3, 10, 8, 1) // just after it rang
+        assertNull(scheduler.nextRecurringFireTime(alarm, now))
+        // ...even though the plain next-fire calculation still has an answer, which is
+        // exactly the trap this exists to avoid.
+        assertNotNull(scheduler.nextFireTime(alarm, now))
+    }
+
+    @Test
+    fun `nextRecurringFireTime is non-null for a weekly alarm`() {
+        val alarm = Alarm(hour = 8, minute = 0, repeatDaysBitmask = 0b1111111,
+            repeatFrequency = RepeatFrequency.WEEKLY)
+        assertNotNull(scheduler.nextRecurringFireTime(alarm, utcMillis(2025, 3, 10, 8, 1)))
+    }
+
+    @Test
+    fun `nextRecurringFireTime is null when weekdays are picked but the frequency is NONE`() {
+        val alarm = Alarm(hour = 8, minute = 0, repeatDaysBitmask = 0b1111111,
+            repeatFrequency = RepeatFrequency.NONE)
+        assertNull(scheduler.nextRecurringFireTime(alarm, utcMillis(2025, 3, 10, 8, 1)))
+    }
+
+    @Test
+    fun `nextRecurringFireTime follows the specific-dates list until it runs out`() {
+        val alarm = Alarm(
+            hour = 8, minute = 0, repeatDaysBitmask = 0,
+            specificDates = listOf(AlarmDate(date = utcMillis(2025, 3, 12))),
+        )
+        assertNotNull("a date still ahead keeps the alarm armed",
+            scheduler.nextRecurringFireTime(alarm, utcMillis(2025, 3, 10, 8, 1)))
+        assertNull("once every listed date has passed there is nothing left",
+            scheduler.nextRecurringFireTime(alarm, utcMillis(2025, 3, 13, 8, 1)))
+    }
+
+    @Test
+    fun `nextRecurringFireTime is null once a specific datetime has passed`() {
+        val alarm = Alarm(specificDateTime = utcMillis(2025, 3, 10, 8, 0))
+        assertNotNull(scheduler.nextRecurringFireTime(alarm, utcMillis(2025, 3, 10, 7, 0)))
+        assertNull(scheduler.nextRecurringFireTime(alarm, utcMillis(2025, 3, 10, 8, 1)))
+    }
+
+    // ── Boot reschedule keeps an in-flight snooze ────────────────────
+
+    @Test
+    fun `rescheduleAll re-arms a snooze that was still pending`() {
+        val alarm = Alarm(id = 99, hour = 8, minute = 0, repeatDaysBitmask = 0b1111111)
+        val snoozeAt = System.currentTimeMillis() + 5 * 60_000L
+        scheduler.scheduleAt(alarm, snoozeAt)
+
+        // Stands in for the reboot: AlarmManager itself is wiped, only the persisted
+        // deadline survives, and RescheduleWorker re-arms everything from the DB.
+        scheduler.rescheduleAll(listOf(alarm))
+
+        // Only the snooze deadline is asserted here: whether it also wins
+        // effectiveNextFireTime() depends on how far off this alarm's own 08:00
+        // occurrence happens to be when the test runs, and that comparison already has
+        // its own deterministic test above.
+        assertEquals("the pending snooze must survive a reboot reschedule",
+            snoozeAt, scheduler.pendingSnoozeUntil(alarm))
+    }
+
+    @Test
+    fun `rescheduleAll drops a snooze deadline that has already passed`() {
+        val alarm = Alarm(id = 98, hour = 8, minute = 0, repeatDaysBitmask = 0b1111111)
+        scheduler.scheduleAt(alarm, System.currentTimeMillis() - 60_000L)
+        scheduler.rescheduleAll(listOf(alarm))
+        assertNull(scheduler.pendingSnoozeUntil(alarm))
+    }
+
     private fun dayOfWeek(millis: Long): Int =
         Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply { timeInMillis = millis }.get(Calendar.DAY_OF_WEEK)
 }

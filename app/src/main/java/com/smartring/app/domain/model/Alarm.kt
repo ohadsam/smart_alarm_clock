@@ -114,8 +114,20 @@ data class Alarm(
     val crescendoStepSeconds: Int       = 15,
     val crescendoStepPercent: Int       = 10,
 ) {
+    /**
+     * The time this alarm actually rings. For a specific-datetime alarm that's the
+     * datetime's own time of day, not the hour/minute fields: only the scheduler reads
+     * specificDateTime, so everything else (list, widgets, notification) would
+     * otherwise show a one-off alarm at a time it never rings — most visibly the
+     * untouched 07:00 default on an alarm set for, say, 09:30 next Tuesday. Alarms
+     * saved before this was fixed keep stale fields in the DB, so deriving it here
+     * rather than only syncing on save covers those too.
+     */
     val timeFormatted: String
-        get() = "%02d:%02d".format(hour, minute)
+        get() = specificDateTime?.let {
+            val cal = Calendar.getInstance().apply { timeInMillis = it }
+            "%02d:%02d".format(cal.get(Calendar.HOUR_OF_DAY), cal.get(Calendar.MINUTE))
+        } ?: "%02d:%02d".format(hour, minute)
 
     val isActive: Boolean
         get() = isEnabled && !isFrozen
@@ -153,6 +165,38 @@ data class Alarm(
         return (floor + steps * crescendoStepPercent).coerceIn(floor, base)
     }
 
+    /**
+     * One-line Hebrew summary of when this alarm rings — "כל יום", "א׳, ג׳, ה׳",
+     * "חד־פעמי", a specific date, etc. The alarm list used to show nothing but the
+     * time and name, so two alarms at 07:00 (one every weekday, one a single
+     * next-Tuesday reminder) were indistinguishable without opening each one.
+     */
+    fun scheduleSummary(): String {
+        specificDateTime?.let {
+            val cal = Calendar.getInstance().apply { timeInMillis = it }
+            return "%02d/%02d/%04d".format(
+                cal.get(Calendar.DAY_OF_MONTH), cal.get(Calendar.MONTH) + 1, cal.get(Calendar.YEAR))
+        }
+        if (repeatDaysBitmask == 0) {
+            return if (specificDates.isEmpty()) "חד־פעמי" else "${specificDates.size} תאריכים"
+        }
+        val dayNames = listOf("א׳", "ב׳", "ג׳", "ד׳", "ה׳", "ו׳", "ש׳")
+        val picked = dayNames.filterIndexed { i, _ -> (repeatDaysBitmask shr i) and 1 == 1 }
+        val days = when {
+            picked.size == 7                                      -> "כל יום"
+            repeatDaysBitmask == WEEKDAYS_SUN_TO_THU_MASK         -> "ימי חול"
+            repeatDaysBitmask == WEEKEND_FRI_SAT_MASK             -> "סוף שבוע"
+            else                                                  -> picked.joinToString(", ")
+        }
+        val cadence = when (repeatFrequency) {
+            RepeatFrequency.WEEKLY   -> ""
+            RepeatFrequency.BIWEEKLY -> " · כל שבועיים"
+            RepeatFrequency.MONTHLY  -> " · פעם בחודש"
+            RepeatFrequency.NONE     -> " · פעם אחת"
+        }
+        return days + cadence
+    }
+
     fun soundActiveAt(e: Int) = when (vibrationMode) {
         VibrationMode.VIBRATION_ONLY        -> false
         VibrationMode.VIBRATION_THEN_SOUND  -> e >= vibrationOnlySeconds
@@ -160,4 +204,10 @@ data class Alarm(
     }
 
     fun vibrateActiveAt(e: Int) = vibrationMode != VibrationMode.SOUND_ONLY
+
+    private companion object {
+        // bit0=Sun … bit6=Sat, matching repeatDaysBitmask.
+        const val WEEKDAYS_SUN_TO_THU_MASK = 0b0011111
+        const val WEEKEND_FRI_SAT_MASK     = 0b1100000
+    }
 }

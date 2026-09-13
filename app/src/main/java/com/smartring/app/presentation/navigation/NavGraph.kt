@@ -72,7 +72,20 @@ fun SmartRingNavGraph(alarmTrigger: Pair<Long, Long> = 0L to -1L) {
             )
         }
         composable(Screen.Ring.route, listOf(navArgument("alarmId") { type = NavType.LongType })) {
-            AlarmRingScreen(alarmId = it.arguments?.getLong("alarmId") ?: 0L, onDismiss = { nav.popBackStack() })
+            AlarmRingScreen(
+                alarmId = it.arguments?.getLong("alarmId") ?: 0L,
+                // When the alarm woke the app from cold, the ring screen *is* the start
+                // destination and there is nothing behind it — popping it emptied the
+                // back stack and left the user staring at a blank window after pressing
+                // Stop. Fall through to the alarm list in that case instead.
+                onDismiss = {
+                    if (nav.previousBackStackEntry != null) nav.popBackStack()
+                    else nav.navigate(Screen.List.route) {
+                        popUpTo(Screen.Ring.route) { inclusive = true }
+                        launchSingleTop = true
+                    }
+                },
+            )
         }
         composable(Screen.History.route) {
             HistoryScreen(

@@ -1,5 +1,91 @@
 # SmartRing – Changelog
 
+## v1.5.0 (2026-09-13)
+
+A full-project review pass over the core alarm flows — scheduling, ringing, snoozing,
+vibration, background survival — plus the project's first instrumented (real emulator)
+test suite. Every item below was found by reading the code against what the app claims
+to do, not by waiting for it to fail on a device.
+
+**Reliability of the thing actually ringing:**
+- **Alarms are now armed with `AlarmManager.setAlarmClock()` instead of
+  `setExactAndAllowWhileIdle()`.** Both survive Doze, but only the former is *exempt*
+  from it — `setExactAndAllowWhileIdle` is rate-limited to roughly one delivery per app
+  per 9 minutes while the device is idle, which is enough to make a short snooze (the
+  slider goes down to 1 minute) land late. It also registers the alarm as a real
+  user-facing alarm clock, which is what puts the next-alarm indicator in the status bar.
+- **A revoked exact-alarm permission no longer throws.** On API 31/32
+  `SCHEDULE_EXACT_ALARM` is user-revocable and every exact-alarm call throws
+  `SecurityException` once it is — which would crash whatever happened to be scheduling
+  at that moment (saving an alarm, the boot reschedule, a snooze). Now it degrades to an
+  inexact trigger and says so in the log, with the real fix surfaced in Settings.
+- **The firing service holds a partial wake lock** (and sets `MediaPlayer.setWakeMode`)
+  for the duration of a ring. A foreground service does not by itself keep the CPU
+  awake, so with the screen off the ring sequence's timing — including the
+  ring-duration auto-stop — could drift by however long the device dozed.
+- **Two alarms in the same minute no longer strand a ringtone.** The second fire started
+  a parallel set of jobs on top of the first: the previous `MediaPlayer` was still
+  looping but no longer reachable, so nothing ever released it and it kept playing until
+  the process died — unstoppable from inside the app — while the *previous* alarm's
+  auto-stop timer cut the new alarm short partway through. The service now tears the
+  previous ring down first, and every player is released in a `finally` so cancellation
+  can't skip it.
+- **The next occurrence is scheduled before the ring starts, not after.** In
+  "vibration → sound" mode the old order sat behind a `vibrationOnlySeconds` delay, so
+  stopping the alarm during those seconds (or the process being killed mid-ring) left a
+  recurring alarm with nothing armed at all.
+- **`AlarmReceiver` can no longer crash the process.** A "restricted" app can receive its
+  alarm broadcast and still be refused a foreground-service start; that now falls back
+  to a full-screen notification instead of throwing out of `onReceive`.
+- **A pending snooze survives a reboot.** Its deadline was persisted but the boot
+  reschedule only re-armed regular schedules, so rebooting mid-snooze silently dropped
+  that wake-up.
+- **Timezone and clock changes reschedule everything.** Alarms are armed as absolute
+  timestamps derived from local time, so after a timezone change a 07:00 alarm still
+  fired at 07:00 in the timezone it was set in.
+- **The boot reschedule is expedited** (API 31+) and retries instead of failing: until it
+  runs, every alarm is unarmed.
+
+**Core behaviour that didn't match what the app says it does:**
+- **"One-time" alarms actually repeated every day.** After firing, the service re-armed
+  unconditionally, and the next-fire calculation answers "same time tomorrow" forever
+  for an alarm with no declared schedule — so the documented one-time default (v1.4.0)
+  quietly behaved as a daily alarm. A non-recurring alarm now switches itself off after
+  it rings, and so does a COUNT/UNTIL-limited one that has reached its end.
+- **`snoozeMaxCount` was never enforced — snoozing was unlimited.** The count was taken
+  "since the last FIRED row", but every snooze re-fire writes its own FIRED row, so it
+  reset to zero on each snooze. It now counts since the occurrence actually *ended*
+  (dismissed or ran out its ring duration).
+- **The ring screen's "snoozes remaining" was always wrong**, starting from the maximum
+  on every re-fire, and pressing snooze at the real cap silently just stopped the alarm.
+  It's seeded from history now, so the label matches what the button will do.
+- **The notification channel played the system notification sound over the chosen
+  ringtone** and added an unconfigured buzz on top of the alarm's own vibration pattern.
+  Channel settings are immutable after creation, so this ships as a new (silent) channel
+  and deletes the old one.
+
+**UI/UX:**
+- Dismissing an alarm that had cold-launched the app left a **blank screen** — the ring
+  screen was the navigation start destination, and popping it emptied the back stack.
+- A **specific-date alarm showed the wrong time** in the list and widgets (they read
+  `hour`/`minute`, which weren't synced to the picked datetime), and **"repeat until
+  <date>" expired a day early** (the date picker's UTC midnight is 02:00/03:00 local).
+- The alarm list now shows **which days each alarm rings on** ("כל יום", "ימי חול",
+  "חד־פעמי", a date…) — two alarms at the same time were previously indistinguishable.
+- Sliders **rounded instead of truncating** (a stop that didn't land on a whole number
+  resolved one unit below what was displayed), and every slider's step count now divides
+  its range evenly.
+- Two new reliability checks in Settings: the **full-screen-intent permission**
+  (Android 14+ can withhold it, silently downgrading every alarm from "takes over the
+  locked screen" to a banner) and a **silent alarm stream** (with the device's alarm
+  volume at zero, no in-app volume setting can make a sound).
+
+**Tests:** first instrumented suite (`app/src/androidTest/`), run on a real API 30
+emulator in CI alongside the JVM suite — covering the real `AlarmManager` accepting an
+alarm-clock registration (the only way to prove the `setAlarmClock` switch took effect),
+real SQLite, the real notification channel's settings, and the app launching and
+rendering through the real Hilt graph. Plus JVM tests for every behaviour change above.
+
 ## v1.4.2 (2026-09-13)
 
 **Fixed:**

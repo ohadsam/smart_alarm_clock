@@ -98,3 +98,78 @@ jobs:
           path: app/build/outputs/apk/release/app-release.apk
           retention-days: 30
           if-no-files-found: error
+
+  # ── Instrumented tests on a real emulator ────────────────────────────
+  # Separate job so it runs in parallel with the APK build rather than delaying it,
+  # and so an emulator problem is immediately distinguishable from a build problem.
+  # Covers what the JVM/Robolectric suite deliberately can't: the real AlarmManager
+  # accepting an alarm-clock registration (which is what makes alarms Doze-exempt),
+  # real SQLite, the real NotificationManager's channel settings, and the whole app
+  # actually starting up and rendering through the real Hilt graph.
+  instrumented:
+    name: Instrumented tests (emulator)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+          cache: 'gradle'
+
+      - name: Generate Gradle Wrapper
+        run: |
+          set -e
+          GRADLE_VERSION="8.7"
+          for i in 1 2 3; do
+            wget -q "https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip" \
+                 -O /tmp/gradle.zip && break
+            echo "Attempt $i failed, retrying..."
+            sleep 5
+          done
+          unzip -q /tmp/gradle.zip -d /tmp/
+          /tmp/gradle-${GRADLE_VERSION}/bin/gradle wrapper \
+               --gradle-version ${GRADLE_VERSION} \
+               --distribution-type bin
+          chmod +x gradlew
+
+      # The emulator needs hardware acceleration to be usable; GitHub's ubuntu
+      # runners have KVM but not the group permissions to reach it by default.
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      # API 30: new enough for everything these tests touch, old enough to avoid
+      # Android 13's runtime notification-permission dialog and Android 14's
+      # full-screen-intent grant appearing mid-test. The app's own SDK-gated code
+      # paths for those are covered by the JVM suite instead.
+      - name: Run instrumented tests on emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 30
+          target: default
+          arch: x86_64
+          profile: pixel_2
+          ram-size: 4096M
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          script: ./gradlew connectedDebugAndroidTest --stacktrace --no-daemon
+        env:
+          GRADLE_OPTS: "-Dorg.gradle.daemon=false"
+
+      - name: Upload instrumented test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: instrumented-test-reports-${{ github.run_number }}
+          path: app/build/reports/androidTests/connected/
+          retention-days: 30
+          if-no-files-found: warn

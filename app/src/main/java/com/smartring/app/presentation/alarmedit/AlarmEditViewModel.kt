@@ -9,6 +9,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.util.Calendar
+import java.util.TimeZone
 import javax.inject.Inject
 
 data class AlarmEditUiState(
@@ -142,7 +143,25 @@ class AlarmEditViewModel @Inject constructor(
     // ── Setters ───────────────────────────────────────────────────
     fun setName(v: String)                       = _state.update { it.copy(name = v, nameError = false) }
     fun setTime(h: Int, m: Int)                   = _state.update { it.copy(hour = h, minute = m).also { updateNextFireHintLater() } }
-    fun setSpecificDateTime(dt: Long?)            = _state.update { it.copy(specificDateTime = dt) }
+    /**
+     * Keeps hour/minute in step with the chosen datetime. Everything that displays an
+     * alarm outside this screen — the list card, every widget size, the notification —
+     * reads `hour`/`minute`, while only the scheduler reads `specificDateTime`, so
+     * leaving them unsynced showed a one-off alarm at whatever time-of-day the fields
+     * happened to hold (07:00 for a brand-new alarm) while it actually rang at the
+     * picked time.
+     */
+    fun setSpecificDateTime(dt: Long?) = _state.update { s ->
+        if (dt == null) s.copy(specificDateTime = null)
+        else {
+            val cal = Calendar.getInstance().apply { timeInMillis = dt }
+            s.copy(
+                specificDateTime = dt,
+                hour   = cal.get(Calendar.HOUR_OF_DAY),
+                minute = cal.get(Calendar.MINUTE),
+            ).also { updateNextFireHintLater() }
+        }
+    }
     fun setReminderText(v: String)                = _state.update { it.copy(reminderText = v) }
     fun setSnoozeEnabled(v: Boolean)               = _state.update { it.copy(snoozeEnabled = v) }
     fun setSnoozeMinutes(v: Int)                  = _state.update { it.copy(snoozeMinutes = v) }
@@ -151,7 +170,17 @@ class AlarmEditViewModel @Inject constructor(
     fun setRingDuration(v: Int)                   = _state.update { it.copy(ringDurationSeconds = v) }
     fun setRepeatFrequency(v: RepeatFrequency)    = _state.update { it.copy(repeatFrequency = v).also { updateNextFireHintLater() } }
     fun setRecurrenceEndType(v: RecurrenceEndType)= _state.update { it.copy(recurrenceEndType = v) }
-    fun setRecurrenceUntilDate(v: Long?)          = _state.update { it.copy(recurrenceUntilDate = v) }
+    /**
+     * Stores the picked "repeat until" day as the *end* of that day in local time.
+     * Compose's DatePicker hands back UTC midnight, and isRecurrenceExpired() treats
+     * the stored value as a hard cutoff — so storing it raw made an alarm set to
+     * repeat "until the 20th" expire during the small hours of the 20th (UTC midnight
+     * is 02:00/03:00 local here) and skip that morning's ring entirely, one day
+     * earlier than the user asked for.
+     */
+    fun setRecurrenceUntilDate(v: Long?) = _state.update { s ->
+        s.copy(recurrenceUntilDate = v?.let { endOfLocalDay(it) })
+    }
     fun setRecurrenceCount(v: Int)                = _state.update { it.copy(recurrenceCount = v) }
     fun setVibrationMode(v: VibrationMode)        = _state.update { it.copy(vibrationMode = v) }
     fun setVibrationOnlySeconds(v: Int)           = _state.update { it.copy(vibrationOnlySeconds = v) }
@@ -197,6 +226,19 @@ class AlarmEditViewModel @Inject constructor(
     private fun updateNextFireHint() {
         val alarm = buildAlarm(_state.value)
         _state.update { it.copy(nextFireHint = nextFireHintFor(alarm)) }
+    }
+
+    /** 23:59:59.999 device-local on the day [utcMidnightMillis] (a Compose DatePicker
+     *  result, reported as UTC midnight) refers to. */
+    private fun endOfLocalDay(utcMidnightMillis: Long): Long {
+        val utc = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply { timeInMillis = utcMidnightMillis }
+        return Calendar.getInstance().apply {
+            set(Calendar.YEAR, utc.get(Calendar.YEAR))
+            set(Calendar.MONTH, utc.get(Calendar.MONTH))
+            set(Calendar.DAY_OF_MONTH, utc.get(Calendar.DAY_OF_MONTH))
+            set(Calendar.HOUR_OF_DAY, 23); set(Calendar.MINUTE, 59)
+            set(Calendar.SECOND, 59); set(Calendar.MILLISECOND, 999)
+        }.timeInMillis
     }
 
     private fun nextFireHintFor(alarm: Alarm): String? {
