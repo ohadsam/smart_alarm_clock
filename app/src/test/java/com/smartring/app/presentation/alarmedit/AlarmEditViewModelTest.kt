@@ -58,12 +58,23 @@ class AlarmEditViewModelTest {
         // SharedFlow until the dispatcher is pumped, so an emit() before that pump is
         // missed entirely (replay = 0, and the extra buffer doesn't back-fill a
         // not-yet-subscribed collector).
-        backgroundScope.launch { vm.scrollToNameRequests.collect { scrollRequested = true } }
+        println("DIAG before launch")
+        backgroundScope.launch {
+            println("DIAG collector coroutine starting")
+            vm.scrollToNameRequests.collect {
+                println("DIAG collector received value")
+                scrollRequested = true
+            }
+        }
+        println("DIAG after launch, before runCurrent")
         runCurrent()
+        println("DIAG after runCurrent")
         vm.setName("   ") // blank after trim
 
         vm.save()
+        println("DIAG after save, before advanceUntilIdle")
         advanceUntilIdle()
+        println("DIAG after advanceUntilIdle, scrollRequested=$scrollRequested")
 
         assertTrue(vm.state.value.nameError)
         assertTrue(scrollRequested)
