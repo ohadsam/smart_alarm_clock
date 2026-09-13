@@ -196,18 +196,23 @@ fun AlarmEditScreen(
                 item {
                     EditCard {
                         val days = listOf("א","ב","ג","ד","ה","ו","ש")
+                        // Each of the 7 circles gets an equal share of the available width
+                        // (via weight(1f), not a fixed 48.dp) so the row always fits exactly —
+                        // 7 fixed 48.dp circles (336.dp) overflow the card's content width on
+                        // most phone screens, clipping the last one ("ש", Saturday) off-screen
+                        // in this RTL layout.
                         Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween) {
                             days.forEachIndexed { i, d ->
                                 val sel = (s.repeatDaysBitmask shr i) and 1 == 1
-                                // 48.dp touch target with 40.dp visual circle
                                 Box(
                                     modifier = Modifier
-                                        .size(48.dp)
+                                        .weight(1f)
+                                        .aspectRatio(1f)
                                         .clickable { vm.toggleDay(i) },
                                     contentAlignment = Alignment.Center,
                                 ) {
                                     Box(
-                                        Modifier.size(40.dp)
+                                        Modifier.fillMaxSize(0.85f)
                                             .background(
                                                 if (sel) MaterialTheme.colorScheme.primary
                                                 else MaterialTheme.colorScheme.surfaceVariant,
