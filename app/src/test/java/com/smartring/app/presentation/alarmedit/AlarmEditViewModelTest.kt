@@ -49,6 +49,20 @@ class AlarmEditViewModelTest {
     }
 
     @Test
+    fun `DIAG bare SharedFlow sanity check`() = runTest(testDispatcher) {
+        val flow = kotlinx.coroutines.flow.MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+        var received = false
+        backgroundScope.launch { flow.collect { received = true } }
+        runCurrent()
+        println("DIAG bare: subscriptionCount=${flow.subscriptionCount.value}")
+        val emitted = flow.tryEmit(Unit)
+        println("DIAG bare: tryEmit returned $emitted")
+        advanceUntilIdle()
+        println("DIAG bare: received=$received")
+        assertTrue(received)
+    }
+
+    @Test
     fun `save with a blank name sets nameError and emits a scroll request, without saving`() = runTest(testDispatcher) {
         var scrollRequested = false
         // backgroundScope (not a plain launch{}) so this indefinitely-collecting job is
