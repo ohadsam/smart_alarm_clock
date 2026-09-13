@@ -73,6 +73,20 @@ android {
     }
 }
 
+// Full exception detail (message + stack trace) straight into the CI console log —
+// the default is just "ExceptionClass at File.kt:N" with no message, and the fuller
+// detail otherwise only lives in the HTML/XML test report artifact, which isn't
+// always reachable (e.g. an environment whose network policy blocks the artifact's
+// storage host but not the Actions API/log itself).
+tasks.withType<Test> {
+    testLogging {
+        events("passed", "skipped", "failed")
+        exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
+        showStackTraces = true
+        showCauses = true
+    }
+}
+
 // Room schema export – must be top-level
 ksp {
     arg("room.schemaLocation", "$projectDir/schemas")
