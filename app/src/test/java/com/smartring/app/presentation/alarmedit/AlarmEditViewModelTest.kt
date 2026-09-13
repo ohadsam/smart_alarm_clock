@@ -6,11 +6,11 @@ import com.smartring.app.util.AlarmScheduler
 import com.smartring.app.util.AppLogger
 import io.mockk.coEvery
 import io.mockk.coVerify
-import io.mockk.match
 import io.mockk.mockk
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
