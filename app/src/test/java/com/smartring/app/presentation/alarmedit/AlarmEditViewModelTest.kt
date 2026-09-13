@@ -6,6 +6,7 @@ import com.smartring.app.util.AlarmScheduler
 import com.smartring.app.util.AppLogger
 import io.mockk.coEvery
 import io.mockk.coVerify
+import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -49,7 +50,10 @@ class AlarmEditViewModelTest {
     @Test
     fun `save with a blank name sets nameError and emits a scroll request, without saving`() = runTest(testDispatcher) {
         var scrollRequested = false
-        val job = launch { vm.scrollToNameRequests.collect { scrollRequested = true } }
+        // backgroundScope (not a plain launch{}) so this indefinitely-collecting job is
+        // cancelled automatically when the test ends — a plain launch{} left running past
+        // the test body, even if cancel()ed, can fail runTest with UncompletedCoroutinesError.
+        backgroundScope.launch { vm.scrollToNameRequests.collect { scrollRequested = true } }
         vm.setName("   ") // blank after trim
 
         vm.save()
@@ -59,7 +63,6 @@ class AlarmEditViewModelTest {
         assertTrue(scrollRequested)
         assertFalse(vm.state.value.isSaved)
         coVerify(exactly = 0) { repository.saveAlarm(any()) }
-        job.cancel()
     }
 
     @Test
@@ -89,7 +92,7 @@ class AlarmEditViewModelTest {
     @Test
     fun `a repeated failed save re-emits the scroll request, not just the first time`() = runTest(testDispatcher) {
         val events = mutableListOf<Unit>()
-        val job = launch { vm.scrollToNameRequests.collect { events += it } }
+        backgroundScope.launch { vm.scrollToNameRequests.collect { events += it } }
 
         vm.save()
         advanceUntilIdle()
@@ -97,12 +100,27 @@ class AlarmEditViewModelTest {
         advanceUntilIdle()
 
         assertEquals(2, events.size)
-        job.cancel()
     }
 
     @Test
     fun `isDirty is false right after loading an alarm unchanged`() = runTest(testDispatcher) {
         coEvery { repository.getAlarm(5) } returns Alarm(id = 5, name = "Existing")
+
+        vm.loadAlarm(5)
+        advanceUntilIdle()
+
+        assertFalse(vm.isDirty)
+    }
+
+    @Test
+    fun `isDirty is false right after loading an alarm whose next fire time is not null`() = runTest(testDispatcher) {
+        // Regression guard: loadAlarm() used to capture originalState *before* computing
+        // nextFireHint, then mutate _state with the computed hint afterward — so the two
+        // diverged immediately whenever effectiveNextFireTime() didn't return null (i.e.
+        // for essentially every real, active alarm), making isDirty true the instant an
+        // existing alarm was opened for editing, with nothing actually edited yet.
+        coEvery { repository.getAlarm(5) } returns Alarm(id = 5, name = "Existing")
+        every { scheduler.effectiveNextFireTime(any()) } returns System.currentTimeMillis() + 3_600_000L
 
         vm.loadAlarm(5)
         advanceUntilIdle()

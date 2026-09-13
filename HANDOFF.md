@@ -315,8 +315,9 @@ if (!alarm.acceptsInteraction) return
 הצלצול). מ-v1.4.1 יש גם סוויטת בדיקות אוטומטיות שרצה ב-CI (ראה סעיף 13), וה-CI ירוק.
 עברו מספר סיבובי code review – הכל תקין. v1.4.0 היה batch של תיקוני באגים אמיתיים שנמצאו
 בבדיקה בפועל על מכשיר; v1.4.1 הוסיף בדיקות ללא שינוי משתמש; v1.4.2 תיקן שני כשלי build
-שחסמו את ה-CI של v1.4.1 (mockk/kotlin-stdlib, ואז import חסר/שגוי בבדיקות עצמן) וגם באג
-אמיתי במכשיר — עיגול "ש" (שבת) בבורר ימי החזרה נחתך.
+שחסמו את ה-CI של v1.4.1 (mockk/kotlin-stdlib, ואז import חסר/שגוי בבדיקות עצמן), באג
+אמיתי במכשיר — עיגול "ש" (שבת) בבורר ימי החזרה נחתך — וגם באג אמיתי שהבדיקות עצמן חשפו:
+פתיחת שעמור קיים לעריכה סימנה אותו כ"מלוכלך" (unsaved changes) מיידית בלי לגעת בכלום.
 
 כללים שאסור לשכוח (ראה HANDOFF.md סעיף 6):
 - ksp{} תמיד top-level
@@ -363,7 +364,7 @@ mockk        = "1.14.2"   # לא לעדכן ל->1.14.4+ בלי לבדוק — ר
 | `domain/model/AlarmTest.kt` | `volumeAtSecond()` (כולל שני ה-clamps ההגנתיים), `isRecurrenceExpired()` |
 | `util/TimeFormatTest.kt` | `formatDurationSeconds()`/`formatCountdownUntil()` |
 | `presentation/alarmring/AlarmRingViewModelTest.kt` | טיימר סגירה אוטומטית (`ShadowSystemClock.advanceBy()`), מצב שבת, נודניק שמתדרדר לעצירה |
-| `presentation/alarmedit/AlarmEditViewModelTest.kt` | ולידציית שם ריק + אירוע הגלילה, ו-`isDirty` לא נשאר "מלוכלך" לצמיתות אחרי ולידציה כושלת |
+| `presentation/alarmedit/AlarmEditViewModelTest.kt` | ולידציית שם ריק + אירוע הגלילה, ו-`isDirty` לא נשאר "מלוכלך" לצמיתות אחרי ולידציה כושלת, וגם לא נהיה "מלוכלך" באופן שגוי מיד אחרי טעינה (v1.4.2) |
 | `data/db/AlarmDaoTest.kt` | `saveAlarmTransaction()` (insert מול update, לא REPLACE), `lastFiredAt`, `snoozeCountSinceLastFire`, SET_NULL FK במחיקה |
 
 **החלטות עיצוב:**

@@ -387,6 +387,38 @@ If the user asks for a PR-based workflow going forward, follow that instead and 
   After fixing any build-blocking issue, don't assume the next run will be green
   just because the fix addresses the error message you saw — a fresh failure
   further down the same pipeline is common, not a sign the first fix was wrong.
+- **A `runTest` test that `launch{}`es a never-ending flow collector (e.g. to
+  observe a `SharedFlow` of one-shot events) and calls `job.cancel()` at the end
+  can still fail with `UncompletedCoroutinesError` (an `AssertionError` subtype,
+  reported by Gradle's console test logger as just "`AssertionError` at
+  <test file>:<the `= runTest(...)` line>", with no further detail — the real
+  stack trace only lives in the JUnit XML/HTML report, i.e. the "Upload unit
+  test reports" CI artifact, which the agent proxy here can't download since it
+  resolves to an Azure Blob Storage host outside the allowlist; get the GitHub
+  Actions job's *console* log instead and treat every failing test's file:line
+  as a lead to re-derive the cause from source, not something you can always
+  fetch the full detail for).** Use `backgroundScope.launch { ... }` (a real
+  member of `TestScope`, no import needed inside `runTest`'s lambda) instead of
+  a plain `launch{}` for this pattern — its children are cancelled automatically
+  when the test ends, with no `job.cancel()` needed and no risk of this error.
+- **A ViewModel that snapshots one "original" state object and later mutates
+  a *separate*, supposedly-equivalent "current" state object in more than one
+  step can leave the two subtly out of sync from the very start** — not just
+  from a later edit. `AlarmEditViewModel.loadAlarm()` set `originalState` right
+  after building the loaded fields, then called `updateNextFireHint()`
+  afterward, which updated `_state` (not `originalState`) with a computed
+  `nextFireHint` — so `isDirty` (`_state.value != originalState`) read `true`
+  immediately after opening any active alarm for editing, before any real edit.
+  Caught only once a test explicitly stubbed the dependency
+  (`effectiveNextFireTime()`) to return a realistic non-null value — an
+  unstubbed relaxed mockk mock returning `null` had been silently hiding this.
+  When a ViewModel builds "the loaded state" in more than one assignment/step,
+  check whether *every* step happens before the original-state snapshot is
+  taken, not just the first one — and when relying on a relaxed mock's default
+  return value in a test, ask what the *real* implementation actually returns
+  in the common case, since a relaxed mock's default (often `null`/`0`/empty)
+  can accidentally match the "nothing changed" case and hide a bug that only
+  shows up against real data.
 
 ## Known limitations (don't re-report these as new findings unless you're the batch fixing them)
 

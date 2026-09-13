@@ -113,10 +113,15 @@ class AlarmEditViewModel @Inject constructor(
                     isEnabled            = a.isEnabled,
                     isFrozen             = a.isFrozen,
                     occurrencesFired     = a.occurrencesFired,
+                    // Computed up front (not via a separate updateNextFireHint() call
+                    // after the fact) so originalState and the initial _state are the
+                    // exact same value — otherwise isDirty (structural equality against
+                    // originalState) would read true the instant the screen opens for
+                    // any alarm whose next fire time isn't null.
+                    nextFireHint         = nextFireHintFor(a),
             )
             originalState = loaded
             _state.update { loaded }
-            updateNextFireHint()
         }
     }
 
@@ -190,26 +195,26 @@ class AlarmEditViewModel @Inject constructor(
     private fun updateNextFireHintLater() = viewModelScope.launch { updateNextFireHint() }
 
     private fun updateNextFireHint() {
-        val s = _state.value
-        val alarm = buildAlarm(s)
-        val next = scheduler.effectiveNextFireTime(alarm)
-        val hint = if (next == null) null else {
-            val cal = Calendar.getInstance().apply { timeInMillis = next }
-            val today = Calendar.getInstance()
-            val isToday = cal.get(Calendar.DAY_OF_YEAR) == today.get(Calendar.DAY_OF_YEAR)
-            val isTomorrow = cal.get(Calendar.DAY_OF_YEAR) == today.get(Calendar.DAY_OF_YEAR) + 1
-            val dateStr = when {
-                isToday    -> "היום"
-                isTomorrow -> "מחר"
-                else       -> "%02d/%02d/%04d".format(
-                    cal.get(Calendar.DAY_OF_MONTH),
-                    cal.get(Calendar.MONTH) + 1,
-                    cal.get(Calendar.YEAR))
-            }
-            "הצלצול הבא: $dateStr בשעה %02d:%02d".format(
-                cal.get(Calendar.HOUR_OF_DAY), cal.get(Calendar.MINUTE))
+        val alarm = buildAlarm(_state.value)
+        _state.update { it.copy(nextFireHint = nextFireHintFor(alarm)) }
+    }
+
+    private fun nextFireHintFor(alarm: Alarm): String? {
+        val next = scheduler.effectiveNextFireTime(alarm) ?: return null
+        val cal = Calendar.getInstance().apply { timeInMillis = next }
+        val today = Calendar.getInstance()
+        val isToday = cal.get(Calendar.DAY_OF_YEAR) == today.get(Calendar.DAY_OF_YEAR)
+        val isTomorrow = cal.get(Calendar.DAY_OF_YEAR) == today.get(Calendar.DAY_OF_YEAR) + 1
+        val dateStr = when {
+            isToday    -> "היום"
+            isTomorrow -> "מחר"
+            else       -> "%02d/%02d/%04d".format(
+                cal.get(Calendar.DAY_OF_MONTH),
+                cal.get(Calendar.MONTH) + 1,
+                cal.get(Calendar.YEAR))
         }
-        _state.update { it.copy(nextFireHint = hint) }
+        return "הצלצול הבא: $dateStr בשעה %02d:%02d".format(
+            cal.get(Calendar.HOUR_OF_DAY), cal.get(Calendar.MINUTE))
     }
 
     // ── Save ──────────────────────────────────────────────────────

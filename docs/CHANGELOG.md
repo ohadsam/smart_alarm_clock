@@ -14,6 +14,18 @@
   width. (No local Android SDK/emulator in this environment to screenshot the fix
   directly — verified analytically for common widths: 320/360/393/411/428.dp; see
   release-checklist's "Known limitations".)
+- **Opening any existing, active alarm for editing immediately marked the screen
+  "dirty"**, even with nothing touched — pressing back showed the "discard
+  changes?" dialog for no real reason. `AlarmEditViewModel.loadAlarm()` captured
+  `originalState` right after loading the alarm's saved fields, then separately
+  called `updateNextFireHint()` afterward, which mutated `_state` again (setting
+  `nextFireHint`) *without* updating `originalState` to match — so the two
+  differed the instant `effectiveNextFireTime()` returned anything other than
+  null (true for essentially every real, active alarm). Caught by a new unit
+  test (`AlarmEditViewModelTest`) that stubs `effectiveNextFireTime()` to return
+  a real timestamp and asserts `isDirty` is still false right after load. Fixed
+  by computing `nextFireHint` up front as part of building `loaded`, so
+  `originalState` and the initial `_state` are always the same value.
 
 **Also included (CI-only, no user-visible effect):** two follow-up fixes to get
 v1.4.1's test suite actually running in CI, discovered only once each was
