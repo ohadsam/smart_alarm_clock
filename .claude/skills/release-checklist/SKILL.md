@@ -387,20 +387,45 @@ If the user asks for a PR-based workflow going forward, follow that instead and 
   After fixing any build-blocking issue, don't assume the next run will be green
   just because the fix addresses the error message you saw — a fresh failure
   further down the same pipeline is common, not a sign the first fix was wrong.
-- **A `runTest` test that `launch{}`es a never-ending flow collector (e.g. to
-  observe a `SharedFlow` of one-shot events) and calls `job.cancel()` at the end
-  can still fail with `UncompletedCoroutinesError` (an `AssertionError` subtype,
-  reported by Gradle's console test logger as just "`AssertionError` at
-  <test file>:<the `= runTest(...)` line>", with no further detail — the real
-  stack trace only lives in the JUnit XML/HTML report, i.e. the "Upload unit
-  test reports" CI artifact, which the agent proxy here can't download since it
-  resolves to an Azure Blob Storage host outside the allowlist; get the GitHub
-  Actions job's *console* log instead and treat every failing test's file:line
-  as a lead to re-derive the cause from source, not something you can always
-  fetch the full detail for).** Use `backgroundScope.launch { ... }` (a real
-  member of `TestScope`, no import needed inside `runTest`'s lambda) instead of
-  a plain `launch{}` for this pattern — its children are cancelled automatically
-  when the test ends, with no `job.cancel()` needed and no risk of this error.
+- **Gradle's default console test logger reports only "`AssertionError` at
+  <test file>:<line>", and that line is consistently the enclosing test
+  function's `= runTest(...) {` declaration line — not the line of the
+  assertion that actually failed** (an artifact of how a suspend lambda's
+  generated `invokeSuspend` frame reports source lines). The real message and
+  full stack trace live in the JUnit XML/HTML report, i.e. the "Upload unit
+  test reports" CI artifact — which the agent proxy here can't download, since
+  its URL resolves to an Azure Blob Storage host outside the allowlist (`get_job_logs`
+  and the Actions API work fine; only the artifact's storage host is blocked).
+  Fixed for good by adding `tasks.withType<Test> { testLogging { exceptionFormat
+  = FULL; showStackTraces = true } } }` to `app/build.gradle.kts` (already
+  done) — this puts the real message and full trace straight into the console
+  log `get_job_logs` can already read, so don't revert it. Add
+  `showStandardStreams = true` too, temporarily, if you ever need to see
+  `println` output for a specific hard-to-diagnose failure — remove it again
+  once done, since it makes every CI log much noisier permanently.
+- **`TestScope.backgroundScope` is for a job whose *individual progress* the
+  test never needs to explicitly wait for — not a general-purpose alternative
+  to a plain `launch{}` + `job.cancel()` for something the test observes.**
+  `advanceUntilIdle()`/`runCurrent()` stop advancing virtual time once only
+  `backgroundScope` coroutines remain unprocessed (by design — otherwise an
+  intentionally-infinite background loop would hang either function forever).
+  Concretely, a collector on a `SharedFlow` started via `backgroundScope.launch`
+  never received a value `tryEmit()`'d moments later in the same test — even
+  though `subscriptionCount` confirmed it was genuinely subscribed and
+  `tryEmit()` itself returned `true` — because the queued resumption was
+  `backgroundScope`-only work at that point, which neither function will run.
+  (Confirmed with an isolated bare-`MutableSharedFlow` reproduction with zero
+  ViewModel code involved, after two guessed "fixes" — job-leak avoidance,
+  then an extra `runCurrent()` — both failed to help, for exactly this reason:
+  neither one was the actual cause.) For a one-shot-event collector the test
+  itself asserts against, use a plain `launch{ }` (counted towards "idle," so
+  `advanceUntilIdle()` reliably delivers the emission) plus an explicit
+  `job.cancel()` before the test ends, **followed by one more `runCurrent()`**
+  (`cancel()` alone doesn't guarantee the job reaches a terminal state before
+  `runTest`'s own completion check, which is a real, separate hazard — the
+  extra pump after `cancel()` is what avoids it, not switching to
+  `backgroundScope`). Reach for `backgroundScope` only for a job the test
+  deliberately never waits on (e.g. a simulated infinite background poller).
 - **A ViewModel that snapshots one "original" state object and later mutates
   a *separate*, supposedly-equivalent "current" state object in more than one
   step can leave the two subtly out of sync from the very start** — not just

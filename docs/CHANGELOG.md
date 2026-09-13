@@ -43,6 +43,25 @@ individually unblocked:
   missing `import kotlinx.coroutines.test.advanceUntilIdle` in two ViewModel test
   files. Both fixed; verified against the actual `mockk-dsl-jvm`/
   `kotlinx-coroutines-test-jvm` jars from Maven Central before fixing.
+- Compilation succeeded next, but two tests genuinely failed: `AlarmEditViewModelTest`'s
+  two tests that assert on `scrollToNameRequests` (a `SharedFlow`) collected the
+  event via `TestScope.backgroundScope.launch { ... }`. That's the wrong tool
+  here — `advanceUntilIdle()`/`runCurrent()` stop advancing virtual time once
+  only `backgroundScope` coroutines remain unprocessed (so an infinite
+  background job can't hang them forever), so a value `tryEmit()`'d to a
+  `backgroundScope` collector is never actually delivered by either function,
+  confirmed with an isolated bare-`MutableSharedFlow` reproduction. Fixed by
+  collecting via a plain `launch{ }` (counted towards "idle") plus an explicit
+  `job.cancel()` before the test ends, followed by one more `runCurrent()` so
+  the cancellation reaches a terminal state before `runTest`'s own completion
+  check. Also added `tasks.withType<Test> { testLogging { ... } }` to
+  `app/build.gradle.kts` so a test failure's real message and full stack trace
+  land in the CI console log directly — Gradle's default one-line summary
+  ("`AssertionError` at file:line") was pointing at the enclosing test
+  function's declaration line for every failure regardless of which assertion
+  inside actually threw, and the JUnit report artifact that has the real detail
+  isn't reachable from here (its storage host is outside this environment's
+  network allowlist).
 
 ## v1.4.1 (2026-09-13) — internal, no user-visible change
 

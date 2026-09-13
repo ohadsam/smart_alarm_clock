@@ -49,57 +49,34 @@ class AlarmEditViewModelTest {
     }
 
     @Test
-    fun `DIAG bare SharedFlow sanity check`() = runTest(testDispatcher) {
-        val flow = kotlinx.coroutines.flow.MutableSharedFlow<Unit>(extraBufferCapacity = 1)
-        var received = false
-        backgroundScope.launch { flow.collect { received = true } }
-        runCurrent()
-        println("DIAG bare: subscriptionCount=${flow.subscriptionCount.value}")
-        val emitted = flow.tryEmit(Unit)
-        println("DIAG bare: tryEmit returned $emitted")
-        advanceUntilIdle()
-        println("DIAG bare: received=$received")
-        assertTrue(received)
-    }
-
-    @Test
     fun `save with a blank name sets nameError and emits a scroll request, without saving`() = runTest(testDispatcher) {
         var scrollRequested = false
-        // backgroundScope (not a plain launch{}) so this indefinitely-collecting job is
-        // cancelled automatically when the test ends instead of needing job.cancel().
-        // runCurrent() right after starting it is required too: on StandardTestDispatcher,
-        // launch{} only *schedules* the collector — it isn't actually subscribed to the
-        // SharedFlow until the dispatcher is pumped, so an emit() before that pump is
-        // missed entirely (replay = 0, and the extra buffer doesn't back-fill a
-        // not-yet-subscribed collector).
-        println("DIAG before launch")
-        val job = backgroundScope.launch {
-            println("DIAG collector coroutine starting")
-            try {
-                vm.scrollToNameRequests.collect {
-                    println("DIAG collector received value")
-                    scrollRequested = true
-                }
-                println("DIAG collect() RETURNED (should never happen for a SharedFlow)")
-            } catch (e: Throwable) {
-                println("DIAG collect() THREW: $e")
-                throw e
-            }
-        }
-        println("DIAG after launch, before runCurrent")
+        // Plain launch (not backgroundScope!) so this job is counted towards
+        // advanceUntilIdle()'s notion of "idle" — advanceUntilIdle()/runCurrent()
+        // stop advancing virtual time once only backgroundScope coroutines remain
+        // unprocessed (by design, so an indefinitely-looping background job can't
+        // hang them forever), so a value emitted via tryEmit() to a backgroundScope
+        // collector is never actually delivered by either function, even though
+        // subscriptionCount confirms the collector is genuinely subscribed and
+        // tryEmit() returns true. runCurrent() right after launching is still
+        // needed: on StandardTestDispatcher, launch{} only *schedules* the
+        // collector — it isn't actually subscribed until the dispatcher is
+        // pumped, so an emit() before that pump would be missed regardless.
+        val job = launch { vm.scrollToNameRequests.collect { scrollRequested = true } }
         runCurrent()
-        println("DIAG after runCurrent, job.isActive=${job.isActive} job.isCompleted=${job.isCompleted} job.isCancelled=${job.isCancelled}")
         vm.setName("   ") // blank after trim
 
         vm.save()
-        println("DIAG after save, before advanceUntilIdle")
         advanceUntilIdle()
-        println("DIAG after advanceUntilIdle, scrollRequested=$scrollRequested")
 
         assertTrue(vm.state.value.nameError)
         assertTrue(scrollRequested)
         assertFalse(vm.state.value.isSaved)
         coVerify(exactly = 0) { repository.saveAlarm(any()) }
+        // cancel() alone doesn't guarantee the job reaches a terminal state before
+        // runTest's own end-of-test completion check — pump once more so it does.
+        job.cancel()
+        runCurrent()
     }
 
     @Test
@@ -129,7 +106,7 @@ class AlarmEditViewModelTest {
     @Test
     fun `a repeated failed save re-emits the scroll request, not just the first time`() = runTest(testDispatcher) {
         val events = mutableListOf<Unit>()
-        backgroundScope.launch { vm.scrollToNameRequests.collect { events += it } }
+        val job = launch { vm.scrollToNameRequests.collect { events += it } }
         runCurrent()
 
         vm.save()
@@ -138,6 +115,8 @@ class AlarmEditViewModelTest {
         advanceUntilIdle()
 
         assertEquals(2, events.size)
+        job.cancel()
+        runCurrent()
     }
 
     @Test
