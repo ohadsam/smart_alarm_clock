@@ -59,16 +59,22 @@ class AlarmEditViewModelTest {
         // missed entirely (replay = 0, and the extra buffer doesn't back-fill a
         // not-yet-subscribed collector).
         println("DIAG before launch")
-        backgroundScope.launch {
+        val job = backgroundScope.launch {
             println("DIAG collector coroutine starting")
-            vm.scrollToNameRequests.collect {
-                println("DIAG collector received value")
-                scrollRequested = true
+            try {
+                vm.scrollToNameRequests.collect {
+                    println("DIAG collector received value")
+                    scrollRequested = true
+                }
+                println("DIAG collect() RETURNED (should never happen for a SharedFlow)")
+            } catch (e: Throwable) {
+                println("DIAG collect() THREW: $e")
+                throw e
             }
         }
         println("DIAG after launch, before runCurrent")
         runCurrent()
-        println("DIAG after runCurrent")
+        println("DIAG after runCurrent, job.isActive=${job.isActive} job.isCompleted=${job.isCompleted} job.isCancelled=${job.isCancelled}")
         vm.setName("   ") // blank after trim
 
         vm.save()
