@@ -56,5 +56,11 @@ Glance Widgets (SmartRingWidget.kt) → AlarmScheduler.effectiveNextFireTime() �
   ה-full-screen intent יכול לפתוח את מסך הצלצול כמעט מיידית, וסדר הפוך השאיר חלון שבו
   מסך הצלצול קורא timestamp ישן מצלצול קודם.
 
+## בדיקות אוטומטיות (v1.4.1)
+`app/src/test/` — JUnit4 + Robolectric (סביבת אנדרואיד על ה-JVM, לא אמולטור אמיתי) + mockk,
+רץ ב-CI לפני assembleDebug/Release. `AlarmScheduler.nextFireTime()` מקבל `now: Long`
+אופציונלי (ברירת מחדל: השעון האמיתי) בדיוק כדי לאפשר בדיקה דטרמיניסטית של חישובי
+WEEKLY/BIWEEKLY/MONTHLY. פירוט מלא ב-HANDOFF.md סעיף 13.
+
 ## Security
 allowBackup=false · exported=false · FLAG_IMMUTABLE · ProGuard · prepareAsync() · startForeground() ראשון

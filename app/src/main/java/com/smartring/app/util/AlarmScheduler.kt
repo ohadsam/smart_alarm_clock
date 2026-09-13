@@ -102,9 +102,12 @@ class AlarmScheduler @Inject constructor(
     fun effectiveNextFireTime(alarm: Alarm): Long? =
         listOfNotNull(pendingSnoozeUntil(alarm), nextFireTime(alarm)).minOrNull()
 
-    fun nextFireTime(alarm: Alarm): Long? {
-        val now = System.currentTimeMillis()
-
+    // [now] defaults to the real clock for every production caller; overridable so
+    // this (and the recurrence math it drives — WEEKLY/BIWEEKLY/MONTHLY, including
+    // the year/month-boundary cases that have broken before) can be tested
+    // deterministically instead of depending on whatever day it happens to be when
+    // the test runs.
+    fun nextFireTime(alarm: Alarm, now: Long = System.currentTimeMillis()): Long? {
         // 1. Exact datetime
         alarm.specificDateTime?.let { dt ->
             return if (dt > now) dt else null
@@ -154,6 +157,7 @@ class AlarmScheduler @Inject constructor(
 
         // 4. Simple time-of-day (one-time)
         return Calendar.getInstance().apply {
+            timeInMillis = now
             set(Calendar.HOUR_OF_DAY, alarm.hour)
             set(Calendar.MINUTE,      alarm.minute)
             set(Calendar.SECOND,      0)
@@ -164,6 +168,7 @@ class AlarmScheduler @Inject constructor(
 
     private fun nextFromMask(h: Int, m: Int, mask: Int, now: Long): Long? {
         val cal = Calendar.getInstance().apply {
+            timeInMillis = now
             set(Calendar.HOUR_OF_DAY, h); set(Calendar.MINUTE, m)
             set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
         }

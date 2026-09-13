@@ -7,10 +7,13 @@ description: Run this after implementing any feature or fix in the SmartRing And
 
 This repo is a Kotlin + Jetpack Compose Android app (MVVM + Repository + Hilt DI, Room DB,
 AlarmManager, Glance widgets) with **no local Android SDK in this environment** — there is no
-`assembleDebug`/`assembleRelease` you can run directly here, and no unit/instrumented test suite
-exists yet either. The GitHub Actions workflow (`.github/workflows/build-apk.yml`, triggered on
-every push to `main`) is therefore the *only* real compile/build verification available, and it
-takes several minutes — treat "wait for it and read the result" as a mandatory step, not optional
+`assembleDebug`/`assembleRelease` you can run directly here. A JVM/Robolectric unit test suite
+does exist as of v1.4.1 (`app/src/test/`, see HANDOFF.md §13), but it too can only actually be
+*run* via the GitHub Actions workflow (`.github/workflows/build-apk.yml`'s "Run unit tests" step,
+before either APK is assembled) — this environment has no local JDK+Gradle set up to run
+`./gradlew test` directly either. The GitHub Actions workflow (triggered on every push to `main`)
+is therefore still the *only* real verification available (compile *and* test), and it takes
+several minutes — treat "wait for it and read the result" as a mandatory step, not optional
 polish. Do not skip a step and do not reorder them: the version bump needs the review's fixes
 already applied, and the push needs the review, docs, and (where reachable) build check done first.
 
@@ -80,7 +83,9 @@ Fix everything found before moving on.
 
 - Bump `versionCode` (always +1) and `versionName` (semver: features → minor, fixes-only → patch)
   in `app/build.gradle.kts`. `versionCode` **must** strictly increase or the signed APK won't
-  install as an update at all (Android rejects a same-or-lower versionCode as a "downgrade").
+  install as an update at all (Android rejects a same-or-lower versionCode as a "downgrade") —
+  bump it even for a batch with no user-visible change at all (internal refactors, test-suite
+  additions), since that's still a new APK someone might install over an old one.
   `versionName` is what's shown in Settings → About (`BuildConfig.VERSION_NAME`, requires
   `buildFeatures.buildConfig = true`, already set) — it updates automatically from this bump,
   nothing else to touch for that.
@@ -91,6 +96,11 @@ Fix everything found before moving on.
   adding an entry ships silently — no user-visible "what's new" for real changes. Write it from
   the user's point of view (what they'd notice), matching the tone of existing entries, not an
   implementation-detail file list.
+  **Exception:** a batch with genuinely nothing a user would notice (test infrastructure, CI-only
+  changes, an internal refactor with no behavior change) skips the WhatsNew entry — inventing one
+  would misrepresent it as a feature — but still bumps the version per above. Say so explicitly in
+  `docs/CHANGELOG.md` (e.g. "no WhatsNew entry: nothing user-visible in this batch") rather than
+  silently omitting it, so it reads as a deliberate choice, not a forgotten step.
 - `docs/CHANGELOG.md` (step 4) is the parallel *developer-facing* record of the same batch — keep
   both in sync, but they're not required to read identically (CHANGELOG can go into more
   technical depth than the in-app dialog should).
@@ -136,30 +146,37 @@ worth its own check, or reveal a step whose instructions were incomplete? If so,
 example the way "Known gotchas" below does — file, symptom, why. If nothing calls for a change,
 say so explicitly.
 
-## 6. Build verification (the real test suite, for now)
+## 6. Build verification (compile + tests, via CI — there's no other way here)
 
-There is no local Android SDK and no unit/instrumented test suite in this repo yet — the GitHub
-Actions build is the only thing that actually compiles this code end to end. After pushing (step
-7), watch the triggered "Build SmartRing APK" run to completion:
+There is no local Android SDK (and no local JDK+Gradle either) in this environment, so neither
+`./gradlew test` nor `assembleDebug`/`assembleRelease` can be run directly — the GitHub Actions
+build is the only thing that actually compiles and tests this code end to end. It now runs the
+`app/src/test/` suite (`testDebugUnitTest`, see HANDOFF.md §13) as its own step *before* either
+APK is assembled, so a test failure fails the build before wasting time packaging an APK from
+code that doesn't work. After pushing (step 7), watch the triggered "Build SmartRing APK" run to
+completion:
 
 ```
 mcp__github__actions_list  method=list_workflow_runs, branch=main   # get the new run's id
 mcp__github__actions_get   method=get_workflow_run, resource_id=<id>
 ```
 
-If it fails, pull the failing job's logs (`mcp__github__get_job_logs`, `failed_only=true`), fix
-the root cause in the working tree, commit, push again, and re-check — don't consider the batch
-done on a red or not-yet-checked build. A build failure here is a real compile/resource-link
-error (see "Known gotchas" for the `Theme.Material.NoTitleBar` example), not a flake — there's no
-device/emulator flakiness in play since `assembleDebug`/`assembleRelease` are pure compile+package
-steps.
+If it fails, pull the failing job's logs (`mcp__github__get_job_logs`, `failed_only=true`) —
+also check the "Upload unit test reports" artifact if the failure is in the test step itself, it
+carries the actual JUnit/Robolectric failure output — fix the root cause in the working tree,
+commit, push again, and re-check. Don't consider the batch done on a red or not-yet-checked
+build. A compile/resource-link failure here (see "Known gotchas" for the `Theme.Material.NoTitleBar`
+example) or a genuine test assertion failure isn't a flake — there's no device/emulator
+flakiness in play, since these are JVM-only (compile+package, or Robolectric on the JVM, not a
+real emulator) steps.
 
-**When real unit tests eventually get added** (`AlarmScheduler.nextFireTime()` is the obvious
-first candidate — pure-Kotlin-reachable logic already flagged in `HANDOFF.md`'s backlog, though
-it takes a `Context`/`AlarmManager` today so extracting the pure date-math helpers or introducing
-a seam is the actual prerequisite), add this checklist a step that runs them locally before the
-push, the same way `system_diagram`'s checklist runs `npm run test:unit` — don't wait for a whole
-separate session to notice the gap.
+**Adding new tests for a batch that touches recurrence/timing logic:** follow the seams already
+established (see HANDOFF.md §13 "Design decisions") — an injectable `now`/clock parameter for
+anything date-dependent, `ShadowSystemClock.advanceBy()` for anything reading
+`SystemClock.elapsedRealtime()`, mockk fakes constructed directly (not through Hilt) for
+ViewModel/Scheduler dependencies. A change that makes existing test-covered logic harder to test
+(e.g. reintroducing a hardcoded `System.currentTimeMillis()` call) should be treated the same as
+breaking a test that already exists.
 
 ## 7. Push to main
 
@@ -174,6 +191,31 @@ git push -u origin main
 If the user asks for a PR-based workflow going forward, follow that instead and update this step.
 
 ## Known gotchas (concrete examples, keep this list growing)
+
+- **A Robolectric test that lets the manifest's real `@HiltAndroidApp` Application class load
+  triggers real Hilt injection** (a real Room DB via `Room.databaseBuilder`, a real WorkManager
+  enqueue, `SmartRingApp`'s `observeAlarms()` background collector) even though the test never
+  asked for any of that — Robolectric instantiates whatever `android:name` the manifest declares
+  by default. `app/src/test/resources/robolectric.properties` sets
+  `application=android.app.Application` (the plain base class) globally so every Robolectric test
+  in this module skips `SmartRingApp` entirely; tests instead construct the class under test
+  directly (`AlarmScheduler(context, mockk(), mockk())`, etc.) with mocked/faked dependencies, not
+  through the Hilt graph. If a future test genuinely needs the real DI graph (e.g. an
+  instrumented/androidTest-level test), it needs its own `@Config(application = ...)` override or
+  Hilt's own test-application mechanism — don't just delete the global override, since that would
+  silently slow down and complicate every existing unit test.
+- **`AlarmScheduler.nextFireTime()` used to read `System.currentTimeMillis()` directly**, making
+  its WEEKLY/BIWEEKLY/MONTHLY recurrence math untestable without depending on whatever real day it
+  happened to be when the test ran. Fixed by adding an optional `now: Long =
+  System.currentTimeMillis()` parameter (zero behavior change for every production caller) and
+  threading it into the two internal `Calendar.getInstance()` calls that previously silently
+  defaulted to the real clock instead of the passed-in `now` — the fix has to touch *both* the
+  parameter and those two `Calendar` seeds, or the "deterministic" tests still secretly depend on
+  today's real date for the day-of-week/month fields.
+- **`SystemClock.elapsedRealtime()` needs `org.robolectric.shadows.ShadowSystemClock.advanceBy(Duration)`
+  to move forward in a Robolectric test** — plain `Thread.sleep()` or waiting doesn't advance
+  Robolectric's fake clock, and this is the same clock `AlarmRingViewModel`'s ring-duration
+  auto-dismiss timer is anchored to (see its own "Known gotchas"-worthy comment in the source).
 
 - **`android:Theme.Material.NoTitleBar` in `themes.xml` doesn't exist** — Android's Material theme
   family uses `NoActionBar`, not `NoTitleBar` (that suffix only ever existed on the pre-Holo
@@ -323,8 +365,12 @@ If the user asks for a PR-based workflow going forward, follow that instead and 
 
 - Code review ran 3 times — technical, functional, and UI/UX+RTL, as genuinely separate passes —
   and every finding was fixed, not just noted.
-- `app/build.gradle.kts`'s `versionCode`/`versionName` bumped, and a matching `WHATS_NEW_HISTORY`
-  entry added in `WhatsNew.kt` — both, not just one.
+- `app/build.gradle.kts`'s `versionCode`/`versionName` bumped, and either a matching
+  `WHATS_NEW_HISTORY` entry added in `WhatsNew.kt`, or (only for a batch with nothing
+  user-visible) `docs/CHANGELOG.md` explicitly says why one wasn't added.
+- The GitHub Actions run's "Run unit tests" step green, not just the two assemble steps —
+  a batch that touches `AlarmScheduler`, a ViewModel, or the DAO should have new/updated
+  tests in `app/src/test/` covering it, per HANDOFF.md §13.
 - `signingConfigs`/`signingConfig` in `app/build.gradle.kts` still point both build types at the
   committed `app/smartring.keystore` (unchanged unless this batch had a deliberate reason to
   touch it) — the whole point is that this *doesn't* need touching every release.

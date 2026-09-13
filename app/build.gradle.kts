@@ -14,8 +14,8 @@ android {
         applicationId   = "com.smartring.app"
         minSdk          = 26
         targetSdk       = 34
-        versionCode     = 5
-        versionName     = "1.4.0"
+        versionCode     = 6
+        versionName     = "1.4.1"
     }
 
     // A single committed keystore, reused for both build types, so every APK built
@@ -62,6 +62,15 @@ android {
     packaging {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
     }
+
+    // Robolectric needs the merged manifest/resources on the unit-test classpath —
+    // without this it can't resolve the app's AndroidManifest.xml (application class,
+    // permissions) that some shadowed framework behavior depends on.
+    testOptions {
+        unitTests {
+            isIncludeAndroidResources = true
+        }
+    }
 }
 
 // Room schema export – must be top-level
@@ -96,4 +105,10 @@ dependencies {
     implementation(libs.work.runtime.ktx)
     implementation(libs.hilt.work)
     ksp(libs.hilt.work.compiler)
+
+    testImplementation(libs.junit)
+    testImplementation(libs.robolectric)
+    testImplementation(libs.mockk)
+    testImplementation(libs.coroutines.test)
+    testImplementation(libs.androidx.test.core)
 }

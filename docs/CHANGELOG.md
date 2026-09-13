@@ -1,5 +1,46 @@
 # SmartRing – Changelog
 
+## v1.4.1 (2026-09-13) — internal, no user-visible change
+
+No WhatsNew entry: nothing in this batch is visible to a user, so writing one would
+misrepresent it as a feature. The version still bumps because `versionCode` must
+strictly increase for the new APK to install as an update at all.
+
+**Added:** the project's first automated test suite (`app/src/test/`) — plain JVM
+unit tests plus Robolectric (a lightweight Android environment on the JVM, not a real
+emulator — much faster and more reliable in CI) for anything needing Context/
+SharedPreferences/Room/AlarmManager:
+- `AlarmSchedulerTest` — WEEKLY/BIWEEKLY (including the exact-14-days-across-a-
+  year-boundary regression this cadence was already fixed for once)/MONTHLY
+  recurrence math, specific date/datetime, the one-time fallback, snooze awareness
+  (`pendingSnoozeUntil`/`effectiveNextFireTime`), and that `schedule()`/`cancel()`
+  actually (dis)arm a real `AlarmManager` alarm (via Robolectric's shadow).
+- `AlarmTest` — crescendo `volumeAtSecond()` math, including the two defensive
+  clamps added in v1.4.0 (a ring quieter than the crescendo start volume, a zero
+  `crescendoStepSeconds`), and `isRecurrenceExpired()`'s three end-types.
+- `TimeFormatTest` — `formatDurationSeconds()`/`formatCountdownUntil()` edge cases.
+- `AlarmRingViewModelTest` — the wall-clock-anchored auto-dismiss timer (via
+  `ShadowSystemClock.advanceBy()`), Shabbat-mode guards, and snooze degrading to a
+  plain stop when disabled or already at its cap.
+- `AlarmEditViewModelTest` — blank-name validation and its scroll-request event,
+  and specifically the round-3-review regression where a validation-attempt
+  counter briefly lived inside the state compared for `isDirty`, permanently
+  marking the screen dirty after one failed Save.
+- `AlarmDaoTest` — the insert-vs-update branching in `saveAlarmTransaction()`
+  (a `REPLACE`-based upsert here previously orphaned history on every edit),
+  `lastFiredAt()`, `snoozeCountSinceLastFire()`, and the `SET_NULL` FK behavior on
+  alarm deletion.
+
+**Changed:** `AlarmScheduler.nextFireTime()` now takes an optional `now` parameter
+(defaulting to the real clock for every production caller — no behavior change)
+instead of always reading `System.currentTimeMillis()` internally, so the
+recurrence math can be tested deterministically instead of depending on whatever
+day it happens to be when the test runs.
+
+**CI:** `.github/workflows/build-apk.yml` runs `./gradlew testDebugUnitTest` before
+assembling either APK, uploading the test reports as a build artifact even on
+failure.
+
 ## v1.4.0 (2026-09-11)
 
 A bug-fix batch driven directly by real on-device testing feedback (ring not stopping,

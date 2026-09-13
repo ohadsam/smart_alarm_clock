@@ -271,7 +271,7 @@ if (!alarm.acceptsInteraction) return
 - [ ] Alarm preview – "נסה עכשיו" בעריכה
 - [x] ~~Widget deep link → AlarmListScreen~~ – **בוצע v1.1.0**: כל 4 הווידג'טים פותחים את האפליקציה בלחיצה.
 - [ ] Accessibility labels על Switch/IconButtons – רק המתג ברשימת השעמורים קיבל תווית (v1.1.0); ה-Switch/IconButtons במסך העריכה עדיין ללא.
-- [ ] Unit tests ל-AlarmScheduler.nextFireTime()
+- [x] ~~Unit tests ל-AlarmScheduler.nextFireTime()~~ – **בוצע v1.4.1**: ראה סעיף 13 (בדיקות אוטומטיות). כלל גם את הרפקטור שהוזכר כאן (`now` כפרמטר ניתן להזרקה).
 - [x] ~~הזנת מספר מדויקת לצד סליידרים~~ – **בוצע v1.2.0**: `EditableValueBadge` (לחיצה על התג פותחת דיאלוג הזנת מספר) בכל הסליידרים.
 - [x] ~~כפתורי מידע על שדות הגדרה~~ – **בוצע v1.2.0**: `FieldLabel` עם אייקון ⓘ ברוב שדות מסך העריכה.
 - [x] ~~מסך לוגים~~ – **בוצע v1.2.0**: `LogsScreen` בהגדרות, עם ניקוי אוטומטי יומי (retention 3 ימים).
@@ -309,12 +309,12 @@ if (!alarm.acceptsInteraction) return
 4. data/db/AlarmDao.kt
 5. presentation/navigation/NavGraph.kt
 
-מצב נוכחי: v1.4.0, DB version 3, כל הפיצ'רים ב-HANDOFF.md סעיף 2 מיושמים (כולל מצב שבת,
+מצב נוכחי: v1.4.1, DB version 3, כל הפיצ'רים ב-HANDOFF.md סעיף 2 מיושמים (כולל מצב שבת,
 נודניק ניתן-לכיבוי, לוגים, בדיקות אמינות (כולל בקשה פרואקטיבית בכניסה), What's New, עדכון APK
 במקום, שעון חי + אינדיקציית זמן לשעמור הבא + מסגרת בווידג'טים, וסגירה אוטומטית אמינה של מסך
-הצלצול).
+הצלצול). מ-v1.4.1 יש גם סוויטת בדיקות אוטומטיות שרצה ב-CI (ראה סעיף 13).
 עברו מספר סיבובי code review – הכל תקין. v1.4.0 היה batch של תיקוני באגים אמיתיים שנמצאו
-בבדיקה בפועל על מכשיר.
+בבדיקה בפועל על מכשיר; v1.4.1 הוסיף בדיקות ללא שינוי משתמש.
 
 כללים שאסור לשכוח (ראה HANDOFF.md סעיף 6):
 - ksp{} תמיד top-level
@@ -342,4 +342,43 @@ lifecycle    = "2.8.2"
 navigation   = "2.7.7"
 work         = "2.9.0"
 datastore    = "1.1.1"
+junit        = "4.13.2"
+robolectric  = "4.16.1"
+mockk        = "1.14.11"
 ```
+
+---
+
+## 13. בדיקות אוטומטיות (v1.4.1)
+
+`app/src/test/` — בדיקות JVM (חלקן Robolectric: סביבת אנדרואיד קלה על ה-JVM, **לא**
+אמולטור אמיתי — הרבה יותר מהיר ואמין ב-CI). רץ אוטומטית ב-CI לפני assembleDebug/Release
+(`.github/workflows/build-apk.yml`, שלב "Run unit tests").
+
+| קובץ | מכסה |
+|------|------|
+| `util/AlarmSchedulerTest.kt` | `nextFireTime()` (WEEKLY/BIWEEKLY כולל חצות שנה/MONTHLY/תאריך ספציפי/one-time), `pendingSnoozeUntil`/`effectiveNextFireTime`, ש-`schedule()`/`cancel()` באמת מפעילים/מבטלים אזעקת `AlarmManager` אמיתית (Robolectric shadow) |
+| `domain/model/AlarmTest.kt` | `volumeAtSecond()` (כולל שני ה-clamps ההגנתיים), `isRecurrenceExpired()` |
+| `util/TimeFormatTest.kt` | `formatDurationSeconds()`/`formatCountdownUntil()` |
+| `presentation/alarmring/AlarmRingViewModelTest.kt` | טיימר סגירה אוטומטית (`ShadowSystemClock.advanceBy()`), מצב שבת, נודניק שמתדרדר לעצירה |
+| `presentation/alarmedit/AlarmEditViewModelTest.kt` | ולידציית שם ריק + אירוע הגלילה, ו-`isDirty` לא נשאר "מלוכלך" לצמיתות אחרי ולידציה כושלת |
+| `data/db/AlarmDaoTest.kt` | `saveAlarmTransaction()` (insert מול update, לא REPLACE), `lastFiredAt`, `snoozeCountSinceLastFire`, SET_NULL FK במחיקה |
+
+**החלטות עיצוב:**
+- `app/src/test/resources/robolectric.properties` מגדיר `application=android.app.Application`
+  (לא את `SmartRingApp` האמיתי) — כדי שבדיקות Robolectric לא יפעילו הזרקת Hilt אמיתית
+  (DB אמיתי, WorkManager, ה-collector של `observeAlarms()`). כל מחלקה תחת בדיקה נבנית
+  ישירות עם dependencies מזויפים/מדומים (mockk), לא דרך גרף ה-DI.
+- `AlarmScheduler.nextFireTime()` מקבל `now: Long` אופציונלי (ברירת מחדל: השעון האמיתי)
+  במקום לקרוא ל-`System.currentTimeMillis()` ישירות — זה מה שהופך את חישובי
+  WEEKLY/BIWEEKLY/MONTHLY לניתנים לבדיקה דטרמיניסטית. כל בדיקה חדשה שצריכה זמן "עכשיו"
+  קבוע צריכה אותו סוג seam.
+- כדי לשלוט ב-`SystemClock.elapsedRealtime()` בבדיקות (למשל טיימר הסגירה האוטומטית של
+  מסך הצלצול) יש להשתמש ב-`org.robolectric.shadows.ShadowSystemClock.advanceBy(Duration)`.
+- אין עדיין בדיקות migration (`MIGRATION_1_2`/`MIGRATION_2_3`) — אלה דורשות קובצי schema
+  שה-KSP מייצא (`app/schemas/*.json`, לפי `room.schemaLocation` ב-`build.gradle.kts`),
+  שעדיין לא נוצרו/הוצמדו כי אין build מקומי בסביבה הזו. ברגע שיש build ראשון עם schema
+  מיוצא, שווה להוסיף `androidx.room:room-testing` + `MigrationTestHelper`.
+- אין בדיקות אמולטור/Compose UI אמיתיות (androidTest) — הוחלט במכוון לטובת
+  Robolectric בגלל המהירות/היציבות ב-CI; שווה לשקול מחדש אם צריך לבדוק רינדור Compose
+  אמיתי, לא רק לוגיקה.

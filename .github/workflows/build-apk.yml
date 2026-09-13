@@ -46,13 +46,33 @@ jobs:
           chmod +x gradlew
           ls -la gradle/wrapper/
 
-      # ── 4. Build Debug APK ───────────────────────
+      # ── 4. Run unit tests ────────────────────────
+      # JVM unit tests (plain + Robolectric, no real device/emulator) — the real
+      # regression coverage for AlarmScheduler's recurrence math, ViewModels, and
+      # Room DAO queries. Runs before assembling APKs so a broken test fails fast
+      # instead of spending build time packaging an APK from code that doesn't work.
+      - name: Run unit tests
+        run: ./gradlew testDebugUnitTest --stacktrace --no-daemon
+        env:
+          GRADLE_OPTS: "-Dorg.gradle.daemon=false"
+
+      # ── 4b. Upload test reports (always, even on failure) ─────────
+      - name: Upload unit test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-reports-${{ github.run_number }}
+          path: app/build/reports/tests/testDebugUnitTest/
+          retention-days: 30
+          if-no-files-found: warn
+
+      # ── 5. Build Debug APK ───────────────────────
       - name: Build Debug APK
         run: ./gradlew assembleDebug --stacktrace --no-daemon
         env:
           GRADLE_OPTS: "-Dorg.gradle.daemon=false"
 
-      # ── 5. Upload Debug APK ──────────────────────
+      # ── 6. Upload Debug APK ──────────────────────
       - name: Upload Debug APK
         uses: actions/upload-artifact@v4
         with:
@@ -61,13 +81,13 @@ jobs:
           retention-days: 30
           if-no-files-found: error
 
-      # ── 6. Build Release APK ─────────────────────
+      # ── 7. Build Release APK ─────────────────────
       - name: Build Release APK
         run: ./gradlew assembleRelease --stacktrace --no-daemon
         env:
           GRADLE_OPTS: "-Dorg.gradle.daemon=false"
 
-      # ── 7. Upload Release APK ────────────────────
+      # ── 8. Upload Release APK ────────────────────
       - name: Upload Release APK
         uses: actions/upload-artifact@v4
         with:
