@@ -1,5 +1,37 @@
 # SmartRing – Changelog
 
+## v1.4.2 (2026-09-13)
+
+**Fixed:**
+- The weekday-selector row on the alarm-edit screen ("ימי חזרה") used 7 fixed-size
+  48.dp circles (336.dp total) inside a card with 16.dp of padding on each side —
+  on essentially every real phone width this overflowed the card's content area,
+  and since `Surface` clips its content to its rounded-corner shape, the circle
+  that overflowed got visibly cut off. In this RTL layout that was always the
+  *last* item in the list — "ש" (Saturday) — matching the exact bug report. Fixed
+  by giving each circle `Modifier.weight(1f).aspectRatio(1f)` instead of a fixed
+  size, so the 7 circles always divide the available width exactly, at any screen
+  width. (No local Android SDK/emulator in this environment to screenshot the fix
+  directly — verified analytically for common widths: 320/360/393/411/428.dp; see
+  release-checklist's "Known limitations".)
+
+**Also included (CI-only, no user-visible effect):** two follow-up fixes to get
+v1.4.1's test suite actually running in CI, discovered only once each was
+individually unblocked:
+- `mockk` was pinned at `1.14.11`, which transitively pulls `kotlin-stdlib:2.2.21`
+  — incompatible with this project's pinned Kotlin/KSP `2.0.0` and failing
+  `:app:kspDebugUnitTestKotlin` outright. Downgraded to `1.14.2`, the newest mockk
+  release still built against `kotlin-stdlib:2.0.0` (confirmed against each
+  version's POM on Maven Central).
+- Once that was fixed, the *next* build reached real Kotlin compilation of the
+  hand-written tests for the first time and turned up two genuine unresolved
+  references that had been masked by the mockk failure until now:
+  `import io.mockk.match` (not a real top-level import — `match` is a member of
+  `MockKMatcherScope`, already in scope inside `every{}`/`coVerify{}`) and a
+  missing `import kotlinx.coroutines.test.advanceUntilIdle` in two ViewModel test
+  files. Both fixed; verified against the actual `mockk-dsl-jvm`/
+  `kotlinx-coroutines-test-jvm` jars from Maven Central before fixing.
+
 ## v1.4.1 (2026-09-13) — internal, no user-visible change
 
 No WhatsNew entry: nothing in this batch is visible to a user, so writing one would

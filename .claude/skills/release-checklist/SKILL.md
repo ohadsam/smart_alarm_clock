@@ -7,15 +7,21 @@ description: Run this after implementing any feature or fix in the SmartRing And
 
 This repo is a Kotlin + Jetpack Compose Android app (MVVM + Repository + Hilt DI, Room DB,
 AlarmManager, Glance widgets) with **no local Android SDK in this environment** — there is no
-`assembleDebug`/`assembleRelease` you can run directly here. A JVM/Robolectric unit test suite
-does exist as of v1.4.1 (`app/src/test/`, see HANDOFF.md §13), but it too can only actually be
-*run* via the GitHub Actions workflow (`.github/workflows/build-apk.yml`'s "Run unit tests" step,
-before either APK is assembled) — this environment has no local JDK+Gradle set up to run
-`./gradlew test` directly either. The GitHub Actions workflow (triggered on every push to `main`)
-is therefore still the *only* real verification available (compile *and* test), and it takes
-several minutes — treat "wait for it and read the result" as a mandatory step, not optional
-polish. Do not skip a step and do not reorder them: the version bump needs the review's fixes
-already applied, and the push needs the review, docs, and (where reachable) build check done first.
+`assembleDebug`/`assembleRelease` you can run directly here, and a local `./gradlew testDebugUnitTest`
+also fails even though a JDK 21 + Gradle install genuinely is present: the agent proxy allows
+`repo1.maven.org` (Maven Central) but blocks `dl.google.com`, and AGP itself (`com.android.application`)
+only resolves from Google's Maven repo — so the build can't even configure, before any test runs.
+A JVM/Robolectric unit test suite does exist as of v1.4.1 (`app/src/test/`, see HANDOFF.md §13),
+but for the reason above it too can only actually be *run* via the GitHub Actions workflow
+(`.github/workflows/build-apk.yml`'s "Run unit tests" step, before either APK is assembled) — the
+GitHub Actions workflow (triggered on every push to `main`) is therefore still the *only* real
+compile-and-test verification available, and it takes several minutes — treat "wait for it and
+read the result" as a mandatory step, not optional polish. The Maven Central access that *is*
+available locally is still genuinely useful, though: `curl`ing a dependency's `.pom`/`.module` file
+lets you check its actual transitive versions (e.g. a candidate `kotlin-stdlib` version, per the
+mockk gotcha below) before committing to a bump, without waiting on a CI round-trip. Do not skip a
+step and do not reorder them: the version bump needs the review's fixes already applied, and the
+push needs the review, docs, and (where reachable) build check done first.
 
 If a step turns up nothing to do, say so explicitly and move on — don't pad an entry just to have
 written something.
@@ -347,6 +353,40 @@ If the user asks for a PR-based workflow going forward, follow that instead and 
   ...collectAsStateWithLifecycle()`, either use the `androidx.compose.runtime.*` wildcard import
   (matches every other screen) or add `getValue` explicitly — don't assume `Composable`/`State`
   imports alone are enough.
+
+- **A test-dependency version bump can silently pull an incompatible `kotlin-stdlib`
+  transitively, and the resulting error won't mention the dependency by name.**
+  Bumping `mockk` from `1.14.2` to `1.14.11` (done while first setting up the test
+  suite) failed `:app:kspDebugUnitTestKotlin` with a bare "Module was compiled with
+  an incompatible version of Kotlin... expected version is 2.0.0" — nothing in the
+  error names `mockk`. Root cause: `mockk` restructured around Kotlin Multiplatform
+  starting around `1.14.x`, splitting into `mockk-dsl`/`mockk-core`/`mockk-agent*`
+  pulled in via Gradle Module Metadata, and some 1.14.x releases raised their
+  `kotlin-stdlib` dependency (`1.14.2`→`2.0.0`, `1.14.4`→`2.1.20`, `1.14.11`→`2.2.21`)
+  past this project's pinned `kotlin`/`ksp` (`2.0.0`). To check what `kotlin-stdlib`
+  version a candidate release actually pulls, fetch its `.module` file from Maven
+  Central (`https://repo1.maven.org/maven2/io/mockk/<artifact>/<version>/<artifact>-<version>.module`)
+  — the plain `.pom` doesn't show it for a KMP-published library. This environment
+  has no local Android SDK, but it does have a working JDK 21 + Gradle install and
+  network access to `repo1.maven.org` (not `dl.google.com`, which the agent proxy
+  blocks) — enough to `curl` a library's `.pom`/`.module` and inspect its real
+  dependency graph before committing to a version bump, without waiting on a CI
+  round-trip. When bumping any test dependency, check this first.
+- **A failure early in a multi-stage build can mask a real, unrelated failure
+  later in the same pipeline — fixing the first doesn't mean the batch is done.**
+  The `mockk`/`kotlin-stdlib` conflict above failed the build at
+  `:app:kspDebugUnitTestKotlin`, before the hand-written test sources were ever
+  actually compiled by Kotlin. Fixing it and re-running surfaced a *second*,
+  unrelated failure at `:app:compileDebugUnitTestKotlin`: `import io.mockk.match`
+  (not a real top-level import — `match`/`coMatch` are members of
+  `MockKMatcherScope`, already in scope inside `every{}`/`coVerify{}` without any
+  import, like `any()`/`eq()`) and a missing `import kotlinx.coroutines.test.advanceUntilIdle`
+  (a real top-level extension on `TestScope`, but not automatically brought into
+  scope by `runTest`) in two ViewModel test files — both had been in the tree since
+  the test suite was first written, just never actually reached by the compiler.
+  After fixing any build-blocking issue, don't assume the next run will be green
+  just because the fix addresses the error message you saw — a fresh failure
+  further down the same pipeline is common, not a sign the first fix was wrong.
 
 ## Known limitations (don't re-report these as new findings unless you're the batch fixing them)
 

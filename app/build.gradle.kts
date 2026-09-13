@@ -14,8 +14,8 @@ android {
         applicationId   = "com.smartring.app"
         minSdk          = 26
         targetSdk       = 34
-        versionCode     = 6
-        versionName     = "1.4.1"
+        versionCode     = 7
+        versionName     = "1.4.2"
     }
 
     // A single committed keystore, reused for both build types, so every APK built
