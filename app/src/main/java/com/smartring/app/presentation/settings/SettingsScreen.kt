@@ -16,6 +16,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.VolumeUp
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -178,7 +179,10 @@ private fun ReliabilitySection() {
     }
     HorizontalDivider(Modifier.padding(horizontal = 16.dp))
     ReliabilityRow(
-        icon = Icons.Rounded.VolumeUp,
+        // AutoMirrored: a speaker icon points in the reading direction, so the bare
+        // Icons.Rounded.VolumeUp faces the wrong way in this RTL app (and the compiler
+        // deprecates it for exactly that reason).
+        icon = Icons.AutoMirrored.Rounded.VolumeUp,
         title = "עוצמת שעמור במכשיר",
         // Phrased as a condition, not a statement: this row keeps its subtitle when the
         // check passes, and "the volume is 0" next to a green check mark reads as a bug.
