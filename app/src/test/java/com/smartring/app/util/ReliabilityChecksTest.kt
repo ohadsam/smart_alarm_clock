@@ -9,6 +9,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import org.robolectric.shadows.ShadowAlarmManager
 
 /**
  * These four checks drive the "אמינות ברקע" rows in Settings and the prompt shown on
@@ -30,15 +31,27 @@ class ReliabilityChecksTest {
     @Test
     @Config(sdk = [30])
     fun `exact alarms count as granted below API 31, where the permission does not exist`() {
+        // Deliberately with the shadow saying "not allowed": below API 31 the check must
+        // not consult AlarmManager at all, because there is no permission to grant and a
+        // "missing permission" row would be unresolvable.
+        ShadowAlarmManager.setCanScheduleExactAlarms(false)
         assertTrue(ReliabilityChecks.canScheduleExactAlarms(context))
     }
 
     @Test
     @Config(sdk = [33])
     fun `exact alarms are read from AlarmManager on API 31 and up`() {
-        // Robolectric grants it by default; the point is that the real system service is
-        // consulted rather than the check being hardcoded true.
-        assertTrue(ReliabilityChecks.canScheduleExactAlarms(context))
+        // Driven in both directions rather than asserting whatever Robolectric happens
+        // to default to: what matters is that the answer tracks the system service, not
+        // that it is hardcoded either way. This is the check behind the Settings row
+        // that sends the user to the exact-alarm permission screen.
+        ShadowAlarmManager.setCanScheduleExactAlarms(false)
+        assertFalse("a revoked permission must be reported as revoked",
+            ReliabilityChecks.canScheduleExactAlarms(context))
+
+        ShadowAlarmManager.setCanScheduleExactAlarms(true)
+        assertTrue("a granted permission must be reported as granted",
+            ReliabilityChecks.canScheduleExactAlarms(context))
     }
 
     // ── Notifications: runtime permission only from API 33 ───────────────

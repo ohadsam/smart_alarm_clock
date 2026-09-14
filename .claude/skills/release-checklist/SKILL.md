@@ -611,6 +611,12 @@ If the user asks for a PR-based workflow going forward, follow that instead and 
   asserting the elapsed-hours gap, which is what proves the transition was really
   crossed rather than the wall clock being ignored.
 
+- **Don't assert a Robolectric shadow's default — drive it.** `ShadowAlarmManager`
+  defaults `canScheduleExactAlarms()` to **false**, not true, and `ShadowAudioManager`'s
+  `setStreamVolume` is `protected` (set the volume through `AudioManager`'s own public
+  API instead). Both cost a CI round here. A test that asserts a default proves nothing
+  anyway: set the state explicitly, in both directions where the check is a boolean gate.
+
 ## Known limitations (don't re-report these as new findings unless you're the batch fixing them)
 
 - **Settings' English toggle doesn't change any visible UI text.** Every screen hardcodes Hebrew
