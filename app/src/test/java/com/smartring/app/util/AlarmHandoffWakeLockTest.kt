@@ -7,10 +7,11 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
-import org.robolectric.Shadows.shadowOf
+import org.robolectric.shadows.ShadowPowerManager
 
 /**
  * The lock that covers the window between the alarm broadcast and the firing service
@@ -23,12 +24,20 @@ class AlarmHandoffWakeLockTest {
 
     private val ctx: Context get() = ApplicationProvider.getApplicationContext()
 
-    @After fun tearDown() = AlarmHandoffWakeLock.release()
+    // The shadow records the latest wake lock in a *static* field, and this object
+    // holds its own across tests, so both have to be reset or one test's lock shows up
+    // in the next one's assertions.
+    @Before fun setUp() = ShadowPowerManager.clearWakeLocks()
+
+    @After fun tearDown() {
+        AlarmHandoffWakeLock.release()
+        ShadowPowerManager.clearWakeLocks()
+    }
 
     /** The most recently created WakeLock in this process — the one the object under
-     *  test just took, since nothing else in a unit test takes any. */
-    private fun latestLock(): PowerManager.WakeLock =
-        shadowOf(ctx.getSystemService(PowerManager::class.java)).latestWakeLock
+     *  test just took, since nothing else in a unit test takes any. Static on the
+     *  shadow class itself, not a property of a shadowOf(powerManager) instance. */
+    private fun latestLock(): PowerManager.WakeLock = ShadowPowerManager.getLatestWakeLock()
 
     @Test
     fun `acquire takes a lock and release lets it go`() {

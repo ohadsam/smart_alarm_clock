@@ -732,6 +732,17 @@ If the user asks for a PR-based workflow going forward, follow that instead and 
   ring duration is also 60s — so the very first round anyone adds never plays. A default
   that produces a silently-inert configuration is worse than a bad value the user chose.
 
+- **Check a Robolectric shadow's accessor against the pinned version's source before using
+  it — static class method vs. instance property is not guessable.** `ShadowPowerManager`
+  exposes `getLatestWakeLock()` as a **static** on the shadow class (with a matching static
+  `clearWakeLocks()`), not as a property of `shadowOf(powerManager)`; assuming the latter
+  cost a whole CI round. `raw.githubusercontent.com` is reachable from this environment, so
+  `curl` the shadow from the `robolectric-<version>` tag and read it — the same habit that
+  already caught `ShadowAudioManager.setStreamVolume` being `protected` and
+  `ShadowAlarmManager.canScheduleExactAlarms` defaulting to false. And when a shadow keeps
+  state in a static field, reset it in `@Before`/`@After` or one test's state leaks into the
+  next.
+
 ## Known limitations (don't re-report these as new findings unless you're the batch fixing them)
 
 - **Settings' English toggle doesn't change any visible UI text.** Every screen hardcodes Hebrew
