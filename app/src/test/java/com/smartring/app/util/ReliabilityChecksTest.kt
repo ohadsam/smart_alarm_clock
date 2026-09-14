@@ -8,7 +8,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
-import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 
 /**
@@ -67,15 +66,18 @@ class ReliabilityChecksTest {
         // Every ring's volume is a percentage *of this stream*, so at zero the alarm is
         // silent no matter what the app is set to — which is exactly the failure that
         // looks like "the alarm didn't go off".
+        // Set through AudioManager's own public API rather than the Robolectric shadow,
+        // whose setStreamVolume is protected — and this way the test drives the same
+        // call path the device's volume keys do.
         val audio = context.getSystemService(AudioManager::class.java)
-        shadowOf(audio).setStreamVolume(AudioManager.STREAM_ALARM, 0)
+        audio.setStreamVolume(AudioManager.STREAM_ALARM, 0, 0)
         assertFalse(ReliabilityChecks.isAlarmVolumeAudible(context))
     }
 
     @Test
     fun `an audible alarm stream is reported as fine`() {
         val audio = context.getSystemService(AudioManager::class.java)
-        shadowOf(audio).setStreamVolume(AudioManager.STREAM_ALARM, 7)
+        audio.setStreamVolume(AudioManager.STREAM_ALARM, 7, 0)
         assertTrue(ReliabilityChecks.isAlarmVolumeAudible(context))
     }
 
