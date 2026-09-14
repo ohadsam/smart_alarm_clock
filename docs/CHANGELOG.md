@@ -1,5 +1,70 @@
 # SmartRing – Changelog
 
+## v1.6.6 (2026-09-14)
+
+Two findings, and both are the same shape as something already fixed elsewhere in the
+app — which is the useful part. The widget palette was measured and corrected in
+v1.6.3; the app's own theme never was. The DataStore guard was applied to one
+ViewModel in v1.6.4 and the other in v1.6.5. Fixing an instance is not fixing the
+class, and this round is mostly the cost of that.
+
+### The app's own colors failed WCAG AA, light mode worst
+
+Measured, not eyeballed. Against the surfaces they are actually drawn on:
+
+| Role | Was | On |
+|---|---|---|
+| light `tertiary` | **3.13:1** | surface (2.48 on surfaceVariant) |
+| light `error` | **4.34:1** | surface (3.44 on surfaceVariant) |
+| light `primary` | **4.31:1** | surfaceVariant |
+| light `secondary` | **4.25:1** | surfaceVariant |
+| dark `onSurfaceVariant` | **4.21:1** | surface (3.76 on surfaceVariant) |
+
+None of these is theoretical: all four accents and `onSurfaceVariant` are used as
+literal text and icon colors — the ring screen's crescendo readout and reminder card,
+History's status labels, the list card's badges and supporting text, Settings'
+subtitles. And light mode is a setting the user picks, so "looks fine here" proves
+nothing. `dark onSurfaceVariant` is the same `#6E7A96` already corrected once in the
+widget palette and never checked here.
+
+The light accents are now the same hues darkened, matching the widget's light palette
+for blue and green so the app and its widgets stay one design.
+
+**A second defect fell out of writing the test for that:** overriding an accent
+without its matching `on` color leaves Material's own baseline in place — and that
+baseline is a *purple* family, while this app's accents are blue, gold, mint and pink.
+So the label on a filled primary button was Material's dark purple `#381E72` at
+**4.12:1**, and on the error color its dark maroon `#601410` at **4.17:1** — both under
+AA, and both chromatically unrelated to the button underneath. Every accent now names
+its own `on` color.
+
+### Five ways to close the app from a button
+
+`startActivity` with an intent nothing resolves throws `ActivityNotFoundException`, and
+every settings screen the app links to is optional on some build: the exact-alarm and
+full-screen-intent pages only exist from API 31 and 34, and
+`ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` is missing outright on some AOSP, Go and
+OEM images. All four Settings rows called it bare — inside the reliability section
+whose entire purpose is making the app more dependable. `openSystemScreen()` now falls
+back to the app's own details page (which every Android build has, and which contains
+the same controls a level further in) and reports failure so the row can say so instead
+of looking broken.
+
+The ringtone picker and the log-file export launch activities the same way and could
+throw the same way; both now keep their state and show a line instead.
+
+### Accessibility
+
+Settings' back button had no `contentDescription` — the only one of the app's four
+screens missing it, so a screen reader announced an unlabeled button.
+
+**Tests (244 → 252):** `ThemeContrastTest` (5) measures every role against every
+surface it can be drawn on, in both schemes, plus the label-on-filled-accent pairs, and
+asserts the dark-tuned raw constants never appear in the light scheme. `SystemScreensTest`
+(3) uses Robolectric's `checkActivities(true)` — without which every intent "resolves"
+and this entire class of bug is invisible to tests — to pin that a missing screen
+reports failure rather than throwing.
+
 ## v1.6.5 (2026-09-14)
 
 A coverage round: walk every option the app exposes, ask which of them a test would

@@ -599,18 +599,26 @@ private fun RingsSection(
     val audioPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
         Manifest.permission.READ_MEDIA_AUDIO else Manifest.permission.READ_EXTERNAL_STORAGE
 
+    // A device with no ringtone picker (stripped AOSP/Go builds) makes launch() throw
+    // ActivityNotFoundException straight out of the click handler. The round keeps its
+    // current sound and the user is told, rather than the app closing.
+    var pickerMissing by remember { mutableStateOf(false) }
+
     fun openPicker(index: Int) {
         pickingIndex = index
-        ringtonePicker.launch(Intent(RingtoneManager.ACTION_RINGTONE_PICKER).apply {
-            putExtra(RingtoneManager.EXTRA_RINGTONE_TYPE, RingtoneManager.TYPE_ALARM)
-            putExtra(RingtoneManager.EXTRA_RINGTONE_SHOW_DEFAULT, true)
-            putExtra(RingtoneManager.EXTRA_RINGTONE_SHOW_SILENT, false)
-            putExtra(RingtoneManager.EXTRA_RINGTONE_DEFAULT_URI,
-                RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM))
-            val current = rings.getOrNull(index)?.ringtoneUri
-            if (current != null && current != "default")
-                putExtra(RingtoneManager.EXTRA_RINGTONE_EXISTING_URI, Uri.parse(current))
-        })
+        val launched = runCatching {
+            ringtonePicker.launch(Intent(RingtoneManager.ACTION_RINGTONE_PICKER).apply {
+                putExtra(RingtoneManager.EXTRA_RINGTONE_TYPE, RingtoneManager.TYPE_ALARM)
+                putExtra(RingtoneManager.EXTRA_RINGTONE_SHOW_DEFAULT, true)
+                putExtra(RingtoneManager.EXTRA_RINGTONE_SHOW_SILENT, false)
+                putExtra(RingtoneManager.EXTRA_RINGTONE_DEFAULT_URI,
+                    RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM))
+                val current = rings.getOrNull(index)?.ringtoneUri
+                if (current != null && current != "default")
+                    putExtra(RingtoneManager.EXTRA_RINGTONE_EXISTING_URI, Uri.parse(current))
+            })
+        }.isSuccess
+        if (!launched) { pickingIndex = -1; pickerMissing = true }
     }
 
     // Opens the picker whatever the user answers: a denied permission only limits
@@ -629,6 +637,12 @@ private fun RingsSection(
     }
 
     EditCard {
+        if (pickerMissing) {
+            Text("לא נמצא בורר צלצולים במכשיר הזה — הסבב ימשיך עם הצליל הנוכחי.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error)
+            Spacer(Modifier.height(8.dp))
+        }
         rings.forEachIndexed { i, ring ->
             Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {
                 Text("סבב ${i + 1}", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall)

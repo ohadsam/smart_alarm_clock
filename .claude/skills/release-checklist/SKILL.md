@@ -771,6 +771,31 @@ If the user asks for a PR-based workflow going forward, follow that instead and 
   recurrence-end options, and the only one that advances on its own — had no scheduler
   coverage at all while `UNTIL` and `FOREVER` both did.
 
+- **Overriding a Material accent without its matching `on*` color leaves Material's own
+  baseline there, and that baseline is a purple family.** `darkColorScheme(primary=Blue)`
+  keeps `onPrimary = #381E72` — dark purple as the label on a blue filled button, at
+  4.12:1. Whenever `primary`/`secondary`/`tertiary`/`error` is customised, set
+  `onPrimary`/`onSecondary`/`onTertiary`/`onError` alongside it, and check the pair.
+- **Measure theme colors against every surface they can land on, not just the
+  background.** `surfaceVariant` is what Material fills cards and containers with, so an
+  accent that clears 4.5:1 on `surface` can fail the moment the same label moves inside a
+  card (light `primary` here: 5.43 on surface, 4.31 on surfaceVariant). The check is
+  cheap and belongs in a test — `ThemeContrastTest` and `WidgetPaletteTest` are the two
+  that exist; extend them rather than re-deriving the arithmetic.
+- **`startActivity` with an intent nothing resolves throws — and every `Settings.ACTION_*`
+  screen is optional on some build.** The exact-alarm and full-screen-intent pages start
+  at API 31/34, and `ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` is absent on some AOSP,
+  Go and OEM images. Route every jump through `util/SystemScreens.kt`'s
+  `openSystemScreen()`, which falls back to the app's own details page and reports
+  failure. The same applies to `ActivityResultLauncher.launch()` — the ringtone picker
+  and `CreateDocument` throw out of the click handler just as readily. In tests, this
+  class of bug is invisible unless `shadowOf(application).checkActivities(true)` is set:
+  Robolectric resolves every intent by default.
+- **Check that every icon-only `IconButton` has a description, across all screens at
+  once.** Three of this app's four screens labelled their back arrow "חזור" and Settings
+  passed `null` — the kind of gap that only shows up when you grep the whole repo for the
+  icon rather than reading one screen at a time.
+
 ## Known limitations (don't re-report these as new findings unless you're the batch fixing them)
 
 - **Settings' English toggle doesn't change any visible UI text.** Every screen hardcodes Hebrew

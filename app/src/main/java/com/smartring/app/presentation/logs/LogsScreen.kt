@@ -84,7 +84,11 @@ fun LogsScreen(onBack: () -> Unit, vm: LogsViewModel = hiltViewModel()) {
                     }) { Icon(Icons.Rounded.ContentCopy, "העתק הכל") }
                     IconButton({
                         val name = "smartring-logs-${System.currentTimeMillis()}.txt"
-                        saveLauncher.launch(name)
+                        // ACTION_CREATE_DOCUMENT needs a documents provider, which a
+                        // stripped build may not have; launch() then throws straight out
+                        // of this click handler. The copy button still works, so say so
+                        // rather than closing the app.
+                        exportError = runCatching { saveLauncher.launch(name) }.isFailure
                     }) { Icon(Icons.Rounded.Download, "הורד כקובץ") }
                     if (s.logs.isNotEmpty()) {
                         IconButton({ showClearDialog = true }) {

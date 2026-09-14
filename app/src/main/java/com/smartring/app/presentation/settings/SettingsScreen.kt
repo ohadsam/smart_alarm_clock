@@ -32,6 +32,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.smartring.app.BuildConfig
 import com.smartring.app.util.ReliabilityChecks
+import com.smartring.app.util.openSystemScreen
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -41,7 +42,7 @@ fun SettingsScreen(onBack: () -> Unit, onOpenLogs: () -> Unit = {}, vm: Settings
     Scaffold(
         topBar = {
             TopAppBar(
-                navigationIcon = { IconButton(onBack) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, null) } },
+                navigationIcon = { IconButton(onBack) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, "חזור") } },
                 title = { Text("הגדרות", fontWeight = FontWeight.ExtraBold) },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.background),
@@ -109,6 +110,9 @@ fun SettingsScreen(onBack: () -> Unit, onOpenLogs: () -> Unit = {}, vm: Settings
 @Composable
 private fun ReliabilitySection() {
     val context = LocalContext.current
+    // False only when neither the specific settings screen nor this app's own details
+    // page could be opened — rare, but the alternative is a button that looks broken.
+    var opened by remember { mutableStateOf(true) }
 
     var notifGranted by remember { mutableStateOf(ReliabilityChecks.isNotificationsGranted(context)) }
     var exactGranted by remember { mutableStateOf(ReliabilityChecks.canScheduleExactAlarms(context)) }
@@ -133,6 +137,12 @@ private fun ReliabilitySection() {
 
     val notifLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { refresh() }
 
+    if (!opened) {
+        Text("לא נמצא מסך הגדרות מתאים במכשיר הזה. אפשר לשנות זאת ידנית בהגדרות המערכת של האפליקציה.",
+            Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.error)
+    }
     ReliabilityRow(
         icon = Icons.Rounded.Notifications,
         title = "התראות",
@@ -153,7 +163,7 @@ private fun ReliabilitySection() {
         actionLabel = "אפשר",
         onAction = {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                context.startActivity(Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM).apply {
+                opened = openSystemScreen(context, Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM).apply {
                     data = Uri.fromParts("package", context.packageName, null)
                 })
             }
@@ -167,7 +177,7 @@ private fun ReliabilitySection() {
         granted = batteryGranted,
         actionLabel = "כבה",
         onAction = {
-            context.startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+            opened = openSystemScreen(context, Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
                 data = Uri.parse("package:${context.packageName}")
             })
         },
@@ -183,7 +193,7 @@ private fun ReliabilitySection() {
             granted = fullScreenGranted,
             actionLabel = "אפשר",
             onAction = {
-                context.startActivity(Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT).apply {
+                opened = openSystemScreen(context, Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT).apply {
                     data = Uri.fromParts("package", context.packageName, null)
                 })
             },
@@ -201,7 +211,7 @@ private fun ReliabilitySection() {
         subtitle = "אם עוצמת ערוץ השעמורים במכשיר היא 0, כל שעמור יהיה שקט — ללא קשר לעוצמה שהוגדרה באפליקציה",
         granted = volumeAudible,
         actionLabel = "פתח צליל",
-        onAction = { context.startActivity(Intent(Settings.ACTION_SOUND_SETTINGS)) },
+        onAction = { opened = openSystemScreen(context, Intent(Settings.ACTION_SOUND_SETTINGS)) },
     )
 }
 
