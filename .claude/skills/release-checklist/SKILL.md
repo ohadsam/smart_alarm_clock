@@ -743,6 +743,34 @@ If the user asks for a PR-based workflow going forward, follow that instead and 
   state in a static field, reset it in `@Before`/`@After` or one test's state leaks into the
   next.
 
+- **When a fix applies to a *class* of code, grep for the whole class before calling it
+  done.** v1.6.4 hardened `SettingsViewModel`'s DataStore reads and shipped with
+  `WhatsNewViewModel` still able to crash the app on launch the same way — they keep
+  separate DataStore files, so nothing connected them. Same shape as the `logFmt`
+  compile break earlier: the fix was right, the sweep for other callers wasn't. After
+  any fix of the form "X was missing a guard", `grep` for every other X in the repo
+  before moving on.
+- **Logic inside a BroadcastReceiver or Service is unreachable by both suites here.**
+  `goAsync()` needs a live pending broadcast result and `@AndroidEntryPoint` needs the
+  Hilt graph, so anything decided inside `onReceive` has no coverage at all. The repo's
+  answer is consistent: extract the *decision* as a pure function taking plain data
+  (`buildUpcomingAlarms`, `ringSetupWarnings`, `snoozeDecision`/`stopDecision`,
+  `formatNextFireAt`) and leave the component to carry it out. Reach for this whenever a
+  review finds branchy logic in a receiver, service or worker — and prefer it to writing
+  no test.
+- **A thing declared in two places needs a test that compares them.** The widget palette
+  (Kotlin + XML colors), the reschedule triggers (Kotlin set + manifest intent-filter),
+  `WHATS_NEW_HISTORY`'s versionCode vs. `build.gradle.kts` — every one of these fails
+  silently when the two sides drift, and the drift is invisible in review because each
+  side reads correctly on its own. For the manifest specifically, resolve through the
+  real `PackageManager` (`queryBroadcastReceivers`, `getReceiverInfo`) so the test asks
+  the same question the OS does rather than re-parsing XML.
+- **"Which options does the app expose, and which would a test catch being broken?" is
+  worth asking as its own pass**, separately from reviewing changed code. Walking the
+  edit screen's controls that way is what surfaced that `COUNT` — one of three
+  recurrence-end options, and the only one that advances on its own — had no scheduler
+  coverage at all while `UNTIL` and `FOREVER` both did.
+
 ## Known limitations (don't re-report these as new findings unless you're the batch fixing them)
 
 - **Settings' English toggle doesn't change any visible UI text.** Every screen hardcodes Hebrew

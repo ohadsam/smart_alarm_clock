@@ -446,6 +446,74 @@ class AlarmSchedulerTest {
     // answers "same time tomorrow" for an alarm with no declared schedule, every
     // one-time alarm quietly became a daily one.
 
+    // ── Recurrence that ends after N occurrences ─────────────────────
+    // FOREVER and UNTIL were both covered; COUNT is the third option the edit screen
+    // offers and the only one whose end condition advances on its own, from the
+    // occurrencesFired the firing service increments on every ring.
+
+    @Test
+    fun `schedule() arms nothing once a COUNT recurrence has run out`() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val shadow = shadowOf(context.getSystemService(AlarmManager::class.java))
+
+        val alarm = Alarm(
+            id = 20, hour = 8, minute = 0, repeatDaysBitmask = 0b1111111,
+            repeatFrequency = RepeatFrequency.WEEKLY,
+            recurrenceEnd = RecurrenceEnd(RecurrenceEndType.COUNT, count = 3),
+            occurrencesFired = 2,
+        )
+        scheduler.schedule(alarm)
+        assertNotNull("precondition: the third occurrence is still due", shadow.peekNextScheduledAlarm())
+
+        // The third ring has now happened, so the alarm is finished.
+        scheduler.schedule(alarm.copy(occurrencesFired = 3))
+        assertNull("a spent COUNT recurrence must not stay armed", shadow.peekNextScheduledAlarm())
+    }
+
+    @Test
+    fun `a COUNT recurrence keeps arming while occurrences remain`() {
+        val alarm = Alarm(
+            id = 21, hour = 8, minute = 0, repeatDaysBitmask = 0b1111111,
+            repeatFrequency = RepeatFrequency.WEEKLY,
+            recurrenceEnd = RecurrenceEnd(RecurrenceEndType.COUNT, count = 10),
+            occurrencesFired = 9,
+        )
+        // The last remaining occurrence still has to be armed — stopping one early is
+        // the same bug as running one over.
+        assertNotNull(scheduler.nextRecurringFireTime(alarm))
+    }
+
+    @Test
+    fun `the COUNT cutoff does not touch nextFireTime itself`() {
+        // isRecurrenceExpired() is the gate, applied in schedule(); nextFireTime() is
+        // deliberately unaware of it, so the two can't both half-apply the rule.
+        val alarm = Alarm(
+            hour = 8, minute = 0, repeatDaysBitmask = 0b1111111,
+            repeatFrequency = RepeatFrequency.WEEKLY,
+            recurrenceEnd = RecurrenceEnd(RecurrenceEndType.COUNT, count = 1),
+            occurrencesFired = 99,
+        )
+        assertNotNull(scheduler.nextFireTime(alarm, now = utcMillis(2030, 6, 20, 7, 0)))
+    }
+
+    @Test
+    fun `an exhausted COUNT recurrence also clears a pending snooze`() {
+        // The widgets read pendingSnoozeUntil() directly; a snooze left armed for an
+        // alarm that has finished its run would keep advertising a ring that will
+        // never come.
+        val alarm = Alarm(
+            id = 22, hour = 8, minute = 0, repeatDaysBitmask = 0b1111111,
+            repeatFrequency = RepeatFrequency.WEEKLY,
+            recurrenceEnd = RecurrenceEnd(RecurrenceEndType.COUNT, count = 2),
+            occurrencesFired = 1,
+        )
+        scheduler.scheduleAt(alarm, System.currentTimeMillis() + 5 * 60_000L)
+        assertNotNull("precondition: a snooze is pending", scheduler.pendingSnoozeUntil(alarm))
+
+        scheduler.schedule(alarm.copy(occurrencesFired = 2))
+        assertNull(scheduler.pendingSnoozeUntil(alarm))
+    }
+
     @Test
     fun `nextRecurringFireTime is null for a plain one-time alarm`() {
         val alarm = Alarm(hour = 8, minute = 0, repeatDaysBitmask = 0)

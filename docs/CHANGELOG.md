@@ -1,5 +1,75 @@
 # SmartRing – Changelog
 
+## v1.6.5 (2026-09-14)
+
+A coverage round: walk every option the app exposes, ask which of them a test would
+catch being broken, and close the gaps. Two real defects fell out of it, and the
+biggest structural change is that the alarm notification's two buttons became
+testable at all.
+
+### Fixed
+
+- **A corrupt "what's new" preferences file crashed the app on launch.** Exactly the
+  failure fixed for `SettingsViewModel` in v1.6.4 — `DataStore.data` reports read
+  errors by throwing into the collector — except this one was missed because the two
+  features keep separate DataStore files. Worse here: the collector also sets
+  `checked`, which `AlarmListScreen`'s `ReliabilityGate` waits on, so the same
+  exception would have silently disabled the on-launch reliability prompts too. Now
+  every read and write in that ViewModel is best-effort and always marks itself
+  checked.
+- **A transient database error could block a snooze the user was entitled to.**
+  `snoozeCountSinceLastFire` threw into the receiver's catch, which logged and gave
+  up — silencing the alarm without re-arming it. An unreadable count now reads as 0,
+  which allows the snooze rather than refusing it.
+
+### Made testable
+
+`StopAlarmReceiver` and `SnoozeAlarmReceiver` carried two of the app's strongest
+promises — Shabbat mode accepting *no* interaction anywhere, and the snooze cap being
+real — in code neither suite could reach: `goAsync()` needs a live pending broadcast
+result and `@AndroidEntryPoint` needs the Hilt graph. The rules moved into the pure
+`util/NotificationActions.kt` (`stopDecision`, `snoozeDecision`), leaving the
+receivers to carry them out. This is the same pattern `buildUpcomingAlarms` and
+`ringSetupWarnings` already follow here.
+
+The decision table is now pinned in both directions, which matters because both are
+harmful: refusing a tap the user is entitled to leaves a phone blaring, and honouring
+one it shouldn't breaks Shabbat mode from the lock screen, where the ring screen's own
+guard never runs. Shabbat mode is asserted to outrank every other reason to act — if
+those checks were ordered the other way, a Shabbat alarm would get silenced through
+one of the degraded paths.
+
+### Coverage added (203 → 244)
+
+- **`NotificationActionsTest` (12)** — the above: Shabbat refusal on both buttons,
+  fail-open on an unreadable alarm, snooze-disabled and cap-reached degrading to a
+  stop (logged as `STOPPED` vs `MISSED`, which are different stories in the history),
+  and the cap boundary from both sides.
+- **`AlarmMapperTest` (13)** — the boundary every alarm crosses twice on its way to
+  disk, previously only exercised incidentally through Room. Whole-object round trips
+  (so a field added to `Alarm` and forgotten in either direction fails without anyone
+  adding a case), ring ordering by `orderIndex` rather than row order, child rows being
+  re-parented on save, and the enum fallbacks that stop one unreadable row from taking
+  the entire alarm list down.
+- **`BootReceiverActionsTest` (4)** — the reschedule triggers are declared twice, in
+  Kotlin and in the manifest's intent-filter, and an action in only one of them fails
+  completely silently. The test resolves each action through the real `PackageManager`
+  against the parsed manifest, which is the same question the OS asks. This is the
+  drift that let the exact-alarm case go unnoticed.
+- **`AlarmSchedulerTest` (+4)** — `COUNT` recurrence, the one end condition of the
+  three that advances on its own. It must arm the last remaining occurrence and arm
+  nothing after it; stopping one early is the same bug as running one over. Also that
+  an exhausted recurrence clears a pending snooze, which the widgets read directly.
+- **`AlarmEditViewModelTest` (+8)** — the new failed-save path (spinner cleared, error
+  shown, edits kept so they can be retried, stale error cleared on retry), and that
+  editing preserves `isEnabled`/`isFrozen`/`occurrencesFired`, which the screen doesn't
+  show and which a rebuild-from-the-form once silently reset.
+
+**Checked and already covered:** every vibration mode, all four recurrence
+frequencies, `UNTIL` and `FOREVER` recurrence ends, specific dates alongside weekday
+recurrence, DST in both directions, snooze survival across reboot, widget palette and
+contrast, the Room migrations, and the two date conventions across four timezones.
+
 ## v1.6.4 (2026-09-14)
 
 A pass over everything the previous rounds hadn't reached — the receivers, the

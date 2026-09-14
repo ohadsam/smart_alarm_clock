@@ -41,23 +41,33 @@ class WhatsNewViewModel @Inject constructor(
 
     init {
         viewModelScope.launch {
-            val lastSeen = ctx.whatsNewDataStore.data.first()[kLastSeen] ?: 0
+            // Everything in here is best-effort: this feature is a dialog. An
+            // unreadable DataStore file or a database error must not take the app down
+            // on launch, and — just as important — must not leave `checked` false
+            // forever, since AlarmListScreen's ReliabilityGate waits on it before
+            // offering its own prompt. Failing closed (show nothing, mark checked)
+            // costs one "what's new" dialog; failing open costs the app.
+            val lastSeen = runCatching { ctx.whatsNewDataStore.data.first()[kLastSeen] }
+                .getOrNull() ?: 0
             // The alarms lookup only matters for the lastSeen == 0 case (see
             // whatsNewEntriesFor), so it isn't worth a DB read on every other launch.
-            val hasExistingAlarms = lastSeen == 0 && repository.observeAlarms().first().isNotEmpty()
+            val hasExistingAlarms = lastSeen == 0 &&
+                runCatching { repository.observeAlarms().first().isNotEmpty() }.getOrDefault(false)
             val entries = whatsNewEntriesFor(lastSeen, BuildConfig.VERSION_CODE, hasExistingAlarms)
             // Nothing to show on a fresh install, so record the current version straight
             // away — otherwise the *next* update would look like "upgrading from
             // nothing" all over again and replay the entire history.
-            if (entries.isEmpty() && lastSeen == 0) {
-                ctx.whatsNewDataStore.edit { it[kLastSeen] = BuildConfig.VERSION_CODE }
-            }
+            if (entries.isEmpty() && lastSeen == 0) markSeen()
             _state.update { it.copy(entriesToShow = entries, checked = true) }
         }
     }
 
     fun dismiss() {
         _state.update { it.copy(entriesToShow = emptyList()) }
-        viewModelScope.launch { ctx.whatsNewDataStore.edit { it[kLastSeen] = BuildConfig.VERSION_CODE } }
+        viewModelScope.launch { markSeen() }
+    }
+
+    private suspend fun markSeen() {
+        runCatching { ctx.whatsNewDataStore.edit { it[kLastSeen] = BuildConfig.VERSION_CODE } }
     }
 }

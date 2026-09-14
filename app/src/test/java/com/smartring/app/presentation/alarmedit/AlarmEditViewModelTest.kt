@@ -2,6 +2,8 @@ package com.smartring.app.presentation.alarmedit
 
 import com.smartring.app.data.repository.AlarmRepository
 import com.smartring.app.domain.model.Alarm
+import com.smartring.app.domain.model.RecurrenceEnd
+import com.smartring.app.domain.model.RecurrenceEndType
 import com.smartring.app.util.AlarmScheduler
 import com.smartring.app.util.AppLogger
 import io.mockk.coEvery
@@ -235,4 +237,117 @@ class AlarmEditViewModelTest {
 
         assertFalse("re-typing the original name should clear isDirty entirely", vm.isDirty)
     }
+
+    // ── A save that fails ─────────────────────────────────────────
+
+    @Test
+    fun `a failing save clears the spinner and reports the failure`() = runTest(testDispatcher) {
+        // Before this had an error path at all, isSaving stayed true forever: the save
+        // button span on a screen that never closed, and nothing told the user their
+        // alarm had not been written.
+        coEvery { repository.saveAlarm(any()) } throws IllegalStateException("disk full")
+        vm.setName("Wake up")
+
+        vm.save()
+        advanceUntilIdle()
+
+        assertFalse("the spinner must stop", vm.state.value.isSaving)
+        assertTrue("the failure must be visible", vm.state.value.saveError)
+        assertFalse("a failed save must not navigate away", vm.state.value.isSaved)
+    }
+
+    @Test
+    fun `a save that fails while arming the alarm is reported too`() = runTest(testDispatcher) {
+        // The row is written but the alarm is not armed — reporting success here would
+        // leave an alarm sitting in the list that never rings.
+        coEvery { repository.saveAlarm(any()) } returns 42L
+        every { scheduler.schedule(any()) } throws SecurityException("too many alarms")
+        vm.setName("Wake up")
+
+        vm.save()
+        advanceUntilIdle()
+
+        assertTrue(vm.state.value.saveError)
+        assertFalse(vm.state.value.isSaved)
+    }
+
+    @Test
+    fun `the edited values survive a failed save so they can be retried`() = runTest(testDispatcher) {
+        coEvery { repository.saveAlarm(any()) } throws IllegalStateException("disk full")
+        vm.setName("Wake up")
+        vm.setTime(6, 30)
+
+        vm.save()
+        advanceUntilIdle()
+
+        assertEquals("Wake up", vm.state.value.name)
+        assertEquals(6, vm.state.value.hour)
+        assertEquals(30, vm.state.value.minute)
+    }
+
+    @Test
+    fun `retrying after a failure clears the previous error`() = runTest(testDispatcher) {
+        coEvery { repository.saveAlarm(any()) } throws IllegalStateException("disk full")
+        vm.setName("Wake up")
+        vm.save()
+        advanceUntilIdle()
+        assertTrue(vm.state.value.saveError)
+
+        coEvery { repository.saveAlarm(any()) } returns 42L
+        vm.save()
+        advanceUntilIdle()
+
+        assertFalse("a stale error banner would outlive the problem", vm.state.value.saveError)
+        assertTrue(vm.state.value.isSaved)
+    }
+
+    // ── Fields the screen doesn't edit but must not reset ──────────
+
+    @Test
+    fun `editing an alarm preserves the state it does not show`() = runTest(testDispatcher) {
+        // isEnabled/isFrozen/occurrencesFired are not on this screen, and rebuilding the
+        // alarm from the form alone silently re-enabled a disabled alarm, un-froze a
+        // frozen one, and reset a COUNT-limited recurrence's progress to zero — so a
+        // recurrence set to run 10 times restarted from 1 on every edit.
+        val existing = Alarm(id = 7, name = "בוקר", isEnabled = false, isFrozen = true,
+            occurrencesFired = 6,
+            recurrenceEnd = RecurrenceEnd(RecurrenceEndType.COUNT, count = 10))
+        coEvery { repository.getAlarm(7) } returns existing
+        coEvery { repository.saveAlarm(any()) } returns 7L
+
+        vm.loadAlarm(7)
+        advanceUntilIdle()
+        vm.setName("בוקר מאוחר")
+        vm.save()
+        advanceUntilIdle()
+
+        coVerify {
+            repository.saveAlarm(match {
+                it.name == "בוקר מאוחר" && !it.isEnabled && it.isFrozen && it.occurrencesFired == 6
+            })
+        }
+    }
+
+    @Test
+    fun `saving trims whitespace from the name`() = runTest(testDispatcher) {
+        coEvery { repository.saveAlarm(any()) } returns 1L
+        vm.setName("   בוקר   ")
+
+        vm.save()
+        advanceUntilIdle()
+
+        coVerify { repository.saveAlarm(match { it.name == "בוקר" }) }
+    }
+
+    @Test
+    fun `a name of only whitespace is rejected like a blank one`() = runTest(testDispatcher) {
+        vm.setName("    ")
+
+        vm.save()
+        advanceUntilIdle()
+
+        assertTrue(vm.state.value.nameError)
+        coVerify(exactly = 0) { repository.saveAlarm(any()) }
+    }
 }
+

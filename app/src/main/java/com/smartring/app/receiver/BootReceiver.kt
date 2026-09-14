@@ -50,8 +50,15 @@ class BootReceiver : BroadcastReceiver() {
                 .build())
     }
 
-    private companion object {
-        val RESCHEDULE_ACTIONS = setOf(
+    companion object {
+        /**
+         * Every broadcast that means "what AlarmManager was holding is gone or wrong".
+         * Internal rather than private so BootReceiverActionsTest can check it against
+         * the manifest's own intent-filter: adding an action to one side and not the
+         * other is silent — the receiver simply never runs for it, which is exactly how
+         * the exact-alarm permission case went unnoticed.
+         */
+        internal val RESCHEDULE_ACTIONS = setOf(
             Intent.ACTION_BOOT_COMPLETED,
             Intent.ACTION_MY_PACKAGE_REPLACED,
             Intent.ACTION_TIME_CHANGED,
