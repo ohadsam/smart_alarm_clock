@@ -3,6 +3,7 @@ package com.smartring.app.presentation.alarmedit
 import android.content.Intent
 import android.media.RingtoneManager
 import android.net.Uri
+import android.os.Build
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -15,6 +16,9 @@ import androidx.compose.foundation.shape.*
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.Label
+import androidx.compose.material.icons.automirrored.rounded.StickyNote2
+import androidx.compose.material.icons.automirrored.rounded.TrendingUp
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -105,7 +109,7 @@ fun AlarmEditScreen(
                     modifier      = Modifier.fillMaxWidth(),
                     label         = { Text("שם השעמור") },
                     placeholder   = { Text("למשל: קום לעבודה") },
-                    leadingIcon   = { Icon(Icons.Rounded.Label, null) },
+                    leadingIcon   = { Icon(Icons.AutoMirrored.Rounded.Label, null) },
                     isError       = s.nameError,
                     supportingText = if (s.nameError) {{ Text("נדרש שם") }} else null,
                     singleLine    = true,
@@ -288,7 +292,7 @@ fun AlarmEditScreen(
                     onValueChange = vm::setReminderText,
                     modifier      = Modifier.fillMaxWidth(),
                     label         = { Text("טקסט תזכורת (אופציונלי)") },
-                    leadingIcon   = { Icon(Icons.Rounded.StickyNote2, null) },
+                    leadingIcon   = { Icon(Icons.AutoMirrored.Rounded.StickyNote2, null) },
                     maxLines      = 2,
                     shape         = RoundedCornerShape(14.dp),
                 )
@@ -341,7 +345,7 @@ fun AlarmEditScreen(
                 EditCard {
                     Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Rounded.TrendingUp, null, Modifier.size(18.dp),
+                            Icon(Icons.AutoMirrored.Rounded.TrendingUp, null, Modifier.size(18.dp),
                                 tint = MaterialTheme.colorScheme.primary)
                             Spacer(Modifier.width(8.dp))
                             FieldLabel("צלצול מתחזק",
@@ -516,7 +520,14 @@ private fun RingsSection(
     val context = LocalContext.current
     var pickingIndex by remember { mutableStateOf(-1) }
     val ringtonePicker = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-        val uri: Uri? = result.data?.getParcelableExtra(RingtoneManager.EXTRA_RINGTONE_PICKED_URI)
+        // The untyped getParcelableExtra() is deprecated from API 33 because it can
+        // hand back an object of the wrong type without complaining; the typed overload
+        // it was replaced by only exists there, hence the version split.
+        val uri: Uri? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
+            result.data?.getParcelableExtra(RingtoneManager.EXTRA_RINGTONE_PICKED_URI, Uri::class.java)
+        else
+            @Suppress("DEPRECATION")
+            result.data?.getParcelableExtra(RingtoneManager.EXTRA_RINGTONE_PICKED_URI)
         if (pickingIndex in rings.indices) {
             onUpdate(pickingIndex, rings[pickingIndex].copy(ringtoneUri = uri?.toString() ?: "default"))
         }

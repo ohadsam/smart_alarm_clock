@@ -9,6 +9,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.StickyNote2
+import androidx.compose.material.icons.automirrored.rounded.TrendingUp
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -115,7 +117,7 @@ fun AlarmRingScreen(alarmId: Long, onDismiss: () -> Unit,
                     Column(Modifier.padding(12.dp)) {
                         Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Rounded.TrendingUp, null, Modifier.size(14.dp), tint = accent)
+                                Icon(Icons.AutoMirrored.Rounded.TrendingUp, null, Modifier.size(14.dp), tint = accent)
                                 Spacer(Modifier.width(6.dp))
                                 Text("צלצול מתחזק", style = MaterialTheme.typography.labelMedium,
                                     color = accent, fontWeight = FontWeight.SemiBold)
@@ -137,7 +139,7 @@ fun AlarmRingScreen(alarmId: Long, onDismiss: () -> Unit,
                 Surface(shape = RoundedCornerShape(16.dp), color = accent.copy(.1f),
                     border = BorderStroke(1.dp, accent.copy(.3f)), modifier = Modifier.fillMaxWidth()) {
                     Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Rounded.StickyNote2, null, Modifier.size(20.dp), tint = accent)
+                        Icon(Icons.AutoMirrored.Rounded.StickyNote2, null, Modifier.size(20.dp), tint = accent)
                         Spacer(Modifier.width(10.dp))
                         Text(txt, color = accent, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
                     }

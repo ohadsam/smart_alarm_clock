@@ -521,6 +521,44 @@ If the user asks for a PR-based workflow going forward, follow that instead and 
   is 26, so an unconditional `setExpedited()` would break the boot reschedule on exactly
   the older devices that need it most.
 
+- **`appwidget-provider` XML needs the pre-31 attributes too.** `targetCellWidth`/
+  `targetCellHeight` are API 31+; `minSdk` here is 26, so a descriptor with only those
+  declares *no size at all* on Android 8–11 and the launcher has nothing to lay the
+  widget out from. Every provider needs `minWidth`/`minHeight` (the platform's
+  `70 * cells - 30` formula), plus the `initialLayout` the `AppWidgetProviderInfo`
+  contract requires, and `resizeMode`/`description` if you want the widget resizable and
+  distinguishable in the picker. `WidgetProviderInfoTest` pins all of this.
+- **Vibration must declare `USAGE_ALARM` or Do Not Disturb silences it.**
+  `vibrate(VibrationEffect)` with no attributes is `USAGE_UNKNOWN`, which the platform
+  suppresses under DND (and plain silent mode on many OEM builds). Use the
+  `VibrationAttributes` overload on API 33+ and the `AudioAttributes` one below that.
+  The same rule already applied to the MediaPlayer's `AudioAttributes`; the two halves of
+  an alarm have to agree.
+- **A "nothing to do" early `return` in `schedule()`-shaped code is usually a bug.**
+  Re-arming and dis-arming are the same decision: if the new configuration has no next
+  occurrence, the *previous* trigger is still live unless something cancels it. Put the
+  cancel at the choke point, not at each call site — `AlarmScheduler.schedule()` is
+  called from the edit screen, the list toggles, the boot reschedule and the firing
+  service, and only one of them would ever remember.
+- **The palette constants in `Theme.kt` are dark-scheme-only.** `Blue`/`Green`/`Gold`/`Red`
+  are tuned for near-black surfaces; as literal `color =` / `tint =` values on Light
+  mode's white surfaces they fail contrast badly (Green and Gold worst). Read the theme
+  color *roles* instead — `primary`=Blue, `secondary`=Gold, `tertiary`=Green,
+  `error`=Red — and use the raw constants only where the background is itself a fixed
+  dark color (white text on the red Stop button). Grep for `\bGold\b|\bGreen\b` in
+  `presentation/` when reviewing any screen.
+- **Widgets follow the *system* night mode, not the app's theme setting.** The in-app
+  auto/dark/light preference lives in DataStore and doesn't change the process
+  `Configuration`, which is what `paletteFor()` reads. That is also the conventional
+  behaviour for a home-screen widget — don't "fix" it by plumbing the DataStore value in.
+- **Glance is a Google-only Maven artifact (`dl.google.com`), which this environment
+  blocks** — so unlike Maven Central artifacts you cannot download the AAR and `javap` it
+  to confirm an API signature before writing code against it. Check the androidx source
+  on GitHub for the matching release tag instead, and when you can't confirm a signature,
+  prefer plain framework APIs you can reason about (e.g. reading
+  `Configuration.UI_MODE_NIGHT_MASK` yourself rather than betting on a Glance day/night
+  `ColorProvider` overload existing in this version).
+
 ## Known limitations (don't re-report these as new findings unless you're the batch fixing them)
 
 - **Settings' English toggle doesn't change any visible UI text.** Every screen hardcodes Hebrew
