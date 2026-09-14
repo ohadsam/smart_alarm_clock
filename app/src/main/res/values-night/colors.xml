@@ -1,5 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="widget_loading_bg">#EE13161E</color>
-    <color name="widget_loading_text">#FF8A94AE</color>
+    <color name="widget_frame_border">#805B8DF6</color>
+    <color name="widget_background">#FF13161E</color>
+    <color name="widget_row_background">#1AFFFFFF</color>
+    <color name="widget_loading_bg">#FF13161E</color>
+    <color name="widget_loading_text">#FF9BA4BC</color>
 </resources>

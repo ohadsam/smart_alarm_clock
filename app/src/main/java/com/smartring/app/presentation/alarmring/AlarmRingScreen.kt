@@ -108,10 +108,22 @@ fun AlarmRingScreen(alarmId: Long, onDismiss: () -> Unit,
             // Crescendo bar. Uses the theme's `tertiary` role (not the raw Green
             // constant) so it stays legible in Light mode too — Green (a light mint)
             // as literal text/icon color on a white surface fails contrast.
-            if (alarm.crescendoEnabled) {
+            //
+            // Only drawn while sound is actually coming out: audibleVolumeAtSecond()
+            // is null during vibration-only alarms and during both silent windows of
+            // a "רטט→צלצול" alarm, where a bar reading "צלצול מתחזק 40%" over silence
+            // is simply wrong. The percentage itself is the round's real volume, not
+            // a hard-coded 100% base.
+            val audibleVolume = alarm.audibleVolumeAtSecond(s.elapsedSeconds)
+            if (alarm.crescendoEnabled && audibleVolume != null) {
                 Spacer(Modifier.height(8.dp))
-                val vol = alarm.volumeAtSecond(100, s.elapsedSeconds)
                 val accent = MaterialTheme.colorScheme.tertiary
+                // Which round is playing, shown only when there is more than one —
+                // otherwise "סבב 1 מתוך 1" is noise on a screen meant to be read in
+                // one glance while half awake.
+                val roundLabel = alarm.ringAtSecond(s.elapsedSeconds)
+                    ?.takeIf { alarm.effectiveRings.size > 1 }
+                    ?.let { " · סבב ${it.index + 1}/${alarm.effectiveRings.size}" } ?: ""
                 Surface(shape = RoundedCornerShape(12.dp), color = accent.copy(.08f),
                     border = BorderStroke(1.dp, accent.copy(.2f)), modifier = Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(12.dp)) {
@@ -119,14 +131,14 @@ fun AlarmRingScreen(alarmId: Long, onDismiss: () -> Unit,
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Icon(Icons.AutoMirrored.Rounded.TrendingUp, null, Modifier.size(14.dp), tint = accent)
                                 Spacer(Modifier.width(6.dp))
-                                Text("צלצול מתחזק", style = MaterialTheme.typography.labelMedium,
+                                Text("צלצול מתחזק$roundLabel", style = MaterialTheme.typography.labelMedium,
                                     color = accent, fontWeight = FontWeight.SemiBold)
                             }
-                            Text("${vol}%", style = MaterialTheme.typography.labelMedium,
+                            Text("${audibleVolume}%", style = MaterialTheme.typography.labelMedium,
                                 color = accent, fontWeight = FontWeight.ExtraBold)
                         }
                         Spacer(Modifier.height(6.dp))
-                        LinearProgressIndicator({ vol / 100f }, Modifier.fillMaxWidth().height(6.dp),
+                        LinearProgressIndicator({ audibleVolume / 100f }, Modifier.fillMaxWidth().height(6.dp),
                             color = accent, trackColor = MaterialTheme.colorScheme.surfaceVariant)
                     }
                 }

@@ -2,6 +2,7 @@ package com.smartring.app.presentation.widget
 import android.content.Context
 import android.content.Intent
 import android.content.res.Configuration
+import android.os.SystemClock
 import android.util.TypedValue
 import android.widget.RemoteViews
 import androidx.compose.runtime.Composable
@@ -35,6 +36,20 @@ import dagger.hilt.components.SingletonComponent
 private fun openAppModifier(ctx: Context) =
     GlanceModifier.clickable(actionStartActivity(Intent(ctx, MainActivity::class.java)))
 
+/** Thickness of the accent frame drawn around every widget. Must match the
+ *  difference between widget_frame_border's and widget_frame_inner's corner radii,
+ *  or the two curves stop being concentric. */
+internal const val WIDGET_BORDER_DP = 2
+
+/**
+ * Below this much time remaining, the countdown is rendered as a live Chronometer
+ * instead of a static string — see widget_countdown.xml for why. Above it, a value
+ * that can be up to one refresh period stale is harmless ("בעוד 8 שע׳" does not
+ * change meaningfully in 15 minutes) and not worth a permanently ticking view on
+ * someone's home screen.
+ */
+internal const val LIVE_COUNTDOWN_WINDOW_MS = 60 * 60 * 1000L
+
 /**
  * The colors one widget renders with. Previously a single hard-coded near-black
  * palette, which made every widget a dark slab on a light home screen no matter what
@@ -42,11 +57,22 @@ private fun openAppModifier(ctx: Context) =
  *
  * Resolved from the night-mode configuration at render time rather than through a
  * Glance day/night ColorProvider, because the same values also drive the embedded
- * TextClock's RemoteViews color, which is a plain ARGB int and can't take a
- * ColorProvider — one source for both keeps the clock and the Glance content from
- * ending up on opposite sides of the theme. Home-screen widgets conventionally follow
- * the *system* theme rather than an in-app preference, and that is what this does;
- * the app's own auto/dark/light setting governs only the app's own screens.
+ * TextClock's and Chronometer's RemoteViews color, which is a plain ARGB int and
+ * can't take a ColorProvider — one source for both keeps the clock and the Glance
+ * content from ending up on opposite sides of the theme. Home-screen widgets
+ * conventionally follow the *system* theme rather than an in-app preference, and
+ * that is what this does; the app's own auto/dark/light setting governs only the
+ * app's own screens.
+ *
+ * [background], [frameBorder] and [rowBackground] are also declared as XML colors
+ * (values/colors.xml + values-night), because the rounded shapes that use them have
+ * to be drawables to round below API 31. WidgetPaletteTest asserts the two
+ * definitions are identical so they cannot drift apart.
+ *
+ * Every foreground here clears WCAG AA (4.5:1) against *both* [background] and
+ * [rowBackground]; WidgetContrastTest pins that. The widget's type is 9-11sp, which
+ * is squarely "normal text" for contrast purposes, and it is read half-awake in the
+ * dark.
  */
 internal data class WidgetPalette(
     val frameBorder: Color,
@@ -54,19 +80,17 @@ internal data class WidgetPalette(
     val accentBlue: Color,
     val accentGreen: Color,
     val textPrimary: Color,
-    val textMuted: Color,
     val textSecondary: Color,
     val rowBackground: Color,
 )
 
 internal val DarkWidgetPalette = WidgetPalette(
-    frameBorder   = Color(0x405B8DF6),
-    background    = Color(0xEE13161E),
-    accentBlue    = Color(0xFF5B8DF6),
+    frameBorder   = Color(0x805B8DF6),
+    background    = Color(0xFF13161E),
+    accentBlue    = Color(0xFF7FA6F8),
     accentGreen   = Color(0xFF5BF6B0),
     textPrimary   = Color(0xFFFFFFFF),
-    textMuted     = Color(0xFF6E7A96),
-    textSecondary = Color(0xFF8A94AE),
+    textSecondary = Color(0xFF9BA4BC),
     rowBackground = Color(0x1AFFFFFF),
 )
 
@@ -74,12 +98,11 @@ internal val DarkWidgetPalette = WidgetPalette(
 // light mint) and #5B8DF6 as text on near-white both fail contrast. These are the
 // same hues darkened, matching the app's own Light color scheme.
 internal val LightWidgetPalette = WidgetPalette(
-    frameBorder   = Color(0x403B5FD4),
-    background    = Color(0xF2F7F8FC),
-    accentBlue    = Color(0xFF3B5FD4),
-    accentGreen   = Color(0xFF0E7A5A),
+    frameBorder   = Color(0x803B5FD4),
+    background    = Color(0xFFF7F8FC),
+    accentBlue    = Color(0xFF2F4FB8),
+    accentGreen   = Color(0xFF0B6047),
     textPrimary   = Color(0xFF0A0C10),
-    textMuted     = Color(0xFF5A6478),
     textSecondary = Color(0xFF424C63),
     rowBackground = Color(0x14000000),
 )
@@ -91,15 +114,22 @@ internal fun isNightMode(ctx: Context): Boolean =
 internal fun paletteFor(ctx: Context): WidgetPalette =
     if (isNightMode(ctx)) DarkWidgetPalette else LightWidgetPalette
 
-/** Thin, subtle accent-tinted border around every widget — a 1dp gap between an
- *  outer box painted in the border color and an inner box painted in the normal
- *  widget background, rather than relying on a Glance border() modifier (version
- *  support for one is inconsistent), so this works on any Glance release. */
+/**
+ * The accent-tinted rounded frame around every widget: an outer box painted with the
+ * border drawable, padded by [WIDGET_BORDER_DP], containing the body drawable.
+ *
+ * The padding belongs on the *outer* box, not the inner one. It used to sit on the
+ * inner box, which is a no-op for this purpose — a view's own padding insets its
+ * children, not itself, so the inner background still filled the outer box edge to
+ * edge and painted over the entire border. The frame was invisible on every device.
+ */
 @Composable
-private fun WidgetFrame(ctx: Context, palette: WidgetPalette, content: @Composable () -> Unit) {
-    Box(GlanceModifier.fillMaxSize().background(palette.frameBorder).cornerRadius(20.dp)
+private fun WidgetFrame(ctx: Context, content: @Composable () -> Unit) {
+    Box(GlanceModifier.fillMaxSize()
+        .background(ImageProvider(R.drawable.widget_frame_border))
+        .padding(WIDGET_BORDER_DP.dp)
         .then(openAppModifier(ctx))) {
-        Box(GlanceModifier.fillMaxSize().padding(1.dp).background(palette.background).cornerRadius(19.dp)) {
+        Box(GlanceModifier.fillMaxSize().background(ImageProvider(R.drawable.widget_frame_inner))) {
             content()
         }
     }
@@ -118,6 +148,34 @@ private fun clockRemoteViews(ctx: Context, sizeSp: Float, colorArgb: Int): Remot
 @Composable
 private fun LiveClock(ctx: Context, sizeSp: Float, colorArgb: Int) {
     AndroidRemoteViews(clockRemoteViews(ctx, sizeSp, colorArgb))
+}
+
+/** Chronometer's base is on the elapsed-realtime clock, not the wall clock, so the
+ *  wall-clock target has to be re-expressed as "now, plus however long is left". */
+private fun countdownRemoteViews(ctx: Context, fireAt: Long, sizeSp: Float, colorArgb: Int): RemoteViews =
+    RemoteViews(ctx.packageName, R.layout.widget_countdown).apply {
+        setTextViewTextSize(R.id.widget_countdown, TypedValue.COMPLEX_UNIT_SP, sizeSp)
+        setTextColor(R.id.widget_countdown, colorArgb)
+        setChronometerCountDown(R.id.widget_countdown, true)
+        setChronometer(
+            R.id.widget_countdown,
+            SystemClock.elapsedRealtime() + (fireAt - System.currentTimeMillis()),
+            "בעוד %s",
+            true,
+        )
+    }
+
+/** "How long until it rings" — live to the second inside the last hour, a plain
+ *  Hebrew phrase before that. See [LIVE_COUNTDOWN_WINDOW_MS]. */
+@Composable
+private fun Countdown(ctx: Context, fireAt: Long, sizeSp: Float, color: Color) {
+    val remaining = fireAt - System.currentTimeMillis()
+    if (remaining in 0..LIVE_COUNTDOWN_WINDOW_MS) {
+        AndroidRemoteViews(countdownRemoteViews(ctx, fireAt, sizeSp, color.toArgb()))
+    } else {
+        Text(formatCountdownUntil(fireAt),
+            style = TextStyle(fontSize = sizeSp.sp, color = ColorProvider(color)), maxLines = 1)
+    }
 }
 
 @EntryPoint @InstallIn(SingletonComponent::class)
@@ -152,7 +210,7 @@ class SmartRingWidgetSmall : SmartRingBaseWidget() {
         val next = upcomingAlarms(ctx).firstOrNull()
         val p = paletteFor(ctx)
         provideContent {
-            WidgetFrame(ctx, p) {
+            WidgetFrame(ctx) {
                 Column(GlanceModifier.fillMaxSize().padding(12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalAlignment = Alignment.CenterHorizontally) {
@@ -160,7 +218,8 @@ class SmartRingWidgetSmall : SmartRingBaseWidget() {
                     Spacer(GlanceModifier.height(2.dp))
                     Text(next?.timeText ?: "--:--",
                         style = TextStyle(fontSize = 24.sp, fontWeight = FontWeight.Bold, color = ColorProvider(p.textPrimary)))
-                    Text(next?.let { formatCountdownUntil(it.fireAt) } ?: "אין שעמור",
+                    if (next != null) Countdown(ctx, next.fireAt, 9f, p.accentBlue)
+                    else Text("אין שעמור",
                         style = TextStyle(fontSize = 9.sp, color = ColorProvider(p.accentBlue)), maxLines = 1)
                 }
             }
@@ -173,7 +232,7 @@ class SmartRingWidgetMedium : SmartRingBaseWidget() {
         val alarms = upcomingAlarms(ctx); val next = alarms.firstOrNull()
         val p = paletteFor(ctx)
         provideContent {
-            WidgetFrame(ctx, p) {
+            WidgetFrame(ctx) {
                 Column(GlanceModifier.fillMaxSize().padding(14.dp)) {
                     Row(GlanceModifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         Text("⏰ SMARTRING", style = TextStyle(fontSize = 9.sp, color = ColorProvider(p.accentBlue)),
@@ -187,12 +246,9 @@ class SmartRingWidgetMedium : SmartRingBaseWidget() {
                         style = TextStyle(fontSize = 30.sp, fontWeight = FontWeight.Bold, color = ColorProvider(p.textPrimary)))
                     Row(GlanceModifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         Text(next?.alarm?.name ?: "אין שעמור",
-                            style = TextStyle(fontSize = 11.sp, color = ColorProvider(p.textMuted)),
+                            style = TextStyle(fontSize = 11.sp, color = ColorProvider(p.textSecondary)),
                             modifier = GlanceModifier.defaultWeight(), maxLines = 1)
-                        next?.let {
-                            Text(formatCountdownUntil(it.fireAt),
-                                style = TextStyle(fontSize = 10.sp, color = ColorProvider(p.accentBlue)), maxLines = 1)
-                        }
+                        next?.let { Countdown(ctx, it.fireAt, 10f, p.accentBlue) }
                     }
                 }
             }
@@ -205,7 +261,7 @@ class SmartRingWidgetWide : SmartRingBaseWidget() {
         val alarms = upcomingAlarms(ctx); val next = alarms.firstOrNull()
         val p = paletteFor(ctx)
         provideContent {
-            WidgetFrame(ctx, p) {
+            WidgetFrame(ctx) {
                 Column(GlanceModifier.fillMaxSize().padding(14.dp)) {
                     Row(GlanceModifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         Text("⏰ ${alarms.size} פעילים", style = TextStyle(fontSize = 9.sp, color = ColorProvider(p.accentBlue)),
@@ -213,8 +269,10 @@ class SmartRingWidgetWide : SmartRingBaseWidget() {
                         LiveClock(ctx, 10f, p.textSecondary.toArgb())
                     }
                     next?.let {
-                        Text("הבא ${formatCountdownUntil(it.fireAt)}",
-                            style = TextStyle(fontSize = 9.sp, color = ColorProvider(p.accentGreen)))
+                        Row(GlanceModifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            Text("הבא ", style = TextStyle(fontSize = 9.sp, color = ColorProvider(p.accentGreen)))
+                            Countdown(ctx, it.fireAt, 9f, p.accentGreen)
+                        }
                     }
                     Spacer(GlanceModifier.height(8.dp))
                     alarms.take(3).forEach { WidgetAlarmRow(it, p) }
@@ -229,7 +287,7 @@ class SmartRingWidgetLarge : SmartRingBaseWidget() {
         val alarms = upcomingAlarms(ctx); val next = alarms.firstOrNull()
         val p = paletteFor(ctx)
         provideContent {
-            WidgetFrame(ctx, p) {
+            WidgetFrame(ctx) {
                 Column(GlanceModifier.fillMaxSize().padding(14.dp)) {
                     Row(GlanceModifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         Text("⏰ SMARTRING · ${alarms.size} פעילים", style = TextStyle(fontSize = 9.sp, color = ColorProvider(p.accentBlue)),
@@ -237,8 +295,10 @@ class SmartRingWidgetLarge : SmartRingBaseWidget() {
                         LiveClock(ctx, 10f, p.textSecondary.toArgb())
                     }
                     next?.let {
-                        Text("הבא ${formatCountdownUntil(it.fireAt)}",
-                            style = TextStyle(fontSize = 9.sp, color = ColorProvider(p.accentGreen)))
+                        Row(GlanceModifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            Text("הבא ", style = TextStyle(fontSize = 9.sp, color = ColorProvider(p.accentGreen)))
+                            Countdown(ctx, it.fireAt, 9f, p.accentGreen)
+                        }
                     }
                     Spacer(GlanceModifier.height(8.dp))
                     alarms.take(4).forEach { WidgetAlarmRow(it, p) }
@@ -255,7 +315,7 @@ class SmartRingWidgetLarge : SmartRingBaseWidget() {
 private fun WidgetAlarmRow(upcoming: UpcomingAlarm, palette: WidgetPalette) {
     val alarm = upcoming.alarm
     Row(GlanceModifier.fillMaxWidth().padding(horizontal=8.dp,vertical=5.dp)
-        .background(palette.rowBackground).cornerRadius(10.dp),
+        .background(ImageProvider(R.drawable.widget_row_bg)),
         verticalAlignment = Alignment.CenterVertically) {
         Text(upcoming.timeText, style = TextStyle(fontSize=16.sp, fontWeight=FontWeight.Bold, color=ColorProvider(palette.textPrimary)),
             modifier = GlanceModifier.padding(end=10.dp))

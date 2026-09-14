@@ -75,6 +75,12 @@
 | 46 | תאריכים ספציפיים פועלים *בנוסף* לחזרה השבועית, לא במקומה | `AlarmScheduler.nextFireTime()` (v1.6.2) |
 | 47 | "עד תאריך" נאכף על מועד הצלצול עצמו, לא רק על "האם עבר" | `AlarmScheduler.nextFromRecurrence()` (v1.6.2) |
 | 48 | שעמור שנדחק ע"י שעמור אחר באותה דקה עדיין משלים תזמון | `AlarmFiringService` generation counter (v1.6.2) |
+| 49 | מסגרת הווידג'ט נראית בפועל (הרקע הפנימי הסתיר אותה לחלוטין) | `WidgetFrame` ב-`SmartRingWidget.kt` — padding על התיבה החיצונית (v1.6.3) |
+| 50 | פינות מעוגלות לווידג'טים גם מתחת ל-API 31 | `res/drawable/widget_frame_border.xml`/`widget_frame_inner.xml`/`widget_row_bg.xml` (v1.6.3) |
+| 51 | ניגודיות AA לכל טקסט בווידג'ט, כולל על שורת שעמור; רקע אטום | `WidgetPalette` + `WidgetPaletteTest` (v1.6.3) |
+| 52 | ספירה לאחור חיה בווידג'ט בשעה שלפני הצלצול | `Chronometer` ב-`res/layout/widget_countdown.xml` דרך `AndroidRemoteViews` (v1.6.3) |
+| 53 | מד "צלצול מתחזק" מציג את העוצמה שבאמת נשמעת, ורק כשמתנגן צליל | `Alarm.audibleVolumeAtSecond()`/`ringAtSecond()`, `AlarmRingScreen` (v1.6.3) |
+| 54 | אזהרות על תצורות צלצול/רטט/התחזקות שלא יעבדו כמובטח | `util/RingSetup.kt`, `AlarmEditScreen` (v1.6.3) |
 
 ---
 
@@ -376,7 +382,7 @@ espresso             = "3.6.1"
 
 ---
 
-## 13. בדיקות אוטומטיות (v1.4.1, הורחב ב-v1.5.0, v1.6.0 ו-v1.6.1)
+## 13. בדיקות אוטומטיות (v1.4.1, הורחב ב-v1.5.0, v1.6.0, v1.6.1, v1.6.2 ו-v1.6.3)
 
 `app/src/test/` — בדיקות JVM (חלקן Robolectric: סביבת אנדרואיד קלה על ה-JVM, **לא**
 אמולטור אמיתי — הרבה יותר מהיר ואמין ב-CI). רץ אוטומטית ב-CI לפני assembleDebug/Release
@@ -398,6 +404,9 @@ espresso             = "3.6.1"
 | `util/ReliabilityChecksTest.kt` (v1.6.2) | שערי ה-SDK של ארבע בדיקות האמינות (`@Config(sdk=...)`): מתחת ל-API הרלוונטי כל בדיקה חייבת להחזיר "תקין", אחרת מוצגת למשתמש באנדרואיד 8 הרשאה חסרה שאין לו שום דרך להעניק |
 | `presentation/logs/LogsFormattingTest.kt` (v1.6.1) | שהייצוא הפוך לסדר המסך (קובץ לוג נקרא מהישן לחדש) |
 | `presentation/alarmlist/AlarmListViewModelTest.kt` (v1.6.0) | כל פעולות "שליטה כללית" — ובעיקר ש-`disableAll`/`freezeAll` קוראות את רשימת הפעילים *לפני* הכתיבה שמנקה אותה, אחרת לא מבוטל שום תזמון |
+| `domain/model/AlarmPlaybackTest.kt` (v1.6.3) | מה באמת נשמע בשנייה N: `ringAtSecond()`/`audibleVolumeAtSecond()` בכל ארבעת מצבי הרטט, ברצף רב-סבבים, בהשהיות השקטות בין סבבים ובגלגול חוזר של הרצף — המודל שמסך הצלצול מצייר ממנו, ושחייב להסכים עם `AlarmFiringService` שנייה-שנייה |
+| `util/RingSetupTest.kt` (v1.6.3) | שלושת כללי האזהרה על תצורות שהסליידרים מרשים אך שלא יתנהגו כמובטח (רטט ארוך ממשך הצלצול, התחזקות שלא יכולה לעלות, התחזקות שלא מספיקה להסתיים) — כולל שני מקרי הגבול ושהאזהרות לא נדלקות זו על זו |
+| `presentation/widget/WidgetPaletteTest.kt` (v1.6.3) | בחירת פלטה לפי `night`/`notnight`, שצבעי ה-XML (שהמסגרת והפינות המעוגלות חייבות אותם) זהים לפלטת ה-Kotlin, ושכל צבע טקסט עובר AA 4.5:1 גם על גוף הווידג'ט וגם על שורת שעמור |
 
 ### בדיקות על אמולטור אמיתי (`app/src/androidTest/`, v1.5.0)
 

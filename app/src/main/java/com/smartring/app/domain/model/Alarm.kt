@@ -205,6 +205,55 @@ data class Alarm(
         else                                -> true
     }
 
+    /**
+     * The rounds as they are actually played. AlarmFiringService substitutes a single
+     * full-volume round for an alarm with none configured and plays them in
+     * orderIndex order; anything that wants to reason about what is audible has to
+     * apply the same two rules, so they live here once.
+     */
+    val effectiveRings: List<AlarmRing>
+        get() = rings.ifEmpty { listOf(AlarmRing(volumePercent = 100)) }.sortedBy { it.orderIndex }
+
+    /**
+     * Which round is playing [e] seconds after the alarm started, or null when
+     * nothing is (vibration-only, the vibrate-first window, or one of the silent
+     * delayAfterSeconds gaps between rounds).
+     *
+     * Mirrors AlarmFiringService.startAudioSequence(): the rounds are walked in order
+     * and the whole list loops until the alarm stops, with each round followed by its
+     * own silent gap.
+     */
+    fun ringAtSecond(e: Int): IndexedValue<AlarmRing>? {
+        if (!soundActiveAt(e)) return null
+        val playing = effectiveRings
+        val soundStartedAt = if (vibrationMode == VibrationMode.VIBRATION_THEN_SOUND) vibrationOnlySeconds else 0
+        val cycleSeconds = playing.sumOf { it.durationSeconds + it.delayAfterSeconds }
+        // A whole cycle of zero-length rounds can't be walked (and can't happen from
+        // the sliders, whose minimum round length is 5s) — treat it as the first round.
+        if (cycleSeconds <= 0) return IndexedValue(0, playing.first())
+        var offset = (e - soundStartedAt) % cycleSeconds
+        playing.forEachIndexed { index, ring ->
+            if (offset < ring.durationSeconds) return IndexedValue(index, ring)
+            offset -= ring.durationSeconds
+            if (offset < ring.delayAfterSeconds) return null   // the silent gap after this round
+            offset -= ring.delayAfterSeconds
+        }
+        return null
+    }
+
+    /**
+     * The volume percentage actually coming out of the speaker [e] seconds in, or
+     * null while nothing is playing.
+     *
+     * The ring screen's crescendo bar reads this rather than deriving its own number:
+     * it used to chart volumeAtSecond(100, ...) — a hard-coded full-volume base — so
+     * a 50%-volume round with a crescendo starting at 10% climbed 10→50 through the
+     * speaker while the bar drew 10→100, and the bar kept climbing for minutes after
+     * the sound had stopped getting louder.
+     */
+    fun audibleVolumeAtSecond(e: Int): Int? =
+        ringAtSecond(e)?.let { volumeAtSecond(it.value.volumePercent, e) }
+
     private companion object {
         // bit0=Sun … bit6=Sat, matching repeatDaysBitmask.
         const val WEEKDAYS_SUN_TO_THU_MASK = 0b0011111

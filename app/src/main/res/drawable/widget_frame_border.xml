@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    The widget's outer frame. Drawn as a *drawable* rather than a Glance
+    background(Color) + cornerRadius() pair because cornerRadius() is a no-op below
+    API 31 (it compiles to RemoteViews.setViewOutlinePreferredRadius, added in S), so
+    on Android 8-11 every widget was a hard-edged rectangle while the same build
+    looked rounded on newer phones. A shape drawable rounds on every API this app
+    supports.
+-->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <corners android:radius="20dp" />
+    <solid android:color="@color/widget_frame_border" />
+</shape>

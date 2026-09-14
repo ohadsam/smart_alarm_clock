@@ -63,6 +63,44 @@ Glance Widgets (SmartRingWidget.kt) → AlarmScheduler.effectiveNextFireTime() �
   נגזר מחותמת הזמן האמיתית של הצלצול ולא מ-`Alarm.timeFormatted`, כדי ששעה שמוצגת
   וספירה לאחור שלידה לא יוכלו לסתור זו את זו (שעמור בנודניק הציג "07:00 · בעוד 8 דק׳").
 
+## ווידג'טים: מסגרת, עיגול פינות וספירה לאחור חיה (v1.6.3)
+- **המסגרת.** `WidgetFrame` הוא תיבה חיצונית עם `widget_frame_border`, `padding` של
+  `WIDGET_BORDER_DP`, ובתוכה תיבה עם `widget_frame_inner`. ה-padding חייב לשבת על
+  התיבה ה**חיצונית**: padding של תצוגה מזיז את ילדיה, לא את עצמה, ולכן כשהוא ישב על
+  הפנימית (כפי שהיה עד v1.6.3) הגוף מילא את התיבה החיצונית מקצה לקצה וכיסה את הגבול
+  לחלוטין — המסגרת לא נראתה באף מכשיר.
+- **למה drawables ולא `background(Color)` + `cornerRadius()`.** `cornerRadius()` של
+  Glance מתורגם ל-`RemoteViews.setViewOutlinePreferredRadius`, שנוסף ב-API 31; מתחת
+  לזה הוא no-op שקט. שלושת ה-shape drawables (`widget_frame_border` r=20dp,
+  `widget_frame_inner` r=18dp — ההפרש הוא בדיוק `WIDGET_BORDER_DP` כדי ששתי הקשתות
+  יישארו קונצנטריות — ו-`widget_row_bg` r=10dp) מתעגלים בכל API נתמך.
+- **צבע מוגדר פעמיים, ובכוונה.** ה-drawables חייבים צבעי XML (`values/colors.xml` +
+  `values-night`), והתוכן של Glance משתמש ב-`WidgetPalette` ב-Kotlin. `WidgetPaletteTest`
+  מאמת ששתי ההגדרות זהות תחת כל qualifier של מצב לילה — דריפט ביניהן מייצר ווידג'ט
+  שהמסגרת והגוף שלו מגיעים מערכות נושא מנוגדות.
+- **רקע אטום.** הרקעים נשאו alpha (0xEE/0xF2) ואיפשרו לטפט לחלחל, מה ששינה את הרקע
+  בפועל וגזל עד 1.5 stops של ניגודיות (מעל טפט בהיר: 3.5:1 לטקסט שורה, 3.47:1
+  להדגשה). הם אטומים כעת, וכל צבע קדמי נבדק מול *שני* הרקעים — גוף הווידג'ט ושורת
+  שעמור (`rowBackground` שקוף מעל הגוף).
+- **ספירה לאחור.** הווידג'ט מתרענן רק בשינוי שעמור או ב-`WidgetRefreshWorker` כל 15
+  דקות, כך שמחרוזת שחושבה ב-`provideGlance()` יכלה לפגר עד רבע שעה. בשעה שלפני
+  הצלצול (`LIVE_COUNTDOWN_WINDOW_MS`) מוצג `Chronometer` אמיתי במצב ספירה לאחור
+  (`res/layout/widget_countdown.xml` דרך `AndroidRemoteViews`, בדיוק כמו ה-TextClock),
+  שמתקתק בתהליך המארח בלי להעיר את האפליקציה. ה-base של Chronometer הוא על שעון
+  `elapsedRealtime`, ולכן היעד על שעון הקיר מומר ל"עכשיו + מה שנשאר".
+
+## מה נשמע בשנייה N (v1.6.3)
+`Alarm.effectiveRings` / `ringAtSecond()` / `audibleVolumeAtSecond()` הם המודל של מה
+שבאמת מתנגן: איזה סבב, או שקט (רטט בלבד, חלון הרטט של "רטט→צלצול", או ההשהיה שאחרי
+סבב). `AlarmFiringService.startAudioSequence()` קורא את `effectiveRings` מאותו מקום
+במקום להחזיק עותק של כללי "רשימה ריקה" ו-`orderIndex`, ו-`AlarmRingScreen` מצייר את
+מד ההתחזקות מ-`audibleVolumeAtSecond()`. עד v1.6.3 המסך גזר מספר משלו מול בסיס קשיח
+של 100% — גזירה שנייה שלא יכלה שלא להיפרד מהנגינה בפועל.
+
+`util/RingSetup.kt` מחזיק את כללי האזהרה על תצורות שהסליידרים מרשים אך שמתנהגות אחרת
+ממה שהמסך מבטיח. פונקציה טהורה בלי טיפוסי אנדרואיד, כדי שהכללים ייבדקו ישירות ולא דרך
+מסך Compose.
+
 ## מסך הצלצול ואמינות (v1.4.0)
 - `AlarmRingViewModel` מחשב את הזמן שחלף מאז הצלצול לפי `SystemClock.elapsedRealtime()`,
   מעוגן ל-timestamp האמיתי (`alarm_logs` action='FIRED'), ולא ספירת טיקים מקומית של המסך —

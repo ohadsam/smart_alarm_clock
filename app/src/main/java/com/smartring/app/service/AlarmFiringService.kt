@@ -199,8 +199,10 @@ class AlarmFiringService : Service() {
      * infinite loop, so a configured multi-round alarm never advanced past round 1.
      */
     private fun startAudioSequence(alarm: Alarm, elapsedAtStart: Int) {
-        val rings = alarm.rings.ifEmpty { listOf(AlarmRing(volumePercent = 100)) }
-            .sortedBy { it.orderIndex }
+        // Alarm.effectiveRings, not a local copy of the same two rules: the ring
+        // screen's crescendo readout walks this exact list via Alarm.ringAtSecond(),
+        // and a second definition here is how the two would drift apart.
+        val rings = alarm.effectiveRings
         ringSequenceJob = scope.launch {
             var elapsed = elapsedAtStart
             while (isActive) {

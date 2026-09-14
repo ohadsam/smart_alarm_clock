@@ -1,5 +1,88 @@
 # SmartRing – Changelog
 
+## v1.6.3 (2026-09-14)
+
+A round aimed at the two areas this batch was asked to prove out: that ring volume,
+crescendo and vibration behave the same in every mode, and that the widgets are
+synced, legible, and actually look the way they were designed to. Both turned up real
+defects, two of which had been shipping unnoticed on every device since the frame and
+the crescendo bar were added.
+
+### Widgets
+
+- **The accent frame was invisible on every device.** `WidgetFrame` painted the border
+  color on an outer box and then put an inner `fillMaxSize()` box with the body color
+  straight on top of it. The 1dp padding meant to reveal the border sat on the *inner*
+  box, and a view's padding insets its children, not itself — so the body covered the
+  border edge to edge and no frame was ever drawn. The padding now sits on the outer
+  box, where it does what it was supposed to, and the border is 2dp so it reads.
+- **Rounded corners only worked on Android 12+.** Glance's `cornerRadius()` compiles to
+  `RemoteViews.setViewOutlinePreferredRadius`, added in API 31; this app's minSdk is 26,
+  so on Android 8–11 every widget was a hard-edged rectangle while the same build looked
+  rounded on a newer phone. The frame, body and row pills are shape drawables now
+  (`widget_frame_border`/`widget_frame_inner`/`widget_row_bg`), which round on every
+  supported API.
+- **The translucent background cost up to 1.5 stops of contrast.** The body colors
+  carried an 0xEE/0xF2 alpha, so the wallpaper showed through and shifted the effective
+  background. Measured over a bright wallpaper, the dark widget's row text landed at
+  3.5:1 and its accent text at 3.47:1, both well under AA's 4.5:1 for type this small.
+  Backgrounds are opaque now, the accents were re-tuned, and every foreground clears
+  4.5:1 against *both* the body and a row pill — pinned by `WidgetPaletteTest` rather
+  than eyeballed.
+- **`textMuted` is gone.** It was used in exactly one place (the medium widget's alarm
+  name) at 4.21:1, while the identical text in the wide/large rows used `textSecondary`.
+  One color for one job; the rows and the medium widget now agree.
+- **The countdown could be a quarter of an hour wrong.** It was a string computed at
+  render time, and the widgets only re-render on an alarm mutation or the 15-minute
+  `WidgetRefreshWorker` tick — so an alarm 5 minutes out could still read "בעוד 20 דק׳",
+  which is exactly the range where someone acts on the number. Inside the last hour the
+  countdown is now a real `Chronometer` in count-down mode, embedded the same way the
+  live `TextClock` already was: it ticks inside the host process with no app wake-up at
+  all. Beyond an hour the static phrase stays, where being a refresh period stale is
+  meaningless and a permanently ticking view is not worth it.
+- The XML colors the drawables need and the Kotlin palette the Glance content uses are
+  two definitions of the same thing, so `WidgetPaletteTest` asserts them equal under
+  each night-mode qualifier — drift there would render a widget with its frame and body
+  from opposite themes.
+
+### Ring volume, crescendo and vibration
+
+- **The crescendo bar on the ring screen showed a number unrelated to what was
+  audible.** It charted `volumeAtSecond(100, …)` — a hard-coded full-volume base — while
+  playback uses each round's own `volumePercent`. A 50%-volume round crescendoing from
+  10% climbed 10→50 through the speaker while the bar drew 10→100, and kept climbing for
+  minutes after the sound had levelled off. It also drew that bar over a *vibration-only*
+  alarm, and during both silent windows of a "רטט→צלצול" one.
+- `Alarm.ringAtSecond()` / `audibleVolumeAtSecond()` now model what is actually playing
+  at second N — which round, or silence — mirroring `AlarmFiringService.startAudioSequence()`,
+  which reads the round list from the same new `Alarm.effectiveRings` instead of keeping
+  its own copy of the empty-list and ordering rules. The screen reads the model; there is
+  no second derivation to drift.
+- The ring screen also names the current round ("סבב 2/3") when more than one is
+  configured — previously a multi-round alarm gave no indication of where it was.
+- **Three configurations the sliders allow but that silently misbehave are now warned
+  about at edit time** (`ringSetupWarnings`, unit-tested): a vibrate-first window at or
+  beyond the ring duration, where the sound *never plays at all* (`fireAlarm` arms the
+  auto-stop for `ringDurationSeconds` and only then waits out `vibrationOnlySeconds`);
+  a crescendo starting at or above every round's volume, which plays flat; and a ramp
+  too slow to reach full volume before the alarm stops. None of these fails loudly —
+  the user finds out at 06:30 the next morning — and none is silently corrected either,
+  since the app can't know which of the two settings was the intended one.
+
+**Verified, not changed:** vibration is tagged `USAGE_ALARM` on both the API 33+ and the
+26–32 paths, so DND can't suppress it; the alarm stream being muted is surfaced as a
+reliability check rather than overridden behind the user's back; the crescendo ramps
+against the specific `MediaPlayer` it was started for and stops when that player is
+replaced; and every widget refresh path (alarm mutation via the Room flow, scheduler,
+snooze, boot, periodic worker) still converges on `refreshAllWidgets`.
+
+**Tests:** +35 JVM cases (152 → 187) — `AlarmPlaybackTest` (13) over which round is
+audible and at what volume, across every vibration mode, multi-round sequences, silent
+gaps and loop wrap-around; `RingSetupTest` (14) over the warning rules including both
+boundary cases; `WidgetPaletteTest` (8) over night/day palette selection, the XML↔Kotlin
+agreement, and WCAG AA contrast for every foreground on both the widget body and a row
+pill.
+
 ## v1.6.2 (2026-09-14)
 
 A focused audit of the core alarm paths — does the alarm ring at exactly the right

@@ -617,6 +617,66 @@ If the user asks for a PR-based workflow going forward, follow that instead and 
   API instead). Both cost a CI round here. A test that asserts a default proves nothing
   anyway: set the state explicitly, in both directions where the check is a boolean gate.
 
+- **A view's `padding` insets its children, never itself — so a "border" built as
+  outer-box-background + inner-box-background needs the padding on the OUTER box.** This is
+  how `WidgetFrame` shipped a frame that was invisible on every device from v1.3.0 to
+  v1.6.3: the outer `Box` painted the border color, the inner `Box` had
+  `.fillMaxSize().padding(1.dp).background(bodyColor)`, and because that padding moved the
+  inner box's *content* rather than the inner box, the body filled the outer box edge to
+  edge and covered the border completely. Nothing about the code looks wrong, and there is
+  no way to see it here (no SDK, no emulator, `dl.google.com` blocked), so it survived four
+  separate review rounds. Whenever a Glance/Compose layer is meant to *reveal* the layer
+  beneath it, check which node carries the padding.
+- **Glance's `cornerRadius()` is a silent no-op below API 31.** It compiles to
+  `RemoteViews.setViewOutlinePreferredRadius`, added in S; this app's minSdk is 26, so every
+  `cornerRadius()` call rounded on a modern test device and left hard-edged rectangles on
+  Android 8–11. The portable equivalent is a `<shape>` drawable applied with
+  `background(ImageProvider(R.drawable.x))` — which also means the color has to be declared
+  as an XML color (with a `values-night` twin) instead of a Kotlin `Color`. When you do that,
+  the color now exists twice: assert the two definitions equal in a Robolectric test under
+  each night qualifier (`WidgetPaletteTest`), or they will drift and produce a widget whose
+  frame and body come from opposite themes.
+- **Widget contrast has to be measured against the *composited* background, not the color
+  constant.** Two separate multipliers get missed: a translucent widget background lets the
+  wallpaper through (an 0xEE body over a white wallpaper measured 1.5 stops lighter than the
+  constant), and a translucent row/pill overlay sits on top of that again. The dark palette's
+  row text measured 5.97:1 against the raw constant and 3.47:1 where it was actually drawn.
+  Widget type here runs 9–11sp — normal text for WCAG, nowhere near the large-text exemption
+  — so the bar is 4.5:1 against *every* surface the text can land on. Make widget backgrounds
+  opaque and assert the ratios in a test; an alarm widget's legibility should not depend on
+  someone's wallpaper.
+- **A value computed in `provideGlance()` is frozen until something re-renders the widget**
+  — an alarm mutation, or the 15-minute `WidgetRefreshWorker` tick. That is fine for a date
+  and fatal for a countdown: "בעוד 20 דק׳" could be showing with 5 minutes left. If a widget
+  needs a live number, embed a framework view that ticks in the *host* process via
+  `AndroidRemoteViews` — `TextClock` for the time, `Chronometer` +
+  `setChronometerCountDown(id, true)` for a countdown (its base is on the
+  `elapsedRealtime` clock, so convert a wall-clock target to `elapsedRealtime() + remaining`).
+  No app wake-up, always correct.
+- **Any number a screen shows about playback must come from the same function playback
+  uses.** `AlarmRingScreen`'s crescendo bar computed `volumeAtSecond(100, elapsed)` while
+  `playOneRing()` used `volumeAtSecond(ring.volumePercent, elapsed)` — a second derivation
+  that could not help diverging, and did: a 50%-volume round drew a bar climbing to 100%.
+  The fix pattern for this repo is the one `soundActiveAt()` already established: put the
+  rule in `domain/model/Alarm.kt` (pure Kotlin, no Android imports) and have both the service
+  and the screen read it. `Alarm.effectiveRings`/`ringAtSecond()`/`audibleVolumeAtSecond()`
+  are that for "what is audible at second N".
+- **Two independent sliders can produce a combination that silently does nothing.** All of
+  these are reachable from this app's own ranges: `vibrationOnlySeconds` (3–120) at or above
+  `ringDurationSeconds` (5–600) means the sound *never plays* in `VIBRATION_THEN_SOUND`,
+  because `fireAlarm()` arms the auto-stop first and only then waits out the vibration;
+  `crescendoStartVolume` (5–80) at or above a round's `volumePercent` (10–100) makes the
+  crescendo play flat; and a slow ramp can need 19 minutes to reach full volume inside a
+  10-minute ring. None of them throws, so the user finds out the next morning. When adding a
+  slider, check it against every other slider it interacts with, and surface a warning rather
+  than silently rewriting one of the two — the app cannot know which one was intended.
+  Warning rules belong in a pure function (`util/RingSetup.kt`) so they are unit-tested
+  directly rather than through a Compose screen.
+- **Robolectric night-mode tests: use the additive qualifier form, `@Config(qualifiers = "+night")`.**
+  A bare `"night"` replaces the entire qualifier set rather than merging with the module's
+  defaults. Pair `+night` with an explicit `+notnight` test — asserting only the dark side
+  passes just as well when `values-night` is missing entirely.
+
 ## Known limitations (don't re-report these as new findings unless you're the batch fixing them)
 
 - **Settings' English toggle doesn't change any visible UI text.** Every screen hardcodes Hebrew

@@ -32,6 +32,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.smartring.app.domain.model.*
 import com.smartring.app.presentation.theme.*
 import com.smartring.app.util.formatDurationSeconds
+import com.smartring.app.util.ringSetupWarnings
 import com.smartring.app.util.formatPickedDay
 import com.smartring.app.util.localInstantOnPickedDay
 import com.smartring.app.util.localInstantToPickedDay
@@ -369,6 +370,44 @@ fun AlarmEditScreen(
                         LabeledSlider("עלייה בכל צעד", s.crescendoStepPercent, "%", 5f, 30f, 4, MaterialTheme.colorScheme.secondary,
                             info = "כמה אחוזים עוצמת הקול עולה בכל שלב.",
                             onChange = vm::setCrescendoStepPercent)
+                    }
+                }
+            }
+
+            // Configurations the sliders allow but that won't behave as the screen
+            // implies — a vibrate-first window longer than the whole ring (the sound
+            // then never plays at all), or a crescendo that can't climb or can't
+            // finish. These fail silently at 06:30 the next morning otherwise; the
+            // rules themselves live in the unit-tested ringSetupWarnings().
+            val ringWarnings = ringSetupWarnings(
+                vibrationMode        = s.vibrationMode,
+                vibrationOnlySeconds = s.vibrationOnlySeconds,
+                ringDurationSeconds  = s.ringDurationSeconds,
+                rings                = s.rings,
+                crescendoEnabled     = s.crescendoEnabled,
+                crescendoStartVolume = s.crescendoStartVolume,
+                crescendoStepSeconds = s.crescendoStepSeconds,
+                crescendoStepPercent = s.crescendoStepPercent,
+            )
+            if (ringWarnings.isNotEmpty()) {
+                item {
+                    Surface(
+                        shape = RoundedCornerShape(14.dp),
+                        color = MaterialTheme.colorScheme.errorContainer,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Column(Modifier.padding(14.dp)) {
+                            ringWarnings.forEachIndexed { i, warning ->
+                                if (i > 0) Spacer(Modifier.height(10.dp))
+                                Row(verticalAlignment = Alignment.Top) {
+                                    Icon(Icons.Rounded.ErrorOutline, null, Modifier.size(16.dp),
+                                        tint = MaterialTheme.colorScheme.onErrorContainer)
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(warning, style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onErrorContainer)
+                                }
+                            }
+                        }
                     }
                 }
             }

@@ -14,8 +14,8 @@ android {
         applicationId   = "com.smartring.app"
         minSdk          = 26
         targetSdk       = 34
-        versionCode     = 11
-        versionName     = "1.6.2"
+        versionCode     = 12
+        versionName     = "1.6.3"
         // Hilt's own runner, so @HiltAndroidTest instrumented tests get a real DI
         // graph on the device instead of the app's @HiltAndroidApp Application.
         testInstrumentationRunner = "com.smartring.app.HiltTestRunner"

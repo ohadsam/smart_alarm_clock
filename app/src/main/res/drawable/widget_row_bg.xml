@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- One alarm row's pill in the wide/large widgets. Same reason as the frame: a
+     Glance cornerRadius() would round it only on API 31+. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <corners android:radius="10dp" />
+    <solid android:color="@color/widget_row_background" />
+</shape>

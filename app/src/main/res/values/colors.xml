@@ -1,10 +1,26 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <color name="dark_bg">#FF0A0C10</color>
-    <!-- Light (default) values for the widget placeholder. The -night variants live
-         in values-night/colors.xml; RemoteViews are inflated in the host process
-         against this app's resources with the host's configuration, so the correct
-         one is picked automatically without the app being running. -->
-    <color name="widget_loading_bg">#F2F7F8FC</color>
-    <color name="widget_loading_text">#FF5A6478</color>
+
+    <!--
+        Light (default) widget colors; the -night variants live in
+        values-night/colors.xml. RemoteViews and drawables are inflated in the *host*
+        process against this app's resources with the host's configuration, so the
+        right one is picked automatically without the app running.
+
+        These must stay in step with LightWidgetPalette/DarkWidgetPalette in
+        SmartRingWidget.kt, which is what the Glance content is colored from —
+        WidgetPaletteTest asserts the two sides are identical, because a drift here
+        shows up as a widget whose frame and body come from opposite themes.
+
+        Opaque on purpose. They used to carry an alpha (0xEE/0xF2) and let the
+        wallpaper bleed through, which quietly cost up to 1.5 stops of contrast: on a
+        bright wallpaper the dark widget's row text landed at 3.5:1, below the 4.5:1
+        the small type needs to stay readable at a glance.
+    -->
+    <color name="widget_frame_border">#803B5FD4</color>
+    <color name="widget_background">#FFF7F8FC</color>
+    <color name="widget_row_background">#14000000</color>
+    <color name="widget_loading_bg">#FFF7F8FC</color>
+    <color name="widget_loading_text">#FF424C63</color>
 </resources>

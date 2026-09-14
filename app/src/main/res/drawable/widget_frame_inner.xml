@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The widget body, inset by WIDGET_BORDER_DP inside widget_frame_border so the
+     accent frame is actually visible. Radius is the outer radius minus that inset,
+     which is what keeps the two curves concentric instead of leaving a thick corner
+     and a thin edge. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <corners android:radius="18dp" />
+    <solid android:color="@color/widget_background" />
+</shape>
