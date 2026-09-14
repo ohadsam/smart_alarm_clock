@@ -31,7 +31,11 @@ class AlarmFiringService : Service() {
     private var crescendoJob: Job? = null
     private var autoStopJob: Job? = null
     private var ringSequenceJob: Job? = null
-    private var fireJob: Job? = null
+    private var ringJob: Job? = null
+    // Incremented on every fire. A fire whose generation is no longer the current one
+    // has been superseded by a newer alarm and must not ring — but its *bookkeeping*
+    // still has to finish. See onStartCommand.
+    private var fireGeneration = 0
 
     override fun onCreate() {
         super.onCreate()
@@ -62,11 +66,22 @@ class AlarmFiringService : Service() {
         // nothing ever released it and it kept playing until the process died, while
         // the *previous* alarm's autoStopJob went on to stopSelf() partway through the
         // new alarm. Tear the previous ring down first so only one is ever active.
+        //
+        // Only the *ring* is torn down, though. Cancelling the whole previous fire — as
+        // this did — also killed its bookkeeping, and that bookkeeping is almost always
+        // still in flight, because the very first thing it does is a suspending database
+        // read. So two alarms set to the same minute meant the first one never logged,
+        // never advanced its occurrence count and, worst of all, never armed its own next
+        // occurrence: a daily alarm sharing a minute with another one simply stopped
+        // after that day. The generation counter below lets the superseded fire finish
+        // its bookkeeping and only skips the part that would make noise.
+        val generation = ++fireGeneration
         stopAll()
 
         val scheduledFor = System.currentTimeMillis()
-        fireJob = scope.launch {
-            val alarm = repository.getAlarm(id) ?: run { stopSelf(); return@launch }
+        scope.launch {
+            val alarm = repository.getAlarm(id)
+                ?: run { if (generation == fireGeneration) stopSelf(); return@launch }
             // Log FIRED before posting the notification, not after: the notification's
             // full-screen intent can launch the ring screen (AlarmRingViewModel reads
             // this same "FIRED" row's timestamp to anchor its auto-dismiss timer)
@@ -87,10 +102,6 @@ class AlarmFiringService : Service() {
             } catch (e: Exception) {
                 appLogger.log("AlarmFiringService", "כתיבת יומן 'מצלצל' נכשלה: ${e.message}")
             }
-            getSystemService(NotificationManager::class.java)
-                .notify(NOTIF_ID, buildNotification(alarm))
-            appLogger.log("AlarmFiringService", "מצלצל: \"${alarm.name}\" (#$id)" +
-                if (alarm.isShabbatMode) " [מצב שבת]" else "")
             // A snooze re-fire is a continuation of the same occurrence, not a new
             // one: bumping occurrencesFired/rescheduling here too would advance a
             // COUNT-limited recurrence once per snooze instead of once per real day.
@@ -124,7 +135,19 @@ class AlarmFiringService : Service() {
                 // widget keeps showing the now-elapsed snooze countdown until the next
                 // periodic WidgetRefreshWorker run, up to 15 minutes later.
             } else widgetRefresher.refresh()
-            fireAlarm(alarm)
+
+            // Superseded while the bookkeeping above was running: that work is done and
+            // committed, but the alarm that arrived after this one owns the ring.
+            if (generation != fireGeneration) return@launch
+
+            getSystemService(NotificationManager::class.java)
+                .notify(NOTIF_ID, buildNotification(alarm))
+            appLogger.log("AlarmFiringService", "מצלצל: \"${alarm.name}\" (#$id)" +
+                if (alarm.isShabbatMode) " [מצב שבת]" else "")
+            // fireAlarm's own suspension points (the vibrate-first delay) have to be
+            // cancellable by a later fire, so the ring runs as its own job that stopAll()
+            // tears down — the bookkeeping coroutine above deliberately is not.
+            ringJob = scope.launch { fireAlarm(alarm) }
         }
         return START_NOT_STICKY
     }
@@ -308,10 +331,10 @@ class AlarmFiringService : Service() {
     }
 
     private fun stopAll() {
-        // fireJob included: a previous fire can still be suspended somewhere before it
-        // even reaches fireAlarm() (the DB read, the FIRED log write), and letting it
-        // resume afterwards would start a second ring sequence behind the new one.
-        fireJob?.cancel()
+        // ringJob, not the whole fire coroutine: a superseded fire must still finish
+        // logging and re-arming itself (see onStartCommand's generation counter), and
+        // only the noise-making half gets cancelled.
+        ringJob?.cancel()
         autoStopJob?.cancel(); crescendoJob?.cancel(); ringSequenceJob?.cancel()
         // Separate runCatching per call: if stop() throws (e.g. player still in the
         // Initialized/Prepared-but-not-started state), release() must still run or

@@ -589,6 +589,28 @@ If the user asks for a PR-based workflow going forward, follow that instead and 
   screen holds hardcoded Hebrew literals. It is now disabled and labelled "בקרוב". If
   you find another control with no effect, either wire it up or say so in the UI.
 
+- **`nextFireTime()` has three sources and must return the *earliest*, not the first
+  one that answers.** A `specificDateTime` is exclusive (it is a different kind of
+  alarm), but the extra-dates list and the weekday recurrence are two schedules for the
+  same alarm and run together — returning the nearest extra date outright switched the
+  weekday schedule off entirely until that date passed. If you add a fourth source, fold
+  it into the same `listOfNotNull(...).minOrNull()`.
+- **A recurrence-end date has to be checked against the candidate occurrence, not just
+  against "now".** `isRecurrenceExpired()` only asks whether the cutoff has already
+  passed, so it cannot stop an alarm from arming an occurrence *beyond* the cutoff. The
+  end date is inclusive: an alarm due on the morning of the last day still rings.
+- **In `AlarmFiringService`, never cancel a previous fire's bookkeeping — only its
+  ring.** The first thing a fire does is a suspending DB read, so a second fire arriving
+  in the same minute almost always cancels the first one mid-flight. Cancelling the
+  whole coroutine meant the first alarm never armed its own next occurrence and a daily
+  alarm silently stopped. The generation counter exists for exactly this: superseded
+  fires finish their bookkeeping and skip only the noise.
+- **Any change to recurrence math needs a daylight-saving test.** Alarms are absolute
+  timestamps derived from the local wall clock, so on a transition day "tomorrow at
+  07:00" is 23 or 25 hours away, not 24. `AlarmSchedulerTest` pins both directions by
+  asserting the elapsed-hours gap, which is what proves the transition was really
+  crossed rather than the wall clock being ignored.
+
 ## Known limitations (don't re-report these as new findings unless you're the batch fixing them)
 
 - **Settings' English toggle doesn't change any visible UI text.** Every screen hardcodes Hebrew

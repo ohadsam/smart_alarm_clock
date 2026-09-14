@@ -1,5 +1,45 @@
 # SmartRing – Changelog
 
+## v1.6.2 (2026-09-14)
+
+A focused audit of the core alarm paths — does the alarm ring at exactly the right
+moment, under every scheduling mode, with background work that survives. Three real
+scheduling bugs came out of it, all of which silently *stopped alarms from ringing*.
+
+- **Adding an extra date switched the weekday schedule off.** `nextFireTime()` returned
+  the nearest entry from the specific-dates list outright, before ever looking at the
+  weekday mask. So an alarm set for every weekday, plus one extra date in August, rang
+  on that August date and on no weekday in between — despite the section being called
+  "תאריכים ספציפיים נוספים", i.e. *additional to*. The two are now evaluated together
+  and the nearer one wins.
+- **"Repeat until <date>" allowed one ring past the end date.** The cutoff was only ever
+  consulted through `isRecurrenceExpired()`, which asks whether the date has *already*
+  passed — so on the 19th, an alarm set to repeat until the 20th happily armed its next
+  Friday occurrence on the 21st. The cutoff is now applied to the candidate occurrence,
+  and the end date stays inclusive (an alarm due on the 20th still rings that morning).
+- **Two alarms in the same minute cost the first one its next occurrence.** The service
+  tears the previous ring down when a new fire arrives, but it was cancelling the whole
+  previous coroutine — including its bookkeeping, which is almost always still in flight
+  because the first thing it does is a suspending database read. The first alarm
+  therefore never logged, never advanced its occurrence count, and never armed its own
+  next occurrence: a daily alarm that happened to share a minute with another one simply
+  stopped after that day. A generation counter now lets the superseded fire finish its
+  bookkeeping and skips only the part that makes noise.
+
+**Verified, not changed** — traced through the code and pinned with tests where they
+were missing: exact-time arming via `setAlarmClock`, the wake lock and foreground
+service that keep a ring alive with the screen off, the battery-optimization and
+exact-alarm reliability checks, one-time / weekly / biweekly / monthly / specific-date
+scheduling, widget/scheduler agreement, Shabbat mode refusing every interaction path
+(ring screen, notification actions, both receivers) while still auto-stopping, and the
+snooze cap counting from persisted history across re-fires.
+
+**Tests:** 10 new scheduler cases covering the two scheduling bugs above plus daylight
+saving in both directions (a daily alarm must follow the wall clock, so the
+spring-forward gap is 21 hours and the fall-back gap 23), and `ReliabilityChecksTest` —
+the SDK gating behind the Settings reliability rows had no coverage, and getting one
+wrong tells someone on Android 8 that a permission they cannot grant is missing.
+
 ## v1.6.1 (2026-09-14)
 
 A third review round, again through the system-architect / UI / QA lenses. This one

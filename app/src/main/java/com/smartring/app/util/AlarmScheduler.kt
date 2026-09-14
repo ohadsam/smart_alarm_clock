@@ -174,15 +174,11 @@ class AlarmScheduler @Inject constructor(
      */
     fun nextRecurringFireTime(alarm: Alarm, now: Long = System.currentTimeMillis()): Long? {
         if (alarm.specificDateTime != null) return alarm.specificDateTime.takeIf { it > now }
-        alarm.specificDates
-            .map { localInstantOnPickedDay(it.date, alarm.hour, alarm.minute) }
-            .filter { it > now }
-            .minOrNull()?.let { return it }
         // isRecurring (mask + a real frequency), not just a non-zero mask: picking
         // weekdays but setting the frequency to "ללא" means "fire on the next one of
         // those days, once", which the rest of the app already treats as non-recurring.
-        if (alarm.isRecurring) return nextFireTime(alarm, now)
-        return null
+        val fromRecurrence = if (alarm.isRecurring) nextFromRecurrence(alarm, now) else null
+        return listOfNotNull(futureExtraDates(alarm, now).minOrNull(), fromRecurrence).minOrNull()
     }
 
     /** The real AlarmManager trigger armed by a snooze (see [snoozePrefs]), if any is
@@ -211,47 +207,19 @@ class AlarmScheduler @Inject constructor(
             return if (dt > now) dt else null
         }
 
-        // 2. Specific dates list
-        alarm.specificDates
-            .map { localInstantOnPickedDay(it.date, alarm.hour, alarm.minute) }
-            .filter { it > now }
+        // 2 + 3. The extra-dates list and the weekday recurrence are two schedules for
+        // the *same* alarm, so the next fire is whichever comes first. Returning the
+        // nearest extra date outright (what this used to do) made the weekday schedule
+        // stop dead the moment one was added: an alarm set for every weekday plus one
+        // date in August rang on that August date and on no weekday in between — even
+        // though the section is called "תאריכים ספציפיים נוספים", additional to rather
+        // than instead of.
+        listOfNotNull(futureExtraDates(alarm, now).minOrNull(), nextFromRecurrence(alarm, now))
             .minOrNull()?.let { return it }
 
-        // 3. Repeat by weekday mask
-        if (alarm.repeatDaysBitmask != 0) {
-            val base = nextFromMask(alarm.hour, alarm.minute, alarm.repeatDaysBitmask, now)
-                ?: return null
-            return when (alarm.repeatFrequency) {
-                RepeatFrequency.NONE     -> base
-                RepeatFrequency.WEEKLY   -> base
-                RepeatFrequency.BIWEEKLY -> {
-                    // Parity is derived from the candidate fire date itself (days since
-                    // epoch / 7), not from "now" vs. "base" via Calendar.WEEK_OF_YEAR:
-                    // WEEK_OF_YEAR resets every January and Kotlin's `%` keeps the
-                    // dividend's sign, so a now/base pair straddling a year boundary
-                    // used to silently break the every-other-week cadence. An absolute,
-                    // now-independent parity check keeps the cadence stable regardless
-                    // of when this is (re)computed.
-                    if (weekParity(base) == 0L) base else base + 7 * 24 * 3_600_000L
-                }
-                RepeatFrequency.MONTHLY -> {
-                    // "Monthly" = only the first matching weekday in each calendar
-                    // month fires. The previous now-vs-base month comparison degraded
-                    // to weekly in the common case (base is always within ~2 weeks of
-                    // now, so it was almost always "still this month").
-                    var probe = firstMatchInMonth(alarm.hour, alarm.minute, alarm.repeatDaysBitmask, base)
-                    if (probe <= now) {
-                        val nextMonth = Calendar.getInstance().apply {
-                            timeInMillis = probe
-                            set(Calendar.DAY_OF_MONTH, 1)
-                            add(Calendar.MONTH, 1)
-                        }.timeInMillis
-                        probe = firstMatchInMonth(alarm.hour, alarm.minute, alarm.repeatDaysBitmask, nextMonth)
-                    }
-                    probe
-                }
-            }
-        }
+        // A weekday mask that produced nothing means the recurrence is over (it ran past
+        // its "repeat until" date), not that the one-time fallback below should step in.
+        if (alarm.repeatDaysBitmask != 0) return null
 
         // 4. Simple time-of-day (one-time)
         return Calendar.getInstance().apply {
@@ -262,6 +230,59 @@ class AlarmScheduler @Inject constructor(
             set(Calendar.MILLISECOND, 0)
             if (timeInMillis <= now) add(Calendar.DAY_OF_YEAR, 1)
         }.timeInMillis
+    }
+
+    /** Future occurrences coming from the alarm's explicit extra-dates list. */
+    private fun futureExtraDates(alarm: Alarm, now: Long): List<Long> =
+        alarm.specificDates
+            .map { localInstantOnPickedDay(it.date, alarm.hour, alarm.minute) }
+            .filter { it > now }
+
+    /**
+     * The next occurrence of the weekday recurrence itself, or null when there is none —
+     * including when the recurrence would run past its "repeat until" date.
+     *
+     * That cutoff has to be applied to the *candidate time*, not only through
+     * `isRecurrenceExpired()`, which just asks whether the cutoff has already passed: on
+     * the 19th, an alarm set to repeat until the 20th was therefore still allowed to arm
+     * its next occurrence on the 21st, and rang once after the date the user chose.
+     */
+    private fun nextFromRecurrence(alarm: Alarm, now: Long): Long? {
+        if (alarm.repeatDaysBitmask == 0) return null
+        val base = nextFromMask(alarm.hour, alarm.minute, alarm.repeatDaysBitmask, now) ?: return null
+        val candidate = when (alarm.repeatFrequency) {
+            RepeatFrequency.NONE     -> base
+            RepeatFrequency.WEEKLY   -> base
+            RepeatFrequency.BIWEEKLY -> {
+                // Parity is derived from the candidate fire date itself (days since
+                // epoch / 7), not from "now" vs. "base" via Calendar.WEEK_OF_YEAR:
+                // WEEK_OF_YEAR resets every January and Kotlin's `%` keeps the
+                // dividend's sign, so a now/base pair straddling a year boundary used to
+                // silently break the every-other-week cadence. An absolute,
+                // now-independent parity check keeps the cadence stable regardless of
+                // when this is (re)computed.
+                if (weekParity(base) == 0L) base else base + 7 * 24 * 3_600_000L
+            }
+            RepeatFrequency.MONTHLY -> {
+                // "Monthly" = only the first matching weekday in each calendar month
+                // fires. The previous now-vs-base month comparison degraded to weekly in
+                // the common case (base is always within ~2 weeks of now, so it was
+                // almost always "still this month").
+                var probe = firstMatchInMonth(alarm.hour, alarm.minute, alarm.repeatDaysBitmask, base)
+                if (probe <= now) {
+                    val nextMonth = Calendar.getInstance().apply {
+                        timeInMillis = probe
+                        set(Calendar.DAY_OF_MONTH, 1)
+                        add(Calendar.MONTH, 1)
+                    }.timeInMillis
+                    probe = firstMatchInMonth(alarm.hour, alarm.minute, alarm.repeatDaysBitmask, nextMonth)
+                }
+                probe
+            }
+        }
+        val cutoff = alarm.recurrenceEnd.untilDate
+            ?.takeIf { alarm.recurrenceEnd.type == RecurrenceEndType.UNTIL }
+        return candidate.takeIf { cutoff == null || it <= cutoff }
     }
 
     private fun nextFromMask(h: Int, m: Int, mask: Int, now: Long): Long? {

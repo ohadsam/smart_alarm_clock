@@ -4,6 +4,8 @@ import android.app.AlarmManager
 import androidx.test.core.app.ApplicationProvider
 import com.smartring.app.domain.model.Alarm
 import com.smartring.app.domain.model.AlarmDate
+import com.smartring.app.domain.model.RecurrenceEnd
+import com.smartring.app.domain.model.RecurrenceEndType
 import com.smartring.app.domain.model.RepeatFrequency
 import io.mockk.mockk
 import org.junit.After
@@ -190,6 +192,174 @@ class AlarmSchedulerTest {
         val at = System.currentTimeMillis() + 30_000
         scheduler.scheduleAt(alarm, at)
         assertEquals(at, scheduler.effectiveNextFireTime(alarm))
+    }
+
+    // ── Daylight saving ───────────────────────────────────────────────────
+    // Alarms are armed as absolute timestamps derived from the local wall clock, so a
+    // DST transition is the one day where "same time tomorrow" is not 24 hours away.
+    // The alarm has to follow the wall clock, not the elapsed interval.
+
+    @Test
+    fun `a daily alarm keeps its local time across a spring-forward transition`() {
+        TimeZone.setDefault(TimeZone.getTimeZone("America/New_York"))
+        // 2030-03-10 is the US spring-forward day: 02:00 jumps straight to 03:00.
+        val now = Calendar.getInstance().apply {
+            set(2030, Calendar.MARCH, 9, 9, 0, 0); set(Calendar.MILLISECOND, 0)
+        }.timeInMillis
+        val alarm = Alarm(hour = 7, minute = 0, repeatDaysBitmask = 0b1111111,
+            repeatFrequency = RepeatFrequency.WEEKLY)
+
+        val next = scheduler.nextFireTime(alarm, now) ?: error("expected a next fire time")
+        val cal = Calendar.getInstance().apply { timeInMillis = next }
+        assertEquals("must still ring on the 10th", 10, cal.get(Calendar.DAY_OF_MONTH))
+        assertEquals("must still ring at 07:00 local", 7, cal.get(Calendar.HOUR_OF_DAY))
+        assertEquals(0, cal.get(Calendar.MINUTE))
+        // 21 elapsed hours, not 22: proof the transition really was crossed, and that
+        // the alarm followed the wall clock rather than a fixed 24-hour offset.
+        assertEquals("the DST hour must actually have been skipped",
+            21L, (next - now) / 3_600_000L)
+    }
+
+    @Test
+    fun `a daily alarm keeps its local time across a fall-back transition`() {
+        TimeZone.setDefault(TimeZone.getTimeZone("America/New_York"))
+        // 2030-11-03: 02:00 happens twice.
+        val now = Calendar.getInstance().apply {
+            set(2030, Calendar.NOVEMBER, 2, 9, 0, 0); set(Calendar.MILLISECOND, 0)
+        }.timeInMillis
+        val alarm = Alarm(hour = 7, minute = 0, repeatDaysBitmask = 0b1111111,
+            repeatFrequency = RepeatFrequency.WEEKLY)
+
+        val next = scheduler.nextFireTime(alarm, now) ?: error("expected a next fire time")
+        val cal = Calendar.getInstance().apply { timeInMillis = next }
+        assertEquals(3, cal.get(Calendar.DAY_OF_MONTH))
+        assertEquals(7, cal.get(Calendar.HOUR_OF_DAY))
+        assertEquals("the repeated hour must actually have been added",
+            23L, (next - now) / 3_600_000L)
+    }
+
+    // ── Extra dates and the weekday recurrence run *together* ────────────
+    // "תאריכים ספציפיים נוספים" means additional to the weekday schedule, not instead
+    // of it. Returning the nearest extra date outright made adding one silently switch
+    // the weekday schedule off until that date had passed.
+    // Weekday bits are Calendar.DAY_OF_WEEK - 1, so Sunday is bit 0. In June 2030 the
+    // 16th is a Sunday, which fixes every weekday used below.
+
+    @Test
+    fun `an extra date does not suspend the weekday schedule`() {
+        val now = utcMillis(2030, 6, 16, 9, 0)          // Sunday morning, after 07:00
+        val alarm = Alarm(
+            hour = 7, minute = 0,
+            repeatDaysBitmask = 0b1111111,              // every day
+            specificDates = listOf(AlarmDate(date = utcMillis(2030, 8, 15))),
+        )
+        assertEquals(
+            "the daily schedule must keep running between now and the extra date",
+            utcMillis(2030, 6, 17, 7, 0), scheduler.nextFireTime(alarm, now),
+        )
+    }
+
+    @Test
+    fun `an extra date wins when it lands before the next weekday occurrence`() {
+        val now = utcMillis(2030, 6, 16, 9, 0)          // Sunday
+        val alarm = Alarm(
+            hour = 7, minute = 0,
+            repeatDaysBitmask = 0b0000001,              // Sundays only -> next is the 23rd
+            specificDates = listOf(AlarmDate(date = utcMillis(2030, 6, 18))),  // Tuesday
+        )
+        assertEquals(utcMillis(2030, 6, 18, 7, 0), scheduler.nextFireTime(alarm, now))
+    }
+
+    @Test
+    fun `the weekday schedule resumes once every extra date has passed`() {
+        val now = utcMillis(2030, 6, 19, 9, 0)          // Wednesday, the extra date is behind us
+        val alarm = Alarm(
+            hour = 7, minute = 0,
+            repeatDaysBitmask = 0b0000001,              // Sundays
+            specificDates = listOf(AlarmDate(date = utcMillis(2030, 6, 18))),
+        )
+        assertEquals(utcMillis(2030, 6, 23, 7, 0), scheduler.nextFireTime(alarm, now))
+    }
+
+    @Test
+    fun `nextRecurringFireTime also treats extra dates as additional`() {
+        // The firing service asks this to decide between re-arming and switching the
+        // alarm off, so the same rule has to hold here or an alarm with an extra date
+        // would keep the wrong one of its two schedules alive.
+        val now = utcMillis(2030, 6, 16, 9, 0)
+        val alarm = Alarm(
+            hour = 7, minute = 0,
+            repeatDaysBitmask = 0b1111111,
+            specificDates = listOf(AlarmDate(date = utcMillis(2030, 8, 15))),
+        )
+        assertEquals(utcMillis(2030, 6, 17, 7, 0), scheduler.nextRecurringFireTime(alarm, now))
+    }
+
+    // ── "Repeat until <date>" is a cutoff on the occurrence, not just on today ──
+    // isRecurrenceExpired() only asks whether the cutoff has already passed, so on the
+    // 19th an alarm set to repeat until the 20th was still allowed to arm its next
+    // occurrence on the 21st — and rang once after the date the user picked.
+
+    private fun endOfDay(year: Int, month: Int, day: Int): Long =
+        utcMillis(year, month, day, 23, 59) + 59_999L
+
+    @Test
+    fun `a recurrence does not arm an occurrence past its until date`() {
+        val now = utcMillis(2030, 6, 19, 9, 0)          // Wednesday
+        val alarm = Alarm(
+            hour = 7, minute = 0,
+            repeatDaysBitmask = 0b0100000,              // Fridays -> next is the 21st
+            recurrenceEnd = RecurrenceEnd(RecurrenceEndType.UNTIL, untilDate = endOfDay(2030, 6, 20)),
+        )
+        assertNull(
+            "Friday the 21st is past the until date, so there is nothing left to arm",
+            scheduler.nextFireTime(alarm, now),
+        )
+    }
+
+    @Test
+    fun `a recurrence still fires on the until date itself`() {
+        val now = utcMillis(2030, 6, 19, 9, 0)          // Wednesday
+        val alarm = Alarm(
+            hour = 7, minute = 0,
+            repeatDaysBitmask = 0b0010000,              // Thursdays -> the 20th
+            recurrenceEnd = RecurrenceEnd(RecurrenceEndType.UNTIL, untilDate = endOfDay(2030, 6, 20)),
+        )
+        assertEquals(
+            "the chosen end date is inclusive — that morning must still ring",
+            utcMillis(2030, 6, 20, 7, 0), scheduler.nextFireTime(alarm, now),
+        )
+    }
+
+    @Test
+    fun `the until cutoff does not affect an alarm ending by count or never`() {
+        val now = utcMillis(2030, 6, 19, 9, 0)
+        val forever = Alarm(hour = 7, minute = 0, repeatDaysBitmask = 0b0100000)
+        assertEquals(utcMillis(2030, 6, 21, 7, 0), scheduler.nextFireTime(forever, now))
+
+        // A stale untilDate left over from switching the end type away from UNTIL must
+        // be ignored, not silently applied.
+        val byCount = forever.copy(
+            recurrenceEnd = RecurrenceEnd(RecurrenceEndType.COUNT, untilDate = endOfDay(2030, 6, 20), count = 5),
+        )
+        assertEquals(utcMillis(2030, 6, 21, 7, 0), scheduler.nextFireTime(byCount, now))
+    }
+
+    @Test
+    fun `schedule() arms nothing once the recurrence has run past its until date`() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val shadow = shadowOf(context.getSystemService(AlarmManager::class.java))
+        // untilDate in the past: isRecurrenceExpired() already covers this case, but it
+        // is the pairing that matters — expired alarms must leave nothing armed.
+        val alarm = Alarm(
+            id = 21, hour = 7, minute = 0, repeatDaysBitmask = 0b1111111,
+            recurrenceEnd = RecurrenceEnd(
+                RecurrenceEndType.UNTIL,
+                untilDate = System.currentTimeMillis() - 86_400_000L,
+            ),
+        )
+        scheduler.schedule(alarm)
+        assertNull(shadow.peekNextScheduledAlarm())
     }
 
     // ── schedule()/cancel() actually (dis)arm a real AlarmManager alarm ─
