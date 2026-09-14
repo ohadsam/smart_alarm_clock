@@ -42,23 +42,17 @@ class WhatsNewViewModel @Inject constructor(
     init {
         viewModelScope.launch {
             val lastSeen = ctx.whatsNewDataStore.data.first()[kLastSeen] ?: 0
-            if (lastSeen == 0) {
-                // last_seen is unset both for a genuine fresh install AND for anyone
-                // upgrading from a version that predates this whole feature (this
-                // DataStore file didn't exist yet) — tell them apart by whether any
-                // alarm already exists. An existing user gets the full history since
-                // we don't know exactly which version they were actually on.
-                if (repository.observeAlarms().first().isNotEmpty()) {
-                    _state.update { it.copy(entriesToShow = WHATS_NEW_HISTORY, checked = true) }
-                } else {
-                    ctx.whatsNewDataStore.edit { it[kLastSeen] = BuildConfig.VERSION_CODE }
-                    _state.update { it.copy(checked = true) }
-                }
-            } else if (lastSeen < BuildConfig.VERSION_CODE) {
-                _state.update { it.copy(entriesToShow = WHATS_NEW_HISTORY.filter { e -> e.versionCode > lastSeen }, checked = true) }
-            } else {
-                _state.update { it.copy(checked = true) }
+            // The alarms lookup only matters for the lastSeen == 0 case (see
+            // whatsNewEntriesFor), so it isn't worth a DB read on every other launch.
+            val hasExistingAlarms = lastSeen == 0 && repository.observeAlarms().first().isNotEmpty()
+            val entries = whatsNewEntriesFor(lastSeen, BuildConfig.VERSION_CODE, hasExistingAlarms)
+            // Nothing to show on a fresh install, so record the current version straight
+            // away — otherwise the *next* update would look like "upgrading from
+            // nothing" all over again and replay the entire history.
+            if (entries.isEmpty() && lastSeen == 0) {
+                ctx.whatsNewDataStore.edit { it[kLastSeen] = BuildConfig.VERSION_CODE }
             }
+            _state.update { it.copy(entriesToShow = entries, checked = true) }
         }
     }
 

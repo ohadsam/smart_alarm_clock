@@ -100,7 +100,7 @@ fun HistoryScreen(
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
+@OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
 private fun HistoryLogCard(log: AlarmLog, onDelete: () -> Unit, onLoad: ((String, Int?, Int?) -> Unit)?) {
     val fmt = remember { SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault()) }
@@ -116,6 +116,32 @@ private fun HistoryLogCard(log: AlarmLog, onDelete: () -> Unit, onLoad: ((String
         else      -> Triple(MaterialTheme.colorScheme.primary,   "הופעל", Icons.Rounded.Alarm)
     }
 
+    // Same gesture as the alarm list: swipe either way (or long-press) opens the same
+    // confirm dialog. History previously accepted long-press only, so the two lists in
+    // the app answered the same swipe differently. confirmValueChange always returns
+    // false so the card snaps back and the dialog owns the real delete.
+    val dismissState = rememberSwipeToDismissBoxState(
+        confirmValueChange = { value ->
+            if (value != SwipeToDismissBoxValue.Settled) showDelete = true
+            false
+        },
+    )
+
+    SwipeToDismissBox(
+        state = dismissState,
+        backgroundContent = {
+            val alignment = if (dismissState.dismissDirection == SwipeToDismissBoxValue.StartToEnd)
+                Alignment.CenterStart else Alignment.CenterEnd
+            Box(
+                Modifier.fillMaxSize().clip(RoundedCornerShape(14.dp))
+                    .background(MaterialTheme.colorScheme.errorContainer)
+                    .padding(horizontal = 24.dp),
+                contentAlignment = alignment,
+            ) {
+                Icon(Icons.Rounded.Delete, "מחק", tint = MaterialTheme.colorScheme.onErrorContainer)
+            }
+        },
+    ) {
     Surface(
         modifier      = Modifier.fillMaxWidth()
             .combinedClickable(onClick = {}, onLongClick = { showDelete = true }),
@@ -161,13 +187,14 @@ private fun HistoryLogCard(log: AlarmLog, onDelete: () -> Unit, onLoad: ((String
             }
         }
     }
-    // Hint for long-press + optional load button
+    }
+    // Hint for the delete gestures + optional load button
     Row(
         Modifier.fillMaxWidth().padding(horizontal = 14.dp).padding(bottom = 10.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text("לחיצה ארוכה למחיקה",
+        Text("החלק או לחץ ארוכות למחיקה",
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f))
         if (onLoad != null) {

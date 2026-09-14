@@ -16,6 +16,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.rounded.VolumeUp
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
@@ -56,9 +57,16 @@ fun SettingsScreen(onBack: () -> Unit, onOpenLogs: () -> Unit = {}, vm: Settings
                 ReliabilitySection()
             }
             SettingsGroup("שפה") {
-                RadioRow("עברית",   "he", s.language)  { vm.setLanguage("he") }
+                RadioRow("עברית", "he", s.language) { vm.setLanguage("he") }
                 HorizontalDivider(Modifier.padding(horizontal = 16.dp))
-                RadioRow("English", "en", s.language)  { vm.setLanguage("en") }
+                // Disabled deliberately, not hidden: picking English used to be
+                // accepted and then change absolutely nothing on screen, because every
+                // screen holds hardcoded Hebrew literals rather than reading
+                // stringResource() — so values-en/strings.xml is unreachable from the
+                // UI. Offering a setting that silently does nothing is worse than
+                // saying it isn't ready. Re-enable this together with externalizing
+                // the strings, not before.
+                RadioRow("English", "en", s.language, enabled = false, supporting = "בקרוב")
             }
             SettingsGroup("עיצוב") {
                 RadioRow("אוטומטי לפי המכשיר", "auto",  s.themeMode) { vm.setThemeMode("auto")  }
@@ -72,7 +80,11 @@ fun SettingsScreen(onBack: () -> Unit, onOpenLogs: () -> Unit = {}, vm: Settings
                     headlineContent   = { Text("לוגים", fontWeight = FontWeight.Medium) },
                     supportingContent = { Text("רישום פעולות רקע לצורכי בדיקה") },
                     leadingContent    = { Icon(Icons.Rounded.Description, null) },
-                    trailingContent   = { Icon(Icons.Rounded.ChevronLeft, null) },
+                    // AutoMirrored: a "drills into another screen" chevron points in the
+                    // reading direction. The hard-coded ChevronLeft here only looked right
+                    // because this app happens to run RTL — it pointed backwards the
+                    // moment anything rendered it LTR.
+                    trailingContent   = { Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, null) },
                     modifier          = Modifier.clickable(onClick = onOpenLogs),
                 )
             }
@@ -233,10 +245,26 @@ private fun SettingsGroup(title: String, content: @Composable () -> Unit) {
 }
 
 @Composable
-private fun RadioRow(label: String, value: String, current: String, onClick: () -> Unit) {
+private fun RadioRow(
+    label: String,
+    value: String,
+    current: String,
+    enabled: Boolean = true,
+    supporting: String? = null,
+    onClick: () -> Unit = {},
+) {
+    val contentColor =
+        if (enabled) MaterialTheme.colorScheme.onSurface
+        else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
     ListItem(
-        headlineContent  = { Text(label, fontWeight = FontWeight.Medium) },
-        trailingContent  = { RadioButton(selected = current == value, onClick = onClick) },
-        modifier         = Modifier.clickable(onClick = onClick),
+        headlineContent  = { Text(label, fontWeight = FontWeight.Medium, color = contentColor) },
+        supportingContent = supporting?.let {
+            { Text(it, style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        },
+        trailingContent  = {
+            RadioButton(selected = current == value, onClick = onClick.takeIf { enabled }, enabled = enabled)
+        },
+        modifier         = if (enabled) Modifier.clickable(onClick = onClick) else Modifier,
     )
 }

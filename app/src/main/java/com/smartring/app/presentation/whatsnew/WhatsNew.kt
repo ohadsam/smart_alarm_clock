@@ -14,6 +14,28 @@ data class WhatsNewEntry(
  * Add a new entry here as part of every release (see the release-checklist skill's
  * "Version + What's New" step) — versionCode must match app/build.gradle.kts's.
  */
+/**
+ * Which entries this launch should show — the whole decision, separated from where
+ * "last seen" happens to be stored so it can be tested without a DataStore.
+ *
+ * [lastSeen] is 0 both for a genuine fresh install *and* for anyone upgrading from a
+ * version that predates this feature (the DataStore file didn't exist yet), which is
+ * why [hasExistingAlarms] is needed to tell those two apart: somebody who already has
+ * alarms is an existing user, and since we can't know which version they were on they
+ * get the full history rather than nothing.
+ */
+fun whatsNewEntriesFor(
+    lastSeen: Int,
+    currentVersionCode: Int,
+    hasExistingAlarms: Boolean,
+    history: List<WhatsNewEntry> = WHATS_NEW_HISTORY,
+): List<WhatsNewEntry> = when {
+    lastSeen == 0 && hasExistingAlarms -> history
+    lastSeen == 0                      -> emptyList()   // genuine fresh install
+    lastSeen < currentVersionCode      -> history.filter { it.versionCode > lastSeen }
+    else                               -> emptyList()   // already seen this version
+}
+
 val WHATS_NEW_HISTORY = listOf(
     WhatsNewEntry(
         versionCode = 3,
@@ -93,6 +115,17 @@ val WHATS_NEW_HISTORY = listOf(
             "שעמור מוקפא מסומן כעת בבירור ברשימה (\"מוקפא — לא יצלצל\") במקום רק בצבע של נקודה קטנה.",
             "שיפור ניגודיות במצב תצוגה בהיר: ערכי הסליידרים במסך העריכה, תגיות ההיסטוריה, כפתור הנודניק ותגית הרטט היו כמעט בלתי קריאים.",
             "בווידג'טים הרחבים מוצגים כעת גם ימי החזרה של כל שעמור, כמו ברשימה.",
+        ),
+    ),
+    WhatsNewEntry(
+        versionCode = 10,
+        versionName = "1.6.1",
+        items = listOf(
+            "תיקון: בתאריכים ספציפיים הוצג במכשירים מסוימים יום אחד לפני התאריך שנבחר, ו\"חזרתיות עד תאריך\" נפתחה מחדש על יום אחד אחרי. התזמון עצמו היה נכון — רק התצוגה הראתה תאריך אחר.",
+            "תיקון: הורדת קובץ הלוגים בוצעה על ה-thread הראשי ויכלה להקפיא את המסך; כעת היא רצה ברקע, וכישלון שמירה מוצג במקום להפיל את האפליקציה.",
+            "בהגדרות: האפשרות English סומנה כ\"בקרוב\" — עד כה אפשר היה לבחור בה והיא לא שינתה דבר.",
+            "מחיקת רשומה בהיסטוריה אפשרית כעת גם בהחלקה, בדיוק כמו ברשימת השעמורים.",
+            "חיזוק: שורת שעמור פגומה במסד הנתונים כבר לא מפילה את כל רשימת השעמורים.",
         ),
     ),
 )

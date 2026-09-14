@@ -4,6 +4,17 @@ import com.smartring.app.domain.model.*
 
 // ── Entity → Domain ───────────────────────────────────────────────
 
+/**
+ * Enum columns are stored as their `name`, and [Enum.valueOf] throws on anything it
+ * doesn't recognise. That throw happens *while mapping the whole list*, so a single
+ * unreadable row — a value written by a newer build the user downgraded from, a
+ * hand-edited or partially-restored database — would take the entire alarm list down
+ * rather than degrading that one alarm. Falling back to the same default the entity
+ * declares keeps the row usable and the list intact.
+ */
+private inline fun <reified T : Enum<T>> enumOrDefault(stored: String, default: T): T =
+    runCatching { enumValueOf<T>(stored) }.getOrDefault(default)
+
 internal fun AlarmWithDetails.toDomain() = Alarm(
     id                   = alarm.id,
     name                 = alarm.name,
@@ -13,9 +24,9 @@ internal fun AlarmWithDetails.toDomain() = Alarm(
     isEnabled            = alarm.isEnabled,
     isFrozen             = alarm.isFrozen,
     repeatDaysBitmask    = alarm.repeatDaysBitmask,
-    repeatFrequency      = RepeatFrequency.valueOf(alarm.repeatFrequency),
+    repeatFrequency      = enumOrDefault(alarm.repeatFrequency, RepeatFrequency.WEEKLY),
     recurrenceEnd        = RecurrenceEnd(
-        type        = RecurrenceEndType.valueOf(alarm.recurrenceEndType),
+        type        = enumOrDefault(alarm.recurrenceEndType, RecurrenceEndType.FOREVER),
         untilDate   = alarm.recurrenceUntilDate,
         count       = alarm.recurrenceCount,
     ),
@@ -28,7 +39,7 @@ internal fun AlarmWithDetails.toDomain() = Alarm(
     snoozeMaxCount       = alarm.snoozeMaxCount,
     isShabbatMode        = alarm.isShabbatMode,
     reminderText         = alarm.reminderText,
-    vibrationMode        = VibrationMode.valueOf(alarm.vibrationMode),
+    vibrationMode        = enumOrDefault(alarm.vibrationMode, VibrationMode.SOUND_AND_VIBRATION),
     vibrationOnlySeconds = alarm.vibrationOnlySeconds,
     crescendoEnabled     = alarm.crescendoEnabled,
     crescendoStartVolume = alarm.crescendoStartVolume,

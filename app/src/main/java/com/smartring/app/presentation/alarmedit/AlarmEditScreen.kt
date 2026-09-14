@@ -32,6 +32,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.smartring.app.domain.model.*
 import com.smartring.app.presentation.theme.*
 import com.smartring.app.util.formatDurationSeconds
+import com.smartring.app.util.formatPickedDay
+import com.smartring.app.util.localInstantOnPickedDay
+import com.smartring.app.util.localInstantToPickedDay
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -449,29 +452,17 @@ private fun DateTimePickerInline(epochMillis: Long, onChanged: (Long) -> Unit) {
     }
 
     if (showDatePicker) {
-        val dpState = rememberDatePickerState(initialSelectedDateMillis = epochMillis)
+        // The stored value is a local instant; the picker reads
+        // initialSelectedDateMillis as UTC, so hand it the picked-day form.
+        val dpState = rememberDatePickerState(
+            initialSelectedDateMillis = localInstantToPickedDay(epochMillis))
         DatePickerDialog(
             onDismissRequest = { showDatePicker = false },
             confirmButton = {
                 TextButton({
-                    dpState.selectedDateMillis?.let { date ->
-                        // DatePicker reports the picked day as UTC midnight; read the
-                        // year/month/day from a UTC calendar, then apply them (plus the
-                        // chosen hour/minute) on a device-local calendar. Building the
-                        // local calendar straight from the UTC millis would shift the
-                        // date by a day for negative-UTC-offset timezones.
-                        val utcCal = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply {
-                            timeInMillis = date
-                        }
-                        val newCal = Calendar.getInstance().apply {
-                            set(Calendar.YEAR, utcCal.get(Calendar.YEAR))
-                            set(Calendar.MONTH, utcCal.get(Calendar.MONTH))
-                            set(Calendar.DAY_OF_MONTH, utcCal.get(Calendar.DAY_OF_MONTH))
-                            set(Calendar.HOUR_OF_DAY, cal.get(Calendar.HOUR_OF_DAY))
-                            set(Calendar.MINUTE, cal.get(Calendar.MINUTE))
-                            set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
-                        }
-                        onChanged(newCal.timeInMillis)
+                    dpState.selectedDateMillis?.let { pickedDay ->
+                        onChanged(localInstantOnPickedDay(
+                            pickedDay, cal.get(Calendar.HOUR_OF_DAY), cal.get(Calendar.MINUTE)))
                     }
                     showDatePicker = false
                 }) { Text("אישור") }
@@ -646,11 +637,16 @@ private fun RecurrenceEndSection(s: AlarmEditUiState, vm: AlarmEditViewModel) {
                 shape = RoundedCornerShape(10.dp)) {
                 Icon(Icons.Rounded.CalendarToday, null, Modifier.size(16.dp))
                 Spacer(Modifier.width(8.dp))
+                // recurrenceUntilDate is a local end-of-day instant, so a local
+                // formatter is right here — unlike the picked-day values above.
                 Text(s.recurrenceUntilDate?.let { fmt.format(Date(it)) } ?: "בחר תאריך סיום")
             }
             if (showDp) {
                 val dpState = rememberDatePickerState(
-                    initialSelectedDateMillis = s.recurrenceUntilDate ?: System.currentTimeMillis())
+                    // Converted back to picked-day form: reopening the picker on the raw
+                    // 23:59:59.999 local instant landed a day late for negative offsets.
+                    initialSelectedDateMillis = localInstantToPickedDay(
+                        s.recurrenceUntilDate ?: System.currentTimeMillis()))
                 DatePickerDialog(
                     onDismissRequest = { showDp = false },
                     confirmButton = {
@@ -673,7 +669,6 @@ private fun SpecificDatesSection(
     onAdd: (Long, String?) -> Unit,
     onRemove: (Int) -> Unit,
 ) {
-    val fmt = remember { SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()) }
     var showDp by remember { mutableStateOf(false) }
     var labelInput by remember { mutableStateOf("") }
 
@@ -688,7 +683,10 @@ private fun SpecificDatesSection(
                         tint = MaterialTheme.colorScheme.primary)
                     Spacer(Modifier.width(8.dp))
                     Column(Modifier.weight(1f)) {
-                        Text(fmt.format(Date(d.date)), fontWeight = FontWeight.SemiBold,
+                        // formatPickedDay, not a local formatter: d.date is midnight
+                        // UTC of the chosen day, which a device-local formatter renders
+                        // as the *previous* day for any negative UTC offset.
+                        Text(formatPickedDay(d.date), fontWeight = FontWeight.SemiBold,
                             style = MaterialTheme.typography.bodyMedium)
                         d.label?.takeIf { it.isNotBlank() }?.let {
                             Text(it, style = MaterialTheme.typography.labelSmall,

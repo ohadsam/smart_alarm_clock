@@ -559,6 +559,36 @@ If the user asks for a PR-based workflow going forward, follow that instead and 
   `Configuration.UI_MODE_NIGHT_MASK` yourself rather than betting on a Glance day/night
   `ColorProvider` overload existing in this version).
 
+- **Two date conventions live in this codebase; `util/CalendarDates.kt` is the only
+  place allowed to convert between them.** A *picked calendar day* is midnight **UTC**
+  (what Compose's `DatePicker` returns, and what `AlarmDate.date` stores) — it names a
+  day, not an instant. A *real instant* is `Alarm.specificDateTime` and
+  `RecurrenceEnd.untilDate`, on the device's local clock. Reading one as the other
+  shifts the date by the device's UTC offset, which in Israel stays inside the same day
+  and looks perfectly fine — this has now caused four bugs for exactly that reason. Any
+  new date code goes through those helpers, and any date test pins
+  `TimeZone.setDefault` to a **negative** offset as well as a positive one, or it proves
+  nothing.
+- **Room migrations are only covered by `MigrationTest`, and it must keep working.** It
+  writes each old schema out as raw SQL and opens it through Room, which runs the real
+  migration objects and validates the result. Adding a DB version means adding its old
+  schema there too. Don't reach for Room's `MigrationTestHelper` instead — it needs the
+  exported schema JSON and `app/schemas/` is generated at build time and never
+  committed. A broken migration is the worst failure this app has: it throws on the
+  first `databaseBuilder().build()` after an update, so every upgrading user's app dies
+  on launch, and the committed keystore means updating over the top is the normal path.
+- **Don't do file or DB IO in an activity-result callback or any other composable
+  callback.** They run on the main thread; a SAF write can be a cloud round-trip. Launch
+  on `Dispatchers.IO` and surface failures — an unhandled throw in one of those
+  callbacks takes the process down.
+- **A top-level `val` of `SimpleDateFormat` is a latent race.** It is not thread-safe,
+  so a single shared instance is only safe while every caller is the main thread — which
+  is exactly the assumption the fix above breaks. Create one per call.
+- **Offering a setting that does nothing is worse than not offering it.** The English
+  language option was selectable for several versions and changed nothing, because every
+  screen holds hardcoded Hebrew literals. It is now disabled and labelled "בקרוב". If
+  you find another control with no effect, either wire it up or say so in the UI.
+
 ## Known limitations (don't re-report these as new findings unless you're the batch fixing them)
 
 - **Settings' English toggle doesn't change any visible UI text.** Every screen hardcodes Hebrew
@@ -567,7 +597,9 @@ If the user asks for a PR-based workflow going forward, follow that instead and 
   action text). Fixing this for real means externalizing every user-facing string across every
   screen — a large, dedicated batch, not a side effect of an unrelated change. If a batch is
   specifically about localization, that's the moment to fix this; otherwise, note it exists and
-  move on.
+  move on. As of v1.6.1 the English option is disabled and labelled "בקרוב" rather than
+  silently accepting a choice that does nothing — re-enable it in the same batch that
+  externalizes the strings, not before.
 - **No Heebo font files** — `Typography.kt` is ready for a custom font but `res/font/` has no TTF
   files checked in (a licensing/asset question, not a code one).
 - **No local Android SDK in this environment** — see step 6.

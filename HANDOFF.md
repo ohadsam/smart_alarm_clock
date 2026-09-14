@@ -69,6 +69,9 @@
 | 40 | אזהרה במסך העריכה כשאין מועד צלצול עתידי | `AlarmEditUiState.neverFires`, `AlarmEditScreen` (v1.6.0) |
 | 41 | חסימת "חזור" בזמן צלצול (כולל מצב שבת) | `BackHandler` ב-`AlarmRingScreen` (v1.6.0) |
 | 42 | סימון "מוקפא — לא יצלצל" בכרטיס ברשימה | `AlarmListScreen` MiniBadge (v1.6.0) |
+| 43 | מקור אחד להמרות תאריך (יום שנבחר מול רגע מקומי) | `util/CalendarDates.kt` (v1.6.1) |
+| 44 | מחיקה בהחלקה גם בהיסטוריה | `HistoryScreen` SwipeToDismissBox (v1.6.1) |
+| 45 | ייצוא לוגים ברקע עם טיפול בשגיאה | `LogsScreen` (v1.6.1) |
 
 ---
 
@@ -370,7 +373,7 @@ espresso             = "3.6.1"
 
 ---
 
-## 13. בדיקות אוטומטיות (v1.4.1, הורחב ב-v1.5.0 וב-v1.6.0)
+## 13. בדיקות אוטומטיות (v1.4.1, הורחב ב-v1.5.0, v1.6.0 ו-v1.6.1)
 
 `app/src/test/` — בדיקות JVM (חלקן Robolectric: סביבת אנדרואיד קלה על ה-JVM, **לא**
 אמולטור אמיתי — הרבה יותר מהיר ואמין ב-CI). רץ אוטומטית ב-CI לפני assembleDebug/Release
@@ -386,6 +389,10 @@ espresso             = "3.6.1"
 | `data/db/AlarmDaoTest.kt` | `saveAlarmTransaction()` (insert מול update, לא REPLACE), `lastFiredAt`, `snoozeCountSinceLastFire`, SET_NULL FK במחיקה |
 | `util/UpcomingAlarmsTest.kt` (v1.6.0) | `buildUpcomingAlarms()` — מה הווידג'טים מציגים ובאיזה סדר: מיון לפי מועד הצלצול האמיתי (לא לפי שעה ביום), עדיפות לנודניק, ששעמור בנודניק מציג את שעת הנודניק ולא את שעתו המקורית, ושחזרתיות שהסתיימה נעלמת — אלא אם המופע האחרון שלה בנודניק |
 | `presentation/widget/WidgetProviderInfoTest.kt` (v1.6.0) | ארבעת קובצי `widget_*_info.xml`: שיש `minWidth`/`minHeight` (הבאג של אנדרואיד 8–11), `initialLayout`, `resizeMode` ו-`description`, ושהגודל המינימלי תואם למספר התאים המוצהר |
+| `data/db/MigrationTest.kt` (v1.6.1) | **MIGRATION_1_2 ו-MIGRATION_2_3 בפועל** — עד v1.6.1 אף בדיקה לא הריצה מיגרציה אפילו פעם אחת. בונה כל סכימה ישנה ב-SQL גולמי במספר הגרסה האמיתי שלה ופותח דרך Room, שמריץ את אובייקטי המיגרציה האמיתיים ומאמת את התוצאה מול ה-entities — בדיוק המסלול שרץ במכשיר של משתמש שמעדכן. בנוסף: ששעמור שנוצר לפני העדכון שומר את ההגדרות שלו, שההיסטוריה שורדת את בנייתה מחדש של `alarm_logs`, ושמחיקת שעמור אחר כך משאירה את ההיסטוריה |
+| `util/CalendarDatesTest.kt` (v1.6.1) | ארבע ההמרות בין "יום שנבחר" (חצות UTC) ל"רגע מקומי", כל מקרה בארבעה אזורי זמן כולל היסט שלילי — שם ורק שם שני באגי התצוגה של v1.6.1 היו נראים |
+| `presentation/whatsnew/WhatsNewTest.kt` (v1.6.1) | ההחלטה מה להציג אחרי עדכון, כולל ההבחנה בין התקנה חדשה למשתמש ותיק שמעדכן מגרסה שקדמה לפיצ'ר (שניהם lastSeen=0), ותקינות `WHATS_NEW_HISTORY` עצמו (סדר, כפילויות) |
+| `presentation/logs/LogsFormattingTest.kt` (v1.6.1) | שהייצוא הפוך לסדר המסך (קובץ לוג נקרא מהישן לחדש) |
 | `presentation/alarmlist/AlarmListViewModelTest.kt` (v1.6.0) | כל פעולות "שליטה כללית" — ובעיקר ש-`disableAll`/`freezeAll` קוראות את רשימת הפעילים *לפני* הכתיבה שמנקה אותה, אחרת לא מבוטל שום תזמון |
 
 ### בדיקות על אמולטור אמיתי (`app/src/androidTest/`, v1.5.0)

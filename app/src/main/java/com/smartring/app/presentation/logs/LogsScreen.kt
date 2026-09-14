@@ -23,16 +23,25 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import com.smartring.app.domain.model.AppLogEntry
 import java.text.SimpleDateFormat
 import java.util.*
 
-private val logFmt = SimpleDateFormat("dd/MM HH:mm:ss", Locale.getDefault())
+// A fresh formatter per call rather than one shared top-level instance:
+// SimpleDateFormat is not thread-safe, and this is now also called from a background
+// dispatcher (the file export below), where a shared instance would be a real race.
+// Also re-reads Locale.getDefault() each time instead of pinning it at class-init.
+private fun logTimeFormat() = SimpleDateFormat("dd/MM HH:mm:ss", Locale.getDefault())
 
 // logs is DESC (newest-first, for on-screen display); exported/copied text reads
 // oldest-first, like a conventional log file, so an event sequence follows top-to-bottom.
-private fun logsAsText(logs: List<AppLogEntry>): String =
-    logs.asReversed().joinToString("\n") { "[${logFmt.format(Date(it.timestamp))}] ${it.tag}: ${it.message}" }
+internal fun logsAsText(logs: List<AppLogEntry>): String {
+    val fmt = logTimeFormat()
+    return logs.asReversed().joinToString("\n") { "[${fmt.format(Date(it.timestamp))}] ${it.tag}: ${it.message}" }
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -43,10 +52,22 @@ fun LogsScreen(onBack: () -> Unit, vm: LogsViewModel = hiltViewModel()) {
     var showClearDialog by remember { mutableStateOf(false) }
     var showCopiedSnackbar by remember { mutableStateOf(false) }
 
+    val scope = rememberCoroutineScope()
+    var exportError by remember { mutableStateOf(false) }
     val saveLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri: Uri? ->
-        uri?.let {
-            context.contentResolver.openOutputStream(it)?.use { out ->
-                out.write(logsAsText(s.logs).toByteArray())
+        // Off the main thread: this callback runs on it, and writing a full log file
+        // through a SAF provider (which can be a cloud target, not local storage) is a
+        // blocking IO round-trip — long enough to jank, and at the far end an ANR.
+        // Wrapped, too: a failed write (revoked permission, no space, provider error)
+        // used to throw straight out of the callback and take the app down.
+        uri?.let { target ->
+            scope.launch(Dispatchers.IO) {
+                val ok = runCatching {
+                    context.contentResolver.openOutputStream(target)?.use { out ->
+                        out.write(logsAsText(s.logs).toByteArray())
+                    } ?: error("no output stream")
+                }.isSuccess
+                withContext(Dispatchers.Main) { exportError = !ok }
             }
         }
     }
@@ -83,6 +104,14 @@ fun LogsScreen(onBack: () -> Unit, vm: LogsViewModel = hiltViewModel()) {
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            if (exportError) {
+                LaunchedEffect(Unit) {
+                    kotlinx.coroutines.delay(3000)
+                    exportError = false
+                }
+                Text("שמירת הקובץ נכשלה", Modifier.padding(horizontal = 16.dp),
+                    style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
+            }
             if (showCopiedSnackbar) {
                 LaunchedEffect(Unit) {
                     kotlinx.coroutines.delay(1500)

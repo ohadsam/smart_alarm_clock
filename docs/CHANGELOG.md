@@ -1,5 +1,68 @@
 # SmartRing – Changelog
 
+## v1.6.1 (2026-09-14)
+
+A third review round, again through the system-architect / UI / QA lenses. This one
+went at the parts the previous two barely touched — History, Logs, Settings, What's
+New, the mappers and the database module — and the headline finding is what *wasn't*
+being tested rather than what was broken on screen.
+
+**The migrations had never been executed by a single test.**
+`AlarmDaoTest` builds the database at the current version, so both `MIGRATION_1_2` and
+`MIGRATION_2_3` were shipped entirely unverified. That is the worst gap this app could
+carry: a bad migration doesn't degrade a feature, it throws on the first
+`databaseBuilder().build()` after an update, so every upgrading user's app dies on
+launch and the only way out is uninstalling — which deletes all their alarms. And the
+committed signing key exists precisely so people install updates over the top, which is
+the path that runs them. `MigrationTest` now writes each old schema out as raw SQL at
+its real version number and opens it through Room, which runs the real migration
+objects and validates the result against the entity definitions exactly as a device
+does — plus checks that an alarm created before the upgrade keeps its settings, that
+ring history survives the `alarm_logs` rebuild, and that deleting an alarm afterwards
+still leaves its history behind.
+
+**Two date bugs, same root cause.** The app deals in two conventions — a *picked
+calendar day* (midnight UTC, what Compose's `DatePicker` returns and what
+`AlarmDate.date` stores) and a *real local instant* — and the scheduling side was
+fixed twice before while the display side was never converted:
+- The specific-dates list formatted a picked day with a device-local formatter, showing
+  the **previous** day for any negative UTC offset.
+- Reopening the "repeat until" picker fed it a stored 23:59:59.999 local instant, which
+  the picker reads as UTC, landing on the **following** day for the same users.
+
+Both are invisible in Israel — a positive offset keeps the error inside the same day —
+which is exactly why they survived. All four conversions now live in one tested
+`CalendarDates.kt`, replacing three separate hand-rolled copies, and every case is
+tested under positive *and* negative offsets.
+
+**Other fixes:**
+- **The log export ran on the main thread**, inside the activity-result callback: a
+  full file write through a SAF provider (which can be a cloud target, not local
+  storage) is a blocking IO round-trip, long enough to jank and at the far end to ANR.
+  A failed write also threw straight out of the callback and took the app down. It now
+  runs on IO and surfaces failures.
+- **A shared top-level `SimpleDateFormat`** was only safe while every caller was the
+  main thread — which the above would have broken. It is now created per call.
+- **The Settings language option did nothing.** Every screen holds hardcoded Hebrew
+  literals rather than reading `stringResource()`, so picking English was accepted and
+  changed nothing at all. Marked "בקרוב" and disabled rather than left lying; the real
+  fix is externalizing the strings, which is its own batch.
+- **A single unreadable enum column would blank the whole alarm list** — `valueOf()`
+  throws while mapping the list, so one bad row took every alarm down with it instead
+  of degrading that one. It now falls back to the entity's own default.
+- `LogCleanupWorker` retries instead of failing and re-throws cancellation, matching
+  the other two workers.
+- A hard-coded `ChevronLeft` in Settings only looked right because this app runs RTL;
+  it now uses the auto-mirrored variant.
+- History rows can be swiped to delete, like the alarm list — the two lists previously
+  answered the same gesture differently.
+
+**Tests:** `MigrationTest` (6), `CalendarDatesTest` (9, across four timezones),
+`WhatsNewTest` (7 — the fresh-install-vs-old-upgrade decision was extracted from the
+ViewModel's init block so it could be tested at all, and the hand-maintained release
+history is now checked for ordering and duplicate version codes), and
+`LogsFormattingTest` (4).
+
 ## v1.6.0 (2026-09-14)
 
 A second full-project review, deliberately run through four lenses — system architect,

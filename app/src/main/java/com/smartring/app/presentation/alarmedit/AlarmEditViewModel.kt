@@ -5,11 +5,11 @@ import com.smartring.app.data.repository.AlarmRepository
 import com.smartring.app.domain.model.*
 import com.smartring.app.util.AlarmScheduler
 import com.smartring.app.util.AppLogger
+import com.smartring.app.util.endOfPickedDay
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.util.Calendar
-import java.util.TimeZone
 import javax.inject.Inject
 
 data class AlarmEditUiState(
@@ -187,7 +187,7 @@ class AlarmEditViewModel @Inject constructor(
      * earlier than the user asked for.
      */
     fun setRecurrenceUntilDate(v: Long?) = _state.update { s ->
-        s.copy(recurrenceUntilDate = v?.let { endOfLocalDay(it) }).also { updateNextFireHintLater() }
+        s.copy(recurrenceUntilDate = v?.let { endOfPickedDay(it) }).also { updateNextFireHintLater() }
     }
     fun setRecurrenceCount(v: Int)                = _state.update { it.copy(recurrenceCount = v).also { updateNextFireHintLater() } }
     fun setVibrationMode(v: VibrationMode)        = _state.update { it.copy(vibrationMode = v) }
@@ -237,19 +237,6 @@ class AlarmEditViewModel @Inject constructor(
         val alarm = buildAlarm(_state.value)
         val next = scheduler.effectiveNextFireTime(alarm)
         _state.update { it.copy(nextFireHint = formatNextFire(next), neverFires = next == null) }
-    }
-
-    /** 23:59:59.999 device-local on the day [utcMidnightMillis] (a Compose DatePicker
-     *  result, reported as UTC midnight) refers to. */
-    private fun endOfLocalDay(utcMidnightMillis: Long): Long {
-        val utc = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply { timeInMillis = utcMidnightMillis }
-        return Calendar.getInstance().apply {
-            set(Calendar.YEAR, utc.get(Calendar.YEAR))
-            set(Calendar.MONTH, utc.get(Calendar.MONTH))
-            set(Calendar.DAY_OF_MONTH, utc.get(Calendar.DAY_OF_MONTH))
-            set(Calendar.HOUR_OF_DAY, 23); set(Calendar.MINUTE, 59)
-            set(Calendar.SECOND, 59); set(Calendar.MILLISECOND, 999)
-        }.timeInMillis
     }
 
     private fun nextFireHintFor(alarm: Alarm): String? =

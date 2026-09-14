@@ -9,7 +9,6 @@ import com.smartring.app.domain.model.*
 import com.smartring.app.receiver.AlarmReceiver
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.util.Calendar
-import java.util.TimeZone
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -176,7 +175,7 @@ class AlarmScheduler @Inject constructor(
     fun nextRecurringFireTime(alarm: Alarm, now: Long = System.currentTimeMillis()): Long? {
         if (alarm.specificDateTime != null) return alarm.specificDateTime.takeIf { it > now }
         alarm.specificDates
-            .map { localDateTimeFor(it.date, alarm.hour, alarm.minute) }
+            .map { localInstantOnPickedDay(it.date, alarm.hour, alarm.minute) }
             .filter { it > now }
             .minOrNull()?.let { return it }
         // isRecurring (mask + a real frequency), not just a non-zero mask: picking
@@ -214,7 +213,7 @@ class AlarmScheduler @Inject constructor(
 
         // 2. Specific dates list
         alarm.specificDates
-            .map { localDateTimeFor(it.date, alarm.hour, alarm.minute) }
+            .map { localInstantOnPickedDay(it.date, alarm.hour, alarm.minute) }
             .filter { it > now }
             .minOrNull()?.let { return it }
 
@@ -296,24 +295,6 @@ class AlarmScheduler @Inject constructor(
             cal.add(Calendar.DAY_OF_YEAR, 1)
         }
         return from
-    }
-
-    /**
-     * [utcMidnightMillis] is a date picked via Compose's DatePicker, reported as UTC
-     * midnight of the chosen day. Re-anchor its year/month/day onto a device-local
-     * calendar before applying [h]:[m] — combining the raw UTC millis with a local
-     * time-of-day offset would shift the fire date by the device's UTC offset.
-     */
-    private fun localDateTimeFor(utcMidnightMillis: Long, h: Int, m: Int): Long {
-        val utcCal = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply { timeInMillis = utcMidnightMillis }
-        return Calendar.getInstance().apply {
-            set(Calendar.YEAR, utcCal.get(Calendar.YEAR))
-            set(Calendar.MONTH, utcCal.get(Calendar.MONTH))
-            set(Calendar.DAY_OF_MONTH, utcCal.get(Calendar.DAY_OF_MONTH))
-            set(Calendar.HOUR_OF_DAY, h)
-            set(Calendar.MINUTE, m)
-            set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
-        }.timeInMillis
     }
 
     private fun buildIntent(id: Long) = PendingIntent.getBroadcast(
