@@ -3,6 +3,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import com.smartring.app.service.AlarmFiringService
+import com.smartring.app.util.AlarmHandoffWakeLock
 import com.smartring.app.util.AlarmNotifications
 import com.smartring.app.util.AppLogger
 import dagger.hilt.android.AndroidEntryPoint
@@ -18,12 +19,20 @@ class AlarmReceiver : BroadcastReceiver() {
         // to get the foreground service going, and AppLogger's write is fire-and-forget
         // anyway, so it has no business sitting in front of the one time-critical call
         // in this receiver.
+        // Taken before the service start and handed to AlarmFiringService, which
+        // releases it once its own lock is held: the platform's alarm wake lock ends
+        // with onReceive, and startForegroundService() is asynchronous, so without
+        // this the device can go back to sleep in between and the alarm rings late or
+        // not at all. See AlarmHandoffWakeLock.
+        AlarmHandoffWakeLock.acquire(ctx)
         try {
             ctx.startForegroundService(Intent(ctx, AlarmFiringService::class.java)
                 .putExtra(EXTRA_ALARM_ID, id)
                 .putExtra(EXTRA_IS_SNOOZE, isSnooze))
             appLogger.log("AlarmReceiver", "אזעקה התקבלה עבור שעמור #$id" + if (isSnooze) " (נודניק)" else "")
         } catch (e: Exception) {
+            // Nothing is coming to hand the lock off to.
+            AlarmHandoffWakeLock.release()
             // Reachable in practice: an app the user (or the OEM) has put in the
             // "restricted" battery state can receive its alarm broadcast and still be
             // refused a foreground service start, which would otherwise throw straight

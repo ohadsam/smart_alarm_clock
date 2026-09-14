@@ -51,6 +51,11 @@
                      wall clock, so both of these invalidate every one of them. -->
                 <action android:name="android.intent.action.TIME_SET"/>
                 <action android:name="android.intent.action.TIMEZONE_CHANGED"/>
+                <!-- API 31+. Revoking SCHEDULE_EXACT_ALARM makes the system cancel
+                     every exact alarm this app has armed; granting it back does not
+                     restore them. Delivered explicitly to this package, so the
+                     implicit-broadcast restrictions don't apply. -->
+                <action android:name="android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED"/>
             </intent-filter>
         </receiver>
 

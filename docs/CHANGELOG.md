@@ -1,5 +1,88 @@
 # SmartRing – Changelog
 
+## v1.6.4 (2026-09-14)
+
+A pass over everything the previous rounds hadn't reached — the receivers, the
+workers, navigation, the settings and save paths — followed by a second pass back
+over the core flows for regressions. The theme that came out of it is the same one
+every time: the failures that matter here are the silent ones, where the app looks
+completely normal and simply doesn't ring.
+
+### Alarms that would not have gone off
+
+- **Granting the exact-alarm permission left every alarm unarmed.** Revoking
+  SCHEDULE_EXACT_ALARM makes the system cancel every exact alarm an app has
+  scheduled, and granting it back does not restore them — the app is expected to
+  listen for `ACTION_SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED` and reschedule.
+  This app never did. That made its own reliability prompt a trap: it sends the user
+  to that settings screen, and they come back to a list where every alarm still shows
+  as enabled and not one of them is armed. `BootReceiver` now handles that broadcast
+  alongside boot and clock changes.
+- **A ringtone that could not be played silenced the whole alarm.** `setDataSource()`
+  throws for a URI the app can't read — a track deleted since it was chosen, an
+  unmounted SD card, or a MediaStore URI without READ_MEDIA_AUDIO — and that
+  exception propagated out of `playOneRing`, out of the ring-sequence loop, and killed
+  the coroutine: no sound for the entire alarm, no retry, nothing logged. The
+  `onError` path was barely better, sitting out each round's full duration in silence,
+  once per loop. Playback now falls back to the device's own alarm sound, and if even
+  that is unavailable, vibrates instead — "rang with the wrong sound" is a different
+  universe from "did not ring".
+- **READ_MEDIA_AUDIO was declared and never requested.** So on Android 13+ the grant
+  never existed and a sound from the user's own library could not be read at all. It
+  is now requested at the moment they reach for the ringtone picker.
+- **The CPU could go back to sleep between the alarm broadcast and the service.** The
+  platform holds its alarm wake lock only for the duration of `onReceive`, and
+  `startForegroundService()` is asynchronous. `AlarmHandoffWakeLock` covers that
+  window: the receiver takes it, the service releases it as soon as its own is held,
+  and a 60-second timeout means it can never be stranded.
+
+### Correctness
+
+- **A second alarm ringing while the ring screen was up stacked another on top of it**,
+  so dismissing the second revealed the first — a live Stop/Snooze screen for an alarm
+  that had already stopped. And because the nav graph's start destination was derived
+  from a value that changes, an alarm firing while the app was open rebuilt the graph,
+  discarded wherever the user was, and then navigated to the ring screen twice.
+- **"הצלצול הבא" called a date exactly one year out "היום".** The day label compared
+  `Calendar.DAY_OF_YEAR` without the year, so the same date a year later matched — and
+  specific dates are the feature people use for birthdays. It also never recognised
+  1 January as "מחר" on 31 December. Now a pure, tested `formatNextFireAt`.
+- **A failed save left the button spinning forever.** No error path at all, so a
+  database error or an AlarmManager refusing another alarm left `isSaving` stuck true
+  on a screen that never closed, with no way to tell the alarm had not been saved.
+- **Added ring rounds never played on the default settings.** "הוסף סבב צלצול" adds a
+  round after a 60s first round while the default ring duration is also 60s, so the
+  first round anyone adds is silent until they lengthen the alarm too. Now the fourth
+  `ringSetupWarnings` rule, which walks the rounds the way the service does — counting
+  the silent gaps and the vibrate-first window — and says how many of them fit.
+
+### Robustness
+
+- **Both notification receivers could strand their `goAsync()` result.** A throw
+  anywhere after `goAsync()` — a history write failing, `scheduleAt` hitting an
+  AlarmManager limit — skipped `finish()`, leaving the receiver alive until the system
+  force-finished it. `finish()` is in a `finally` now, and the snooze path logs why a
+  snooze failed rather than vanishing.
+- **A corrupt settings file crashed the app on launch.** `DataStore.data` reports read
+  failures by throwing into the collector, and this particular collector runs inside
+  `MainActivity.setContent` to pick the theme. Now falls back to defaults, per the
+  documented recovery; writes no longer crash either.
+
+**Verified, not changed:** the snooze cap counted from persisted history rather than
+memory; Shabbat mode refusing every interaction path while still auto-stopping; the
+boot/timezone/clock-change reschedule; the widget-refresh convergence (Room flow,
+scheduler, snooze, boot, periodic worker); `saveAlarmTransaction` using insert/update
+rather than a REPLACE that would cascade history away; `stopWithTask="false"` keeping
+a ringing alarm alive when the app is swiped away; and the ring screen anchoring its
+timer to `elapsedRealtime` so a clock change mid-ring can't dismiss it.
+
+**Tests:** +16 JVM cases (187 → 203). `RingSetupTest` grew 7 cases for the new
+rounds-that-never-play rule, including both boundaries (a round that starts in time
+and merely gets cut off is deliberately *not* flagged); `TimeFormatTest` gained 5 for
+the day label, including the year-ahead and new-year cases that motivated it; and
+`AlarmHandoffWakeLockTest` covers the hand-off lock's acquire/release/re-acquire
+behaviour, where both failure directions are invisible until they matter.
+
 ## v1.6.3 (2026-09-14)
 
 A round aimed at the two areas this batch was asked to prove out: that ring volume,

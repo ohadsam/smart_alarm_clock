@@ -17,6 +17,11 @@ import javax.inject.Inject
  * - TIME_SET / TIMEZONE_CHANGED: the alarms are still armed, but at absolute epoch
  *   timestamps derived from the *old* local time — after flying a few timezones over,
  *   a 07:00 alarm would otherwise still fire at 07:00 in the timezone it was set in.
+ * - SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED: revoking the exact-alarm
+ *   permission makes the system cancel every exact alarm the app has scheduled, and
+ *   granting it back does not bring them back. Without this the app's own reliability
+ *   prompt was a trap: it sends the user to the exact-alarm settings screen, and they
+ *   return to a list of alarms that all look enabled and none of which is armed.
  */
 @AndroidEntryPoint
 class BootReceiver : BroadcastReceiver() {
@@ -51,6 +56,11 @@ class BootReceiver : BroadcastReceiver() {
             Intent.ACTION_MY_PACKAGE_REPLACED,
             Intent.ACTION_TIME_CHANGED,
             Intent.ACTION_TIMEZONE_CHANGED,
+            // AlarmManager.ACTION_SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED,
+            // spelled out rather than referenced so this file carries no API-31 symbol
+            // (the broadcast simply never arrives on older releases, where the
+            // permission it reports on doesn't exist). Must match the manifest.
+            "android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED",
         )
     }
 }

@@ -9,6 +9,7 @@ import com.smartring.app.R
 import com.smartring.app.data.repository.AlarmRepository
 import com.smartring.app.domain.model.*
 import com.smartring.app.receiver.AlarmReceiver
+import com.smartring.app.util.AlarmHandoffWakeLock
 import com.smartring.app.util.AlarmNotifications
 import com.smartring.app.util.AlarmScheduler
 import com.smartring.app.util.AppLogger
@@ -36,6 +37,9 @@ class AlarmFiringService : Service() {
     // has been superseded by a newer alarm and must not ring — but its *bookkeeping*
     // still has to finish. See onStartCommand.
     private var fireGeneration = 0
+    // Set once per fire when no sound at all could be played and vibration was started
+    // as a stand-in, so looping through the rounds doesn't restart it every round.
+    private var silentFallbackVibrating = false
 
     override fun onCreate() {
         super.onCreate()
@@ -58,6 +62,10 @@ class AlarmFiringService : Service() {
         // the auto-stop timer by however long it stays asleep. Held for the service's
         // whole lifetime and released in onDestroy().
         acquireWakeLock()
+        // The receiver's hand-off lock has done its job the moment this service holds
+        // its own; releasing it here rather than leaving it to its timeout keeps the
+        // CPU held for exactly as long as something is actually using it.
+        AlarmHandoffWakeLock.release()
 
         // A second fire arriving while one is already ringing (two alarms set to the
         // same minute, or a snooze re-fire racing the previous ring's teardown) used to
@@ -219,9 +227,58 @@ class AlarmFiringService : Service() {
         }
     }
 
+    /**
+     * Prepares and starts one looping alarm player for [uri], or returns null if that
+     * URI cannot be played at all.
+     *
+     * Every failure mode here used to be fatal to the whole alarm. `setDataSource()`
+     * throws for a URI the app can't read — a track picked from the user's library
+     * that was later deleted, an SD card that isn't mounted, or (the common one on
+     * Android 13+) a MediaStore URI needing READ_MEDIA_AUDIO — and that exception
+     * propagated out of playOneRing, out of the ring-sequence loop, and killed the
+     * coroutine: no sound for the entire alarm, no second attempt, nothing in the log.
+     * The onError path was barely better: it completed the wait and then sat out the
+     * round's full duration in silence, once per loop, forever.
+     */
+    private suspend fun startPlayer(uri: Uri, volume: Float): MediaPlayer? {
+        val mp = MediaPlayer()
+        return try {
+            val started = CompletableDeferred<Boolean>()
+            mp.setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_ALARM)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .build()
+            )
+            // Keeps the CPU running while this plays with the screen off, on top of
+            // the service's own wake lock — MediaPlayer releases it by itself when
+            // playback stops, so it also covers the window between rings.
+            mp.setWakeMode(applicationContext, PowerManager.PARTIAL_WAKE_LOCK)
+            mp.setDataSource(applicationContext, uri)
+            mp.isLooping = true
+            mp.setVolume(volume, volume)
+            mp.setOnPreparedListener { it.start(); started.complete(true) }
+            mp.setOnErrorListener { _, _, _ -> started.complete(false); true }
+            // prepareAsync() rather than prepare(): this runs on the main dispatcher.
+            mp.prepareAsync()
+            if (started.await()) mp else { runCatching { mp.release() }; null }
+        } catch (e: CancellationException) {
+            // Cancelled mid-prepare (Stop pressed, a newer alarm taking over). Release
+            // before unwinding or the native player is leaked, still holding a
+            // USAGE_ALARM stream nothing can reach.
+            runCatching { mp.release() }
+            throw e
+        } catch (e: Exception) {
+            runCatching { mp.release() }
+            appLogger.log("AlarmFiringService", "לא ניתן לנגן את הצליל $uri: ${e.javaClass.simpleName}")
+            null
+        }
+    }
+
     private suspend fun playOneRing(alarm: Alarm, ring: AlarmRing, elapsedAtRingStart: Int) {
-        val uri = if (ring.ringtoneUri != "default") Uri.parse(ring.ringtoneUri)
-                  else android.provider.Settings.System.DEFAULT_ALARM_ALERT_URI
+        val configured = if (ring.ringtoneUri != "default")
+            runCatching { Uri.parse(ring.ringtoneUri) }.getOrNull() ?: DEFAULT_ALARM_URI
+        else DEFAULT_ALARM_URI
         val base = ring.volumePercent / 100f
         // Continue the ramp from wherever cumulative elapsed time says it should be,
         // not always crescendoStartVolume: startAudioSequence() loops through
@@ -233,51 +290,50 @@ class AlarmFiringService : Service() {
             alarm.volumeAtSecond(ring.volumePercent, elapsedAtRingStart) / 100f
         else base
 
-        val mp = MediaPlayer()
-        player = mp
-        // try/finally around everything after the player exists: without it, a
-        // cancellation landing on either suspension point below (the user pressing
-        // Stop, the auto-stop timer, a second alarm taking over) skipped the
-        // stop/release entirely and left a looping, USAGE_ALARM MediaPlayer playing
-        // with no owner — audible until the process itself died, and unstoppable from
-        // inside the app.
-        try {
-            val prepared = CompletableDeferred<Unit>()
-            mp.apply {
-                setAudioAttributes(
-                    AudioAttributes.Builder()
-                        .setUsage(AudioAttributes.USAGE_ALARM)
-                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                        .build()
-                )
-                // Keeps the CPU running while this plays with the screen off, on top of
-                // the service's own wake lock — MediaPlayer releases it by itself when
-                // playback stops, so it also covers the window between rings.
-                setWakeMode(applicationContext, PowerManager.PARTIAL_WAKE_LOCK)
-                setDataSource(applicationContext, uri)
-                isLooping = true
-                setVolume(start, start)
-                // Use prepareAsync() to avoid blocking the main thread
-                setOnPreparedListener { it.start(); prepared.complete(Unit) }
-                setOnErrorListener { _, _, _ ->
-                    // Fallback: fall through silently for this ring rather than getting
-                    // stuck waiting on `prepared` forever; the next ring (or vibration)
-                    // still runs.
-                    prepared.complete(Unit)
-                    true
-                }
-                prepareAsync()
+        // Fall back to the device's own alarm sound rather than ringing silently: the
+        // chosen ringtone is the part most likely to have gone stale since the alarm
+        // was set up, and "the alarm went off with the wrong sound" is a different
+        // universe from "the alarm didn't go off".
+        val mp: MediaPlayer? = startPlayer(configured, start)
+            ?: if (configured != DEFAULT_ALARM_URI) {
+                appLogger.log("AlarmFiringService",
+                    "הצליל שנבחר ל-\"${alarm.name}\" (#${alarm.id}) לא ניתן לניגון — מנוגן צליל ברירת המחדל")
+                startPlayer(DEFAULT_ALARM_URI, start)
+            } else null
+        if (mp == null) {
+            // Nothing is playable — the device's alarm sound is set to silent, or audio
+            // is unavailable entirely. Vibrate instead if this alarm wasn't already
+            // going to, so the alarm still happens in *some* form.
+            appLogger.log("AlarmFiringService",
+                "אין צליל שניתן לנגן עבור \"${alarm.name}\" (#${alarm.id}) — מופעל רטט במקום")
+            if (alarm.vibrationMode == VibrationMode.SOUND_ONLY && !silentFallbackVibrating) {
+                silentFallbackVibrating = true
+                startVibration()
             }
-            prepared.await()
+            // Still wait out the round so the sequence's timing (and the auto-stop) is
+            // unchanged from a round that did play.
+            delay(ring.durationSeconds * 1_000L)
+            return
+        }
 
-            if (alarm.crescendoEnabled) startCrescendo(alarm, mp, base, elapsedAtRingStart)
-
+        // Bound to a non-null val rather than relying on a smart cast: `mp` is read
+        // inside the runCatching lambdas below, and a nullable local that a closure
+        // captures is exactly the shape Kotlin refuses to smart-cast.
+        val playing: MediaPlayer = mp
+        player = playing
+        // try/finally around everything after the player is live: without it, a
+        // cancellation landing on the delay below (the user pressing Stop, the
+        // auto-stop timer, a second alarm taking over) skipped the stop/release
+        // entirely and left a looping, USAGE_ALARM MediaPlayer playing with no owner —
+        // audible until the process itself died, and unstoppable from inside the app.
+        try {
+            if (alarm.crescendoEnabled) startCrescendo(alarm, playing, base, elapsedAtRingStart)
             delay(ring.durationSeconds * 1_000L)
         } finally {
             crescendoJob?.cancel()
-            runCatching { mp.stop() }
-            runCatching { mp.release() }
-            if (player === mp) player = null
+            runCatching { playing.stop() }
+            runCatching { playing.release() }
+            if (player === playing) player = null
         }
     }
 
@@ -337,6 +393,7 @@ class AlarmFiringService : Service() {
         // logging and re-arming itself (see onStartCommand's generation counter), and
         // only the noise-making half gets cancelled.
         ringJob?.cancel()
+        silentFallbackVibrating = false
         autoStopJob?.cancel(); crescendoJob?.cancel(); ringSequenceJob?.cancel()
         // Separate runCatching per call: if stop() throws (e.g. player still in the
         // Initialized/Prepared-but-not-started state), release() must still run or
@@ -395,6 +452,9 @@ class AlarmFiringService : Service() {
          *  fallback notification. */
         const val CH = AlarmNotifications.CHANNEL_ID
         const val NOTIF_ID = 1001
+        /** The device's configured alarm sound; the fallback whenever a ring's own
+         *  chosen ringtone can't be played. */
+        private val DEFAULT_ALARM_URI: Uri = android.provider.Settings.System.DEFAULT_ALARM_ALERT_URI
         private const val WAKE_LOCK_TAG = "SmartRing:alarm"
         // The ring-duration slider's maximum (600s) plus room for the pre-ring
         // vibration window and teardown.

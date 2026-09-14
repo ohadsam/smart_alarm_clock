@@ -99,6 +99,9 @@ class RingSetupTest {
         // A quiet first round doesn't make the whole crescendo pointless if a later
         // round is loud enough to ramp into.
         assertEquals(emptyList<String>(), warnings(
+            // 300s so both 60s rounds comfortably fit — otherwise the "rounds that
+            // never play" rule below fires too and this stops testing only crescendo.
+            ringDurationSeconds = 300,
             rings = listOf(AlarmRing(volumePercent = 20), AlarmRing(orderIndex = 1, volumePercent = 100)),
             crescendoEnabled = true, crescendoStartVolume = 40,
             crescendoStepSeconds = 5, crescendoStepPercent = 30,
@@ -176,6 +179,108 @@ class RingSetupTest {
             crescendoStepSeconds = 60, crescendoStepPercent = 5,
         )
         assertEquals(2, w.size)
+    }
+
+    // ── Ring rounds the alarm stops before reaching ──────────────────────────
+
+    @Test
+    fun `the edit screen's own default for a second round never plays`() {
+        // Exactly what "הוסף סבב צלצול" produces on a fresh alarm: a 60s first round,
+        // a 30s second one, against the default 60s ring duration. Round 2 is due to
+        // start at t=60, which is the same instant the alarm stops.
+        val w = warnings(
+            ringDurationSeconds = 60,
+            rings = listOf(
+                AlarmRing(orderIndex = 0, durationSeconds = 60, volumePercent = 100),
+                AlarmRing(orderIndex = 1, durationSeconds = 30, volumePercent = 80, delayAfterSeconds = 300),
+            ),
+        )
+        assertEquals(1, w.size)
+        assertTrue(w.single(), w.single().contains("רק ל-1 מתוך 2"))
+    }
+
+    @Test
+    fun `rounds that all fit are not flagged`() {
+        assertEquals(emptyList<String>(), warnings(
+            ringDurationSeconds = 120,
+            rings = listOf(
+                AlarmRing(orderIndex = 0, durationSeconds = 30),
+                AlarmRing(orderIndex = 1, durationSeconds = 30),
+                AlarmRing(orderIndex = 2, durationSeconds = 30),
+            ),
+        ))
+    }
+
+    @Test
+    fun `the silent gap between rounds counts against the ring duration`() {
+        // Two 20s rounds fit inside 60s on their own; a 30s gap after the first one
+        // pushes the second past the end.
+        val w = warnings(
+            ringDurationSeconds = 45,
+            rings = listOf(
+                AlarmRing(orderIndex = 0, durationSeconds = 20, delayAfterSeconds = 30),
+                AlarmRing(orderIndex = 1, durationSeconds = 20),
+            ),
+        )
+        assertEquals(1, w.size)
+        assertTrue(w.single(), w.single().contains("רק ל-1 מתוך 2"))
+    }
+
+    @Test
+    fun `the vibrate-first window pushes rounds past the end of the alarm`() {
+        // The sound sequence only starts after the vibration window, so the rounds
+        // have that much less of the ring duration to fit into.
+        // Vibration to 55s, then round 1 runs 55->85; round 2 would not start until 85,
+        // past the 80s the alarm lasts. (Not 40/90: there round 2 *does* start, at 70,
+        // and merely gets cut off — which is what "משך צלצול" is for, not a mistake.)
+        val w = warnings(
+            vibrationMode = VibrationMode.VIBRATION_THEN_SOUND,
+            vibrationOnlySeconds = 55, ringDurationSeconds = 80,
+            rings = listOf(
+                AlarmRing(orderIndex = 0, durationSeconds = 30),
+                AlarmRing(orderIndex = 1, durationSeconds = 30),
+            ),
+        )
+        assertEquals(1, w.size)
+        assertTrue(w.single(), w.single().contains("רק ל-1 מתוך 2"))
+    }
+
+    @Test
+    fun `a round that starts in time is not flagged just because it gets cut off`() {
+        // Round 2 starts at 30s, inside the 45s the alarm lasts, and is silenced
+        // mid-round. That is exactly what the ring-duration setting is for; warning
+        // about it would nag about every ordinary alarm.
+        assertEquals(emptyList<String>(), warnings(
+            ringDurationSeconds = 45,
+            rings = listOf(
+                AlarmRing(orderIndex = 0, durationSeconds = 30),
+                AlarmRing(orderIndex = 1, durationSeconds = 30),
+            ),
+        ))
+    }
+
+    @Test
+    fun `a single round is never flagged for not fitting`() {
+        // A lone round longer than the ring duration isn't a mistake — it just gets
+        // cut off, which is exactly what "משך צלצול" is for.
+        assertEquals(emptyList<String>(), warnings(
+            ringDurationSeconds = 10,
+            rings = listOf(AlarmRing(orderIndex = 0, durationSeconds = 300)),
+        ))
+    }
+
+    @Test
+    fun `a vibration-only alarm is not told its rounds won't play`() {
+        // Nothing plays in this mode by design; complaining that round 2 won't be
+        // heard would be noise on top of a setting the user chose deliberately.
+        assertEquals(emptyList<String>(), warnings(
+            vibrationMode = VibrationMode.VIBRATION_ONLY,
+            ringDurationSeconds = 30,
+            rings = listOf(
+                AlarmRing(orderIndex = 0, durationSeconds = 60),
+                AlarmRing(orderIndex = 1, durationSeconds = 60),
+            ),
+        ))
     }
 
     @Test

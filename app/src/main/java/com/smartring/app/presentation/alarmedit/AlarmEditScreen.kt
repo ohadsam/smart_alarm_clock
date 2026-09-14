@@ -1,6 +1,8 @@
 package com.smartring.app.presentation.alarmedit
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.media.RingtoneManager
 import android.net.Uri
 import android.os.Build
@@ -24,6 +26,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.*
 import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.ContextCompat
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.*
@@ -105,6 +108,27 @@ fun AlarmEditScreen(
             contentPadding        = PaddingValues(start=16.dp, end=16.dp, top=pad.calculateTopPadding()+8.dp, bottom=80.dp),
             verticalArrangement   = Arrangement.spacedBy(12.dp),
         ) {
+            // A save that threw. Shown at the very top, where the user is looking after
+            // tapping Save — previously the button simply went back to being tappable
+            // with nothing to say the alarm had not been written at all.
+            if (s.saveError) {
+                item {
+                    Surface(shape = RoundedCornerShape(14.dp),
+                        color = MaterialTheme.colorScheme.errorContainer,
+                        modifier = Modifier.fillMaxWidth()) {
+                        Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Rounded.ErrorOutline, null, Modifier.size(18.dp),
+                                tint = MaterialTheme.colorScheme.onErrorContainer)
+                            Spacer(Modifier.width(8.dp))
+                            Text("שמירת השעמור נכשלה. נסה שוב — הפרטים נשמרו במסך. " +
+                                "אם זה חוזר, אפשר לראות את הסיבה בהגדרות ← לוגים.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onErrorContainer)
+                        }
+                    }
+                }
+            }
+
             // ── Name ──────────────────────────────────────────────
             item {
                 OutlinedTextField(
@@ -564,6 +588,46 @@ private fun RingsSection(
         pickingIndex = -1
     }
 
+    // The picker itself needs no permission — but the URI it hands back does, later,
+    // when AlarmFiringService opens it. A track from the user's own library lives in
+    // MediaStore, and reading it on Android 13+ requires READ_MEDIA_AUDIO (below that,
+    // READ_EXTERNAL_STORAGE). Both were declared in the manifest and never once
+    // requested, so the grant never existed: the alarm fell back to the default sound
+    // (and, before this release, fell silent altogether) at 06:30 with no hint why.
+    // Asked for at the moment the user reaches for a custom sound, which is the only
+    // point where the request makes sense to them.
+    val audioPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
+        Manifest.permission.READ_MEDIA_AUDIO else Manifest.permission.READ_EXTERNAL_STORAGE
+
+    fun openPicker(index: Int) {
+        pickingIndex = index
+        ringtonePicker.launch(Intent(RingtoneManager.ACTION_RINGTONE_PICKER).apply {
+            putExtra(RingtoneManager.EXTRA_RINGTONE_TYPE, RingtoneManager.TYPE_ALARM)
+            putExtra(RingtoneManager.EXTRA_RINGTONE_SHOW_DEFAULT, true)
+            putExtra(RingtoneManager.EXTRA_RINGTONE_SHOW_SILENT, false)
+            putExtra(RingtoneManager.EXTRA_RINGTONE_DEFAULT_URI,
+                RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM))
+            val current = rings.getOrNull(index)?.ringtoneUri
+            if (current != null && current != "default")
+                putExtra(RingtoneManager.EXTRA_RINGTONE_EXISTING_URI, Uri.parse(current))
+        })
+    }
+
+    // Opens the picker whatever the user answers: a denied permission only limits
+    // which sounds will play later, and refusing to show the picker over it would be
+    // worse than the degraded case it protects against.
+    var pendingPickIndex by remember { mutableStateOf(-1) }
+    val audioPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { if (pendingPickIndex >= 0) { openPicker(pendingPickIndex); pendingPickIndex = -1 } }
+
+    fun pickRingtone(index: Int) {
+        val granted = ContextCompat.checkSelfPermission(context, audioPermission) ==
+            PackageManager.PERMISSION_GRANTED
+        if (granted) openPicker(index)
+        else { pendingPickIndex = index; audioPermissionLauncher.launch(audioPermission) }
+    }
+
     EditCard {
         rings.forEachIndexed { i, ring ->
             Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {
@@ -577,18 +641,7 @@ private fun RingsSection(
             }
             Spacer(Modifier.height(4.dp))
             OutlinedButton(
-                onClick = {
-                    pickingIndex = i
-                    ringtonePicker.launch(Intent(RingtoneManager.ACTION_RINGTONE_PICKER).apply {
-                        putExtra(RingtoneManager.EXTRA_RINGTONE_TYPE, RingtoneManager.TYPE_ALARM)
-                        putExtra(RingtoneManager.EXTRA_RINGTONE_SHOW_DEFAULT, true)
-                        putExtra(RingtoneManager.EXTRA_RINGTONE_SHOW_SILENT, false)
-                        putExtra(RingtoneManager.EXTRA_RINGTONE_DEFAULT_URI,
-                            RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM))
-                        if (ring.ringtoneUri != "default")
-                            putExtra(RingtoneManager.EXTRA_RINGTONE_EXISTING_URI, Uri.parse(ring.ringtoneUri))
-                    })
-                },
+                onClick = { pickRingtone(i) },
                 modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(10.dp),
             ) {
                 Icon(Icons.Rounded.MusicNote, null, Modifier.size(16.dp))

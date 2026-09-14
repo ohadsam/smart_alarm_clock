@@ -34,7 +34,13 @@ sealed class Screen(val route: String) {
 fun SmartRingNavGraph(alarmTrigger: Pair<Long, Long> = 0L to -1L) {
     val nav = rememberNavController()
     val (initialNonce, initialAlarmId) = alarmTrigger
-    val start = if (initialAlarmId > 0L) Screen.Ring.go(initialAlarmId) else Screen.List.route
+    // remember{}, so the graph's start destination is fixed for the life of this
+    // composable. NavHost rebuilds (and re-applies) its graph whenever the start
+    // destination changes, which resets the back stack — so deriving it from a value
+    // that changes meant an alarm firing while the app was open threw away wherever
+    // the user was and then navigated to the ring screen twice: once from the rebuilt
+    // graph, once from the LaunchedEffect below.
+    val start = remember { if (initialAlarmId > 0L) Screen.Ring.go(initialAlarmId) else Screen.List.route }
 
     // The start destination already handles the very first alarm id; only re-navigate
     // when a *new* trigger (a higher nonce) arrives, e.g. via MainActivity.onNewIntent
@@ -43,7 +49,15 @@ fun SmartRingNavGraph(alarmTrigger: Pair<Long, Long> = 0L to -1L) {
     LaunchedEffect(alarmTrigger) {
         val (nonce, id) = alarmTrigger
         if (id > 0L && nonce != lastHandledNonce) {
-            nav.navigate(Screen.Ring.go(id))
+            // Replace any ring screen already showing rather than stacking on it: a
+            // second alarm firing while the first one's screen is up left the first
+            // one underneath, so dismissing the second revealed a ring screen for an
+            // alarm that had already stopped, with live Stop/Snooze buttons. popUpTo
+            // is a no-op when there is no ring screen on the stack.
+            nav.navigate(Screen.Ring.go(id)) {
+                popUpTo(Screen.Ring.route) { inclusive = true }
+                launchSingleTop = true
+            }
             lastHandledNonce = nonce
         }
     }

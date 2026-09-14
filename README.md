@@ -28,7 +28,8 @@
 - Kotlin 2.0 + Jetpack Compose + Material 3
 - MVVM + Repository + Hilt DI
 - Room DB + DataStore
-- AlarmManager `setAlarmClock()` (פטור מ-Doze) + ForegroundService עם wake lock
+- AlarmManager `setAlarmClock()` (פטור מ-Doze) + ForegroundService עם wake lock רציף
+  מרגע קבלת ההתראה, ונפילה חלקה לצליל ברירת המחדל/רטט אם הצליל שנבחר לא ניתן לניגון
 - Glance API (4 גדלי ווידג'ט, עם שעון חי וספירה לאחור חיה דרך AndroidRemoteViews, מותאמים למצב בהיר/כהה)
 - WorkManager (reschedule אחרי ריבוט/שינוי אזור זמן, יומי לניקוי לוגים, כל 15 דק' לרענון ווידג'טים)
 - בדיקות: JUnit + Robolectric (JVM) **ובדיקות instrumented על אמולטור אמיתי** ב-CI

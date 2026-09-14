@@ -677,6 +677,61 @@ If the user asks for a PR-based workflow going forward, follow that instead and 
   defaults. Pair `+night` with an explicit `+notnight` test — asserting only the dark side
   passes just as well when `values-night` is missing entirely.
 
+- **Granting SCHEDULE_EXACT_ALARM does not restore the alarms revoking it cancelled.**
+  The system cancels every exact alarm when the permission goes away, and the app is
+  expected to listen for `ACTION_SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED` (API 31+,
+  delivered explicitly so the implicit-broadcast restrictions don't apply) and reschedule.
+  This repo's own `ReliabilityGate` sends users to that settings screen, so missing the
+  broadcast meant the *recommended* flow ended with a list of enabled alarms, none armed.
+  Any future OS-state prompt deserves the same question: what does the system throw away
+  when the user acts on this, and who puts it back?
+- **A wake lock is not held across `onReceive` → `startForegroundService()` → the service.**
+  The platform's alarm wake lock ends with `onReceive`, and the service start is
+  asynchronous, so a phone that has been idle all night can go back to sleep in between.
+  `AlarmHandoffWakeLock` bridges it: static (the two ends have no handle on each other),
+  reference-counting off so the release is idempotent, and with a timeout so a service
+  that never starts can't strand it.
+- **`MediaPlayer.setDataSource()` throws for a URI the app can't read, and that exception
+  will take the whole ring coroutine with it.** A ringtone chosen months ago is the part
+  of an alarm most likely to have gone stale — a deleted track, an unmounted card, a
+  MediaStore URI with no READ_MEDIA_AUDIO grant. Treat "the chosen sound doesn't work" as
+  an expected state with a ladder of fallbacks (default alarm sound, then vibration), never
+  as an error path. Also: a `setOnErrorListener` that just completes the wait is not a
+  fallback — it plays silence for the round's full duration, once per loop.
+- **A permission declared in the manifest is not a permission you have.** READ_MEDIA_AUDIO
+  and READ_EXTERNAL_STORAGE sat in this manifest for releases without a single runtime
+  request, so custom ringtones from the user's library could never be read on Android 13+.
+  When reviewing a manifest change, grep for an actual `RequestPermission()` launcher for
+  every dangerous permission listed.
+- **A `goAsync()` pending result must be finished in a `finally`.** Both notification
+  receivers called `p.finish()` at each exit point, so any throw in between — a history
+  write failing, `scheduleAt` hitting an AlarmManager limit — left the receiver alive until
+  the system force-finished it. The same applies to any future `goAsync()` receiver.
+- **`DataStore.data` reports read failures by throwing into the collector.** Without
+  `.catch { if (it is IOException) emit(emptyPreferences()) else throw it }`, a corrupt
+  preferences file crashes the app — and in this app that collector runs inside
+  `MainActivity.setContent` to choose the theme, so the crash is on launch, every launch.
+- **NavHost rebuilds and re-applies its graph when the start destination changes**, which
+  resets the back stack. Deriving `startDestination` from anything that can change (here,
+  the alarm-trigger pair from `onNewIntent`) means an event mid-session throws away
+  wherever the user was. Wrap it in `remember {}` and let a `LaunchedEffect` handle
+  everything after the first. Relatedly, navigating to a screen that can already be showing
+  needs `popUpTo(route) { inclusive = true }` + `launchSingleTop`, or they stack: a second
+  alarm left the first alarm's ring screen underneath, live buttons and all.
+- **Any `viewModelScope.launch` behind a button that sets an `isSaving`-style flag needs a
+  `try/catch` that clears it.** `AlarmEditViewModel.save()` had none, so a failed write left
+  the spinner running forever on a screen that never closed and never said why.
+- **Day-label logic ("today"/"tomorrow") must compare year *and* day-of-year, and derive
+  "tomorrow" by advancing a Calendar.** Comparing `DAY_OF_YEAR` alone calls a date exactly
+  one year out "today" — reachable here, since the specific-dates feature exists for
+  birthdays — and never matches 1 January as tomorrow on 31 December. Extract it as a pure
+  function taking `now`, like the rest of this repo's date code, so it can be tested at a
+  year boundary without waiting for December.
+- **Check each slider against the ones it interacts with, including the defaults the app
+  itself writes.** "הוסף סבב צלצול" adds a round after a 60s first round while the default
+  ring duration is also 60s — so the very first round anyone adds never plays. A default
+  that produces a silently-inert configuration is worse than a bad value the user chose.
+
 ## Known limitations (don't re-report these as new findings unless you're the batch fixing them)
 
 - **Settings' English toggle doesn't change any visible UI text.** Every screen hardcodes Hebrew

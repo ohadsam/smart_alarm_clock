@@ -6,7 +6,9 @@ import com.smartring.app.domain.model.*
 import com.smartring.app.util.AlarmScheduler
 import com.smartring.app.util.AppLogger
 import com.smartring.app.util.endOfPickedDay
+import com.smartring.app.util.formatNextFireAt
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.util.Calendar
@@ -51,6 +53,9 @@ data class AlarmEditUiState(
     val isSaving: Boolean                  = false,
     val isSaved: Boolean                   = false,
     val nameError: Boolean                 = false,
+    // The last save attempt threw. Cleared when the next one starts; surfaced on the
+    // screen so a failed save is visible rather than looking like a stuck button.
+    val saveError: Boolean                 = false,
     // "next fire" hint shown to user
     val nextFireHint: String?              = null,
     // True when this alarm, exactly as configured right now, has no future occurrence
@@ -242,23 +247,8 @@ class AlarmEditViewModel @Inject constructor(
     private fun nextFireHintFor(alarm: Alarm): String? =
         formatNextFire(scheduler.effectiveNextFireTime(alarm))
 
-    private fun formatNextFire(next: Long?): String? {
-        if (next == null) return null
-        val cal = Calendar.getInstance().apply { timeInMillis = next }
-        val today = Calendar.getInstance()
-        val isToday = cal.get(Calendar.DAY_OF_YEAR) == today.get(Calendar.DAY_OF_YEAR)
-        val isTomorrow = cal.get(Calendar.DAY_OF_YEAR) == today.get(Calendar.DAY_OF_YEAR) + 1
-        val dateStr = when {
-            isToday    -> "היום"
-            isTomorrow -> "מחר"
-            else       -> "%02d/%02d/%04d".format(
-                cal.get(Calendar.DAY_OF_MONTH),
-                cal.get(Calendar.MONTH) + 1,
-                cal.get(Calendar.YEAR))
-        }
-        return "הצלצול הבא: $dateStr בשעה %02d:%02d".format(
-            cal.get(Calendar.HOUR_OF_DAY), cal.get(Calendar.MINUTE))
-    }
+    private fun formatNextFire(next: Long?): String? =
+        next?.let { formatNextFireAt(it) }
 
     // ── Save ──────────────────────────────────────────────────────
     fun save() {
@@ -268,14 +258,25 @@ class AlarmEditViewModel @Inject constructor(
             _scrollToNameRequests.tryEmit(Unit)
             return
         }
-        _state.update { it.copy(isSaving = true) }
+        _state.update { it.copy(isSaving = true, saveError = false) }
         viewModelScope.launch {
-            val alarm = buildAlarm(s)
-            val savedId = repository.saveAlarm(alarm)
-            scheduler.schedule(alarm.copy(id = savedId))
-            appLogger.log("AlarmEdit", (if (editingId > 0L) "שעמור עודכן: " else "שעמור חדש נוצר: ") +
-                "\"${alarm.name}\" (#$savedId) ל-%02d:%02d".format(alarm.hour, alarm.minute))
-            _state.update { it.copy(isSaving = false, isSaved = true) }
+            // Without this, a failing write (a database error, an AlarmManager refusing
+            // one more exact alarm) left isSaving stuck at true forever: the save button
+            // span on a screen that never closed, and the user had no way to tell that
+            // their alarm had not been saved at all.
+            try {
+                val alarm = buildAlarm(s)
+                val savedId = repository.saveAlarm(alarm)
+                scheduler.schedule(alarm.copy(id = savedId))
+                appLogger.log("AlarmEdit", (if (editingId > 0L) "שעמור עודכן: " else "שעמור חדש נוצר: ") +
+                    "\"${alarm.name}\" (#$savedId) ל-%02d:%02d".format(alarm.hour, alarm.minute))
+                _state.update { it.copy(isSaving = false, isSaved = true) }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                appLogger.log("AlarmEdit", "שמירת השעמור \"${s.name}\" נכשלה: ${e.message}")
+                _state.update { it.copy(isSaving = false, saveError = true) }
+            }
         }
     }
 

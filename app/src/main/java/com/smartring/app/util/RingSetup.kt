@@ -71,5 +71,43 @@ fun ringSetupWarnings(
         }
     }
 
+    // 4. Ring rounds that the alarm stops before ever reaching. Each round starts at
+    //    the cumulative length of everything before it (durations plus the silent
+    //    gaps), and the whole alarm ends at ringDurationSeconds — so a round whose
+    //    start time is already past that simply never plays, however carefully it was
+    //    configured. The edit screen's own defaults land here: "הוסף סבב צלצול" adds a
+    //    round after a 60s first round while the default ring duration is also 60s, so
+    //    the very first round anyone adds is silent until they also lengthen the alarm.
+    val playable = playableRoundCount(vibrationMode, vibrationOnlySeconds, ringDurationSeconds, rings)
+    if (rings.size > 1 && playable < rings.size) {
+        warnings += "משך הצלצול (${formatDurationSeconds(ringDurationSeconds)}) מספיק רק ל-$playable מתוך " +
+            "${rings.size} סבבי הצלצול — " +
+            (if (playable == 0) "אף סבב לא יספיק להתנגן. " else "הסבבים שאחריו לא יתנגנו. ") +
+            "הארך את משך הצלצול, או קצר את משכי הסבבים ואת ההשהיות ביניהם."
+    }
+
     return warnings
+}
+
+/**
+ * How many of [rings] actually get to play before the alarm's auto-stop, mirroring
+ * AlarmFiringService.startAudioSequence(): rounds run in order, each followed by its
+ * own silent gap, and in "רטט→צלצול" the whole sequence only begins once the
+ * vibrate-first window is over.
+ */
+private fun playableRoundCount(
+    vibrationMode: VibrationMode,
+    vibrationOnlySeconds: Int,
+    ringDurationSeconds: Int,
+    rings: List<AlarmRing>,
+): Int {
+    if (vibrationMode == VibrationMode.VIBRATION_ONLY) return rings.size   // nothing plays; rule 1's territory
+    var at = if (vibrationMode == VibrationMode.VIBRATION_THEN_SOUND) vibrationOnlySeconds else 0
+    var count = 0
+    for (ring in rings.sortedBy { it.orderIndex }) {
+        if (at >= ringDurationSeconds) break
+        count++
+        at += ring.durationSeconds + ring.delayAfterSeconds
+    }
+    return count
 }
