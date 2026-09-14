@@ -126,7 +126,14 @@ fun AlarmListScreen(onAddAlarm: ()->Unit, onEditAlarm: (Long)->Unit, onOpenHisto
 @Composable
 private fun AlarmCardItem(alarm: Alarm, onToggle:(Boolean)->Unit, onEdit:()->Unit, onDelete:()->Unit) {
     var showDel by remember { mutableStateOf(false) }
-    val dotColor = if (alarm.isFrozen) Blue else if (alarm.isActive) Green else MaterialTheme.colorScheme.outline
+    // Theme color roles rather than the raw Blue/Green constants: those are tuned for
+    // the dark scheme's near-black card, and Green (a pale mint) as a 8dp dot and a
+    // card border on Light mode's white surface is all but invisible.
+    val dotColor = when {
+        alarm.isFrozen -> MaterialTheme.colorScheme.primary
+        alarm.isActive -> MaterialTheme.colorScheme.tertiary
+        else           -> MaterialTheme.colorScheme.outline
+    }
 
     // Swipe (either direction) surfaces the same confirm dialog as long-press, rather
     // than deleting outright — a quicker, more discoverable gesture without an
@@ -173,9 +180,13 @@ private fun AlarmCardItem(alarm: Alarm, onToggle:(Boolean)->Unit, onEdit:()->Uni
                     Spacer(Modifier.height(2.dp))
                     Text("📝 $it",style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.tertiary,maxLines=1)
                 }
-                if (alarm.isShabbatMode || !alarm.snoozeEnabled) {
+                if (alarm.isFrozen || alarm.isShabbatMode || !alarm.snoozeEnabled) {
                     Spacer(Modifier.height(3.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        // A frozen alarm keeps isEnabled = true, so its switch stays
+                        // visibly ON while the alarm will not ring at all — the only
+                        // hint was the color of an 8dp dot. Say it in words.
+                        if (alarm.isFrozen) MiniBadge("❄️ מוקפא — לא יצלצל", MaterialTheme.colorScheme.primary)
                         if (alarm.isShabbatMode) MiniBadge("🕯 שבת", MaterialTheme.colorScheme.tertiary)
                         if (!alarm.snoozeEnabled) MiniBadge("ללא נודניק", MaterialTheme.colorScheme.onSurfaceVariant)
                     }
@@ -183,11 +194,18 @@ private fun AlarmCardItem(alarm: Alarm, onToggle:(Boolean)->Unit, onEdit:()->Uni
             }
             Column(horizontalAlignment=Alignment.End){
                 Switch(alarm.isEnabled,onToggle,
+                    // "מוקפא" is called out separately from the on/off state: a frozen
+                    // alarm reads as "פעיל" to the switch but never rings, and a screen
+                    // reader user has no dot color or badge to fall back on.
                     modifier=Modifier.semantics{contentDescription=
-                        "שעמור ${alarm.name.ifBlank{alarm.timeFormatted}} בשעה ${alarm.timeFormatted}, ${if(alarm.isEnabled)"פעיל" else "כבוי"}"})
-                Text("לחץ לחיצה ארוכה למחיקה",
+                        "שעמור ${alarm.name.ifBlank{alarm.timeFormatted}} בשעה ${alarm.timeFormatted}, " +
+                        when { alarm.isFrozen -> "מוקפא"; alarm.isEnabled -> "פעיל"; else -> "כבוי" }})
+                // Mentions the swipe gesture too — it was added alongside long-press but
+                // this hint still named only long-press, so the quicker of the two ways
+                // to delete a card was undiscoverable.
+                Text("החלק או לחץ ארוכות למחיקה",
                     style=MaterialTheme.typography.labelSmall,
-                    color=MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha=0.5f),
+                    color=MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha=0.7f),
                     fontSize=9.sp)
             }
         }

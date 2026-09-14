@@ -2,6 +2,10 @@
 <resources>
     <string name="action_stop">Stop</string>
     <string name="action_snooze">Snooze</string>
+    <string name="widget_small_desc">Live clock and the next alarm</string>
+    <string name="widget_medium_desc">Live clock, the next alarm and its name</string>
+    <string name="widget_wide_desc">Live clock and the next three alarms</string>
+    <string name="widget_large_desc">Live clock and the next four alarms</string>
     <string name="history">History</string>
     <string name="settings">Settings</string>
     <string name="controls">Global Controls</string>

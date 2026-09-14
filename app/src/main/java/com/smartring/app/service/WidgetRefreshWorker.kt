@@ -4,6 +4,7 @@ import androidx.hilt.work.HiltWorker
 import androidx.work.*
 import com.smartring.app.presentation.widget.refreshAllWidgets
 import dagger.assisted.*
+import kotlinx.coroutines.CancellationException
 
 /**
  * Periodic fallback that keeps the home-screen widgets' live countdown fresh even
@@ -16,9 +17,18 @@ import dagger.assisted.*
 class WidgetRefreshWorker @AssistedInject constructor(
     @Assisted ctx: Context, @Assisted params: WorkerParameters,
 ) : CoroutineWorker(ctx, params) {
-    override suspend fun doWork(): Result {
+    // Mirrors RescheduleWorker: a transient failure (the Glance session losing a race
+    // with a widget being removed, a DB read failing) becomes a retry rather than a
+    // hard failure, and CancellationException is re-thrown rather than swallowed —
+    // catching it would tell WorkManager the run succeeded while the coroutine was in
+    // fact being torn down.
+    override suspend fun doWork(): Result = try {
         refreshAllWidgets(applicationContext)
-        return Result.success()
+        Result.success()
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        Result.retry()
     }
     companion object {
         const val WORK_NAME = "widget_refresh"

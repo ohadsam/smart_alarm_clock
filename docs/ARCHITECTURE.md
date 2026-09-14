@@ -46,6 +46,23 @@ Glance Widgets (SmartRingWidget.kt) → AlarmScheduler.effectiveNextFireTime() �
   ו-`rescheduleAll()` (רק לקריאה מ-`RescheduleWorker` אחרי ריבוט) עדיין מרעננים ישירות, כי הם לא
   תמיד מלווים בכתיבה לטבלה. `WidgetRefreshWorker` רץ כל 15 דקות כ-fallback נוסף.
 
+## ווידג'טים: תיאור, ערכת צבעים ובדיקות (v1.6.0)
+- ארבעת קובצי `res/xml/widget_*_info.xml` מגדירים כעת גם `minWidth`/`minHeight`
+  (לפי הנוסחה של אנדרואיד, `70 * תאים - 30`). `targetCellWidth`/`targetCellHeight`
+  קיימים רק מ-API 31, וה-minSdk כאן הוא 26 — בלעדיהם הווידג'ט לא הכריז על גודל כלל
+  באנדרואיד 8–11. בנוסף: `initialLayout` (חובה לפי חוזה `AppWidgetProviderInfo`,
+  ומוצג בין הנחת הווידג'ט לרינדור הראשון של Glance), `resizeMode` ו-`description`.
+- `SmartRingWidget.kt` בוחר `WidgetPalette` (בהיר/כהה) מ-`Configuration.UI_MODE_NIGHT_MASK`
+  בזמן הרינדור, ולא דרך ColorProvider יום/לילה של Glance — אותם ערכים מזינים גם את
+  צבע ה-TextClock המוטמע, שהוא ARGB int ולא ColorProvider, ומקור אחד לשניהם מונע מצב
+  שבו השעון והתוכן נמצאים בצדדים מנוגדים של הערכה. `SmartRingApp.onConfigurationChanged()`
+  מרענן את הווידג'טים בכל מעבר יום/לילה בפועל.
+- הלוגיקה שקובעת *מה* מוצג (`buildUpcomingAlarms` ב-`util/UpcomingAlarms.kt`) הוצאה
+  מתוך `provideGlance()` והיא פונקציה טהורה שמקבלת את שתי השאילתות כפרמטרים — כך היא
+  נבדקת ב-JVM בלי AlarmManager, בלי מארח Glance ובלי שעון אמיתי. `UpcomingAlarm.timeText`
+  נגזר מחותמת הזמן האמיתית של הצלצול ולא מ-`Alarm.timeFormatted`, כדי ששעה שמוצגת
+  וספירה לאחור שלידה לא יוכלו לסתור זו את זו (שעמור בנודניק הציג "07:00 · בעוד 8 דק׳").
+
 ## מסך הצלצול ואמינות (v1.4.0)
 - `AlarmRingViewModel` מחשב את הזמן שחלף מאז הצלצול לפי `SystemClock.elapsedRealtime()`,
   מעוגן ל-timestamp האמיתי (`alarm_logs` action='FIRED'), ולא ספירת טיקים מקומית של המסך —
@@ -88,6 +105,13 @@ WEEKLY/BIWEEKLY/MONTHLY.
 ב-CI, למה ש-Robolectric לא יכול לאמת: ש-`AlarmManager` האמיתי אכן רושם alarm-clock,
 SQLite אמיתי, הגדרות ערוץ ההתראות האמיתי, ועליית האפליקציה דרך גרף Hilt אמיתי.
 פירוט מלא ב-HANDOFF.md סעיף 13.
+
+## צבעים וערכת נושא (v1.6.0)
+ארבעת קבועי הצבע ב-`Theme.kt` (Blue/Green/Gold/Red) מכוונים למשטחים הכהים של הערכה
+הכהה ואינם קריאים כטקסט או כ-tint על משטח לבן. לכן מסכים קוראים את הגוונים דרך
+*תפקידי* הצבע של Material (`primary`=Blue, `secondary`=Gold, `tertiary`=Green,
+`error`=Red), שמחזיקים ערך נפרד לכל ערכה, ומשתמשים בקבועים הגולמיים רק כשהרקע עצמו
+הוא צבע כהה קבוע (למשל טקסט לבן על כפתור העצירה האדום).
 
 ## Security
 allowBackup=false · exported=false · FLAG_IMMUTABLE · ProGuard · prepareAsync() · startForeground() ראשון

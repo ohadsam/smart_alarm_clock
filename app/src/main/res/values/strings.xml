@@ -8,6 +8,14 @@
     <string name="widget_medium">SmartRing בינוני</string>
     <string name="widget_wide">SmartRing רחב</string>
     <string name="widget_large">SmartRing גדול</string>
+    <!-- android:description on each appwidget-provider: what the widget picker shows
+         under the widget's name on API 31+. Without it the picker offered four
+         identically-described entries and the only way to tell them apart was to
+         place one. -->
+    <string name="widget_small_desc">שעון חי והשעמור הבא</string>
+    <string name="widget_medium_desc">שעון חי, השעמור הבא ושמו</string>
+    <string name="widget_wide_desc">שעון חי ושלושת השעמורים הקרובים</string>
+    <string name="widget_large_desc">שעון חי וארבעת השעמורים הקרובים</string>
     <string name="history">היסטוריה</string>
     <string name="settings">הגדרות</string>
     <string name="controls">שליטה כללית</string>

@@ -220,6 +220,56 @@ class AlarmSchedulerTest {
         assertNull(shadow.peekNextScheduledAlarm())
     }
 
+    // ── schedule() also has to *dis*arm when there is nothing left to arm ──
+    // It used to plainly `return` in each of these cases, which left whatever had been
+    // armed before still armed: editing an alarm into a configuration that never fires
+    // again went on ringing at the old time, because nothing ever cancelled the
+    // PendingIntent the previous save had registered.
+
+    @Test
+    fun `schedule() disarms a previously armed alarm that can no longer fire`() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val shadow = shadowOf(context.getSystemService(AlarmManager::class.java))
+
+        val armed = Alarm(id = 9, hour = 8, minute = 0, repeatDaysBitmask = 0)
+        scheduler.schedule(armed)
+        assertNotNull("precondition: the alarm is armed", shadow.peekNextScheduledAlarm())
+
+        // Same id, now pointing at a specific datetime that has already passed, for
+        // which nextFireTime() returns null.
+        scheduler.schedule(armed.copy(specificDateTime = System.currentTimeMillis() - 60_000L))
+        assertNull(
+            "re-scheduling an alarm with no future occurrence must cancel the old trigger",
+            shadow.peekNextScheduledAlarm(),
+        )
+    }
+
+    @Test
+    fun `schedule() disarms an alarm that has just been frozen`() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val shadow = shadowOf(context.getSystemService(AlarmManager::class.java))
+
+        val armed = Alarm(id = 10, hour = 8, minute = 0, repeatDaysBitmask = 0)
+        scheduler.schedule(armed)
+        assertNotNull("precondition: the alarm is armed", shadow.peekNextScheduledAlarm())
+
+        scheduler.schedule(armed.copy(isFrozen = true))
+        assertNull("a frozen alarm must not stay armed", shadow.peekNextScheduledAlarm())
+    }
+
+    @Test
+    fun `schedule() clears a pending snooze when the alarm can no longer fire`() {
+        // pendingSnoozeUntil() is what the widgets and the edit screen's next-fire hint
+        // read. A snooze left behind for an alarm that has since been switched off would
+        // keep both of them advertising a ring that is never going to happen.
+        val alarm = Alarm(id = 11, hour = 8, minute = 0, repeatDaysBitmask = 0)
+        scheduler.scheduleAt(alarm, System.currentTimeMillis() + 5 * 60_000L)
+        assertNotNull("precondition: a snooze is pending", scheduler.pendingSnoozeUntil(alarm))
+
+        scheduler.schedule(alarm.copy(isEnabled = false))
+        assertNull(scheduler.pendingSnoozeUntil(alarm))
+    }
+
     // ── nextRecurringFireTime: "is there anything after the ring that just ended?" ──
     // This is what AlarmFiringService consults to decide between re-arming an alarm
     // and switching it off. It used to re-arm unconditionally, and since nextFireTime()

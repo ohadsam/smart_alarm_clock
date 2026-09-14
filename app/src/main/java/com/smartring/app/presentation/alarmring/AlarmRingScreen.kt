@@ -1,4 +1,5 @@
 package com.smartring.app.presentation.alarmring
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
@@ -33,6 +34,15 @@ fun AlarmRingScreen(alarmId: Long, onDismiss: () -> Unit,
     val s by vm.state.collectAsStateWithLifecycle()
     LaunchedEffect(Unit) { while (true) { delay(1_000); vm.tick() } }
     LaunchedEffect(s.isDismissed) { if (s.isDismissed) onDismiss() }
+
+    // Back must not dismiss a ringing alarm. It never stopped the ringtone (that's
+    // AlarmFiringService's job, and only Stop/Snooze tell it to) — it just navigated
+    // away from the one screen with the buttons, leaving the alarm blaring with no
+    // visible way to silence it. It also drove a hole straight through Shabbat mode,
+    // whose entire premise is that no interaction is accepted while the alarm rings.
+    // Disabled once the alarm has been dealt with, so the dismissal navigation that
+    // follows isn't itself swallowed.
+    BackHandler(enabled = !s.isDismissed) { /* deliberately consumed */ }
 
     // Add KeepScreenOn so alarm screen stays visible
     val view = LocalView.current
@@ -75,13 +85,17 @@ fun AlarmRingScreen(alarmId: Long, onDismiss: () -> Unit,
             Text(alarm.name, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.ExtraBold)
             Spacer(Modifier.height(12.dp))
 
-            // Vibration badge
+            // Vibration badge. Theme color *roles*, not the raw palette constants:
+            // Green (a pale mint) and Gold (a pale amber) are legible as text on the
+            // dark scheme's near-black surface and wash out completely on Light mode's
+            // white one — the same contrast bug already fixed for the crescendo bar
+            // and the reminder card below.
             val (vLabel, vColor) = when {
-                alarm.vibrationMode == VibrationMode.VIBRATION_THEN_SOUND && s.elapsedSeconds < alarm.vibrationOnlySeconds ->
-                    "רטט בלבד – עוד ${alarm.vibrationOnlySeconds - s.elapsedSeconds}שנ׳" to Red
-                alarm.vibrationMode == VibrationMode.SOUND_ONLY          -> "רק צלצול" to Blue
-                alarm.vibrationMode == VibrationMode.VIBRATION_ONLY      -> "רק רטט" to Green
-                else -> "צלצול + רטט" to Gold
+                alarm.vibrationMode == VibrationMode.VIBRATION_THEN_SOUND && !alarm.soundActiveAt(s.elapsedSeconds) ->
+                    "רטט בלבד – עוד ${alarm.vibrationOnlySeconds - s.elapsedSeconds}שנ׳" to MaterialTheme.colorScheme.error
+                alarm.vibrationMode == VibrationMode.SOUND_ONLY          -> "רק צלצול" to MaterialTheme.colorScheme.primary
+                alarm.vibrationMode == VibrationMode.VIBRATION_ONLY      -> "רק רטט" to MaterialTheme.colorScheme.tertiary
+                else -> "צלצול + רטט" to MaterialTheme.colorScheme.secondary
             }
             Surface(shape = RoundedCornerShape(999.dp), color = vColor.copy(.12f),
                 border = BorderStroke(1.dp, vColor.copy(.35f))) {
@@ -171,11 +185,15 @@ fun AlarmRingScreen(alarmId: Long, onDismiss: () -> Unit,
                 }
                 !alarm.snoozeEnabled -> { /* no snooze UI at all for this alarm */ }
                 s.snoozeCount < alarm.snoozeMaxCount -> {
+                    // colorScheme.secondary, not the raw Gold constant: as bare button
+                    // text on Light mode's white background Gold is effectively
+                    // invisible, which hid the only snooze control the screen has.
+                    val snoozeColor = MaterialTheme.colorScheme.secondary
                     TextButton(vm::snooze) {
-                        Icon(Icons.Rounded.Bedtime, null, Modifier.size(18.dp), tint = Gold)
+                        Icon(Icons.Rounded.Bedtime, null, Modifier.size(18.dp), tint = snoozeColor)
                         Spacer(Modifier.width(6.dp))
                         Text("נודניק – ${alarm.snoozeMinutes} דק' (${alarm.snoozeMaxCount - s.snoozeCount} נותרו)",
-                            color = Gold, fontWeight = FontWeight.SemiBold)
+                            color = snoozeColor, fontWeight = FontWeight.SemiBold)
                     }
                 }
                 else -> {

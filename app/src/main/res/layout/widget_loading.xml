@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    android:initialLayout for every widget size. The AppWidgetProviderInfo contract
+    requires one: it is what the host draws in the moment between the widget being
+    placed and Glance's first provideGlance() render landing. Without it a freshly
+    dropped widget was a blank hole on the home screen (and on some hosts could not
+    be placed at all).
+
+    Deliberately the app's own tiny layout rather than Glance's bundled loading
+    layout, so it never depends on a resource name that is internal to the library.
+-->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_loading_bg">
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:text="@string/app_name"
+        android:textColor="@color/widget_loading_text"
+        android:textSize="12sp"
+        android:textStyle="bold" />
+</FrameLayout>

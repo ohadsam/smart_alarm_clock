@@ -62,6 +62,13 @@
 | 33 | תזמון מחדש אחרי שינוי אזור זמן/שעת מכשיר | `BootReceiver` (TIME_SET/TIMEZONE_CHANGED) → `RescheduleWorker` (v1.5.0) |
 | 34 | wake lock + `setWakeMode` בזמן צלצול (מסך כבוי) | `AlarmFiringService.acquireWakeLock()`, `playOneRing()` (v1.5.0) |
 | 35 | התראה חלופית אם המערכת חוסמת הפעלת שירות הצלצול | `AlarmNotifications.postFallback()`, `AlarmReceiver` (v1.5.0) |
+| 36 | ווידג'טים מותאמים למצב תצוגה בהיר/כהה | `WidgetPalette`/`paletteFor()` ב-`SmartRingWidget.kt`, `SmartRingApp.onConfigurationChanged()` (v1.6.0) |
+| 37 | תיאור ווידג'ט תקין (גודל מינימלי, פריסת ביניים, שינוי גודל, תיאור בבורר) | `res/xml/widget_*_info.xml`, `res/layout/widget_loading.xml` (v1.6.0) |
+| 38 | רטט שעמור פטור מ-DND | `AlarmFiringService.startVibration()` עם `VibrationAttributes.USAGE_ALARM` (v1.6.0) |
+| 39 | ביטול תזמון קודם כששעמור נערך למצב שלא מצלצל | `AlarmScheduler.schedule()` (v1.6.0) |
+| 40 | אזהרה במסך העריכה כשאין מועד צלצול עתידי | `AlarmEditUiState.neverFires`, `AlarmEditScreen` (v1.6.0) |
+| 41 | חסימת "חזור" בזמן צלצול (כולל מצב שבת) | `BackHandler` ב-`AlarmRingScreen` (v1.6.0) |
+| 42 | סימון "מוקפא — לא יצלצל" בכרטיס ברשימה | `AlarmListScreen` MiniBadge (v1.6.0) |
 
 ---
 
@@ -296,6 +303,8 @@ if (!alarm.acceptsInteraction) return
 | Long.toInt() ל-id גדול | `AlarmScheduler.buildIntent()` | נמוכה |
 | מסך הצלצול (רשת ביטחון) עלול "לנצח" את טיימר השירות האמיתי אם `AlarmFiringService.onStartCommand()` איטי מ-GRACE_SECONDS (2 שניות) — במקרה כזה רשומת "MISSED" לא תיכתב | `AlarmRingViewModel.tick()`, `AlarmFiringService.fireAlarm()` | נמוכה (v1.4.0) |
 | `recurrenceUntilDate` של שעמורים שנשמרו לפני v1.5.0 עדיין מכיל חצות UTC (מסתיים יום מוקדם). לא מנורמל בטעינה בכוונה — זה היה מסמן את המסך כ"עם שינויים שלא נשמרו" עוד לפני שהמשתמש נגע במשהו. נפתר ברגע שהמשתמש בוחר תאריך סיום מחדש | `AlarmEditViewModel.setRecurrenceUntilDate()` | נמוכה (v1.5.0) |
+| הווידג'טים עוקבים אחרי מצב התצוגה של *המערכת*, לא אחרי הגדרת העיצוב באפליקציה (אוטומטי/כהה/בהיר). זו ההתנהגות המקובלת לווידג'ט מסך בית, וגם המעשית: ההגדרה שמורה ב-DataStore ואינה משנה את ה-Configuration של התהליך, שממנו הרינדור נגזר | `paletteFor()` ב-`SmartRingWidget.kt` | נמוכה (v1.6.0) |
+| שינוי מצב תצוגה מרענן את הווידג'טים דרך `Application.onConfigurationChanged()`, שנקרא רק כשהתהליך חי. אם התהליך אינו רץ בזמן המעבר, הערכה מתעדכנת ברענון התקופתי הבא (עד 15 דקות) | `SmartRingApp.onConfigurationChanged()` | נמוכה (v1.6.0) |
 | עוצמת הצלצול היא אחוז מתוך עוצמת ערוץ השעמורים של המכשיר; אם היא 0 הצלצול שקט. בכוונה לא נכתבת מחדש על ידי האפליקציה (אפליקציה שמשנה את עוצמת המכשיר בלי לשאול, ועלולה להשאיר אותה משונה אם התהליך נהרג באמצע צלצול, גרועה יותר) — רק מוצגת כבדיקת אמינות | `ReliabilityChecks.isAlarmVolumeAudible()` | נמוכה (v1.5.0) |
 
 ---
@@ -361,7 +370,7 @@ espresso             = "3.6.1"
 
 ---
 
-## 13. בדיקות אוטומטיות (v1.4.1, הורחב ב-v1.5.0)
+## 13. בדיקות אוטומטיות (v1.4.1, הורחב ב-v1.5.0 וב-v1.6.0)
 
 `app/src/test/` — בדיקות JVM (חלקן Robolectric: סביבת אנדרואיד קלה על ה-JVM, **לא**
 אמולטור אמיתי — הרבה יותר מהיר ואמין ב-CI). רץ אוטומטית ב-CI לפני assembleDebug/Release
@@ -375,6 +384,9 @@ espresso             = "3.6.1"
 | `presentation/alarmring/AlarmRingViewModelTest.kt` | טיימר סגירה אוטומטית (`ShadowSystemClock.advanceBy()`), מצב שבת, נודניק שמתדרדר לעצירה |
 | `presentation/alarmedit/AlarmEditViewModelTest.kt` | ולידציית שם ריק + אירוע הגלילה, ו-`isDirty` לא נשאר "מלוכלך" לצמיתות אחרי ולידציה כושלת, וגם לא נהיה "מלוכלך" באופן שגוי מיד אחרי טעינה (v1.4.2) |
 | `data/db/AlarmDaoTest.kt` | `saveAlarmTransaction()` (insert מול update, לא REPLACE), `lastFiredAt`, `snoozeCountSinceLastFire`, SET_NULL FK במחיקה |
+| `util/UpcomingAlarmsTest.kt` (v1.6.0) | `buildUpcomingAlarms()` — מה הווידג'טים מציגים ובאיזה סדר: מיון לפי מועד הצלצול האמיתי (לא לפי שעה ביום), עדיפות לנודניק, ששעמור בנודניק מציג את שעת הנודניק ולא את שעתו המקורית, ושחזרתיות שהסתיימה נעלמת — אלא אם המופע האחרון שלה בנודניק |
+| `presentation/widget/WidgetProviderInfoTest.kt` (v1.6.0) | ארבעת קובצי `widget_*_info.xml`: שיש `minWidth`/`minHeight` (הבאג של אנדרואיד 8–11), `initialLayout`, `resizeMode` ו-`description`, ושהגודל המינימלי תואם למספר התאים המוצהר |
+| `presentation/alarmlist/AlarmListViewModelTest.kt` (v1.6.0) | כל פעולות "שליטה כללית" — ובעיקר ש-`disableAll`/`freezeAll` קוראות את רשימת הפעילים *לפני* הכתיבה שמנקה אותה, אחרת לא מבוטל שום תזמון |
 
 ### בדיקות על אמולטור אמיתי (`app/src/androidTest/`, v1.5.0)
 
@@ -389,6 +401,7 @@ espresso             = "3.6.1"
 | `data/AlarmRepositoryInstrumentedTest.kt` | Room מול SQLite אמיתי: round-trip של שעמור + סבבים, שעריכה לא מוחקת היסטוריה, וסמנטיקת `snoozeCountSinceLastFire` |
 | `util/AlarmNotificationsInstrumentedTest.kt` | שערוץ ההתראות קיים, IMPORTANCE_HIGH, **ובלי** צליל/רטט משל עצמו (הבאג של צליל כפול), ושהערוץ הישן נמחק |
 | `presentation/AlarmListScreenInstrumentedTest.kt` | smoke end-to-end: MainActivity האמיתי עולה ומצייר דרך גרף Hilt אמיתי + Room אמיתי |
+| `presentation/WidgetProviderInstrumentedTest.kt` (v1.6.0) | שה-`AppWidgetManager` האמיתי מזהה את כל ארבעת הווידג'טים ומחזיר להם גודל מינימלי שאינו 0 — זה מה שמסך הבית קורא כדי להחליט אם ואיך למקם אותם |
 
 `HiltTestRunner` (`app/src/androidTest/.../HiltTestRunner.kt`) מחליף את `SmartRingApp`
 ב-`HiltTestApplication`, כך שתופעות הלוואי של `onCreate()` בפרודקשן (WorkManager

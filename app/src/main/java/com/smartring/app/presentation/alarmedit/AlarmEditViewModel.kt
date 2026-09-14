@@ -53,6 +53,13 @@ data class AlarmEditUiState(
     val nameError: Boolean                 = false,
     // "next fire" hint shown to user
     val nextFireHint: String?              = null,
+    // True when this alarm, exactly as configured right now, has no future occurrence
+    // left at all — a specific date/time already in the past, every specific date
+    // passed, or a recurrence that has already ended. Saving in that state is still
+    // allowed (the user may be mid-edit and about to pick a date), but it will never
+    // ring, and the screen used to say nothing at all: the "next fire" hint just
+    // vanished, which reads as a rendering quirk rather than "this will not go off".
+    val neverFires: Boolean                = false,
     // Preserved verbatim from the loaded alarm; not editable on this screen but must
     // survive save() so editing an alarm doesn't silently re-enable/un-freeze it or
     // reset its COUNT-recurrence progress.
@@ -120,6 +127,7 @@ class AlarmEditViewModel @Inject constructor(
                     // originalState) would read true the instant the screen opens for
                     // any alarm whose next fire time isn't null.
                     nextFireHint         = nextFireHintFor(a),
+                    neverFires           = scheduler.effectiveNextFireTime(a) == null,
             )
             originalState = loaded
             _state.update { loaded }
@@ -169,7 +177,7 @@ class AlarmEditViewModel @Inject constructor(
     fun setShabbatMode(v: Boolean)                = _state.update { it.copy(isShabbatMode = v) }
     fun setRingDuration(v: Int)                   = _state.update { it.copy(ringDurationSeconds = v) }
     fun setRepeatFrequency(v: RepeatFrequency)    = _state.update { it.copy(repeatFrequency = v).also { updateNextFireHintLater() } }
-    fun setRecurrenceEndType(v: RecurrenceEndType)= _state.update { it.copy(recurrenceEndType = v) }
+    fun setRecurrenceEndType(v: RecurrenceEndType)= _state.update { it.copy(recurrenceEndType = v).also { updateNextFireHintLater() } }
     /**
      * Stores the picked "repeat until" day as the *end* of that day in local time.
      * Compose's DatePicker hands back UTC midnight, and isRecurrenceExpired() treats
@@ -179,9 +187,9 @@ class AlarmEditViewModel @Inject constructor(
      * earlier than the user asked for.
      */
     fun setRecurrenceUntilDate(v: Long?) = _state.update { s ->
-        s.copy(recurrenceUntilDate = v?.let { endOfLocalDay(it) })
+        s.copy(recurrenceUntilDate = v?.let { endOfLocalDay(it) }).also { updateNextFireHintLater() }
     }
-    fun setRecurrenceCount(v: Int)                = _state.update { it.copy(recurrenceCount = v) }
+    fun setRecurrenceCount(v: Int)                = _state.update { it.copy(recurrenceCount = v).also { updateNextFireHintLater() } }
     fun setVibrationMode(v: VibrationMode)        = _state.update { it.copy(vibrationMode = v) }
     fun setVibrationOnlySeconds(v: Int)           = _state.update { it.copy(vibrationOnlySeconds = v) }
     fun setCrescendoEnabled(v: Boolean)           = _state.update { it.copy(crescendoEnabled = v) }
@@ -215,9 +223,11 @@ class AlarmEditViewModel @Inject constructor(
     // ── Specific dates ────────────────────────────────────────────
     fun addDate(epochMillis: Long, label: String? = null) = _state.update {
         it.copy(specificDates = it.specificDates + AlarmDate(date = epochMillis, label = label))
+            .also { updateNextFireHintLater() }
     }
     fun removeDate(i: Int) = _state.update {
         it.copy(specificDates = it.specificDates.toMutableList().also { l -> l.removeAt(i) })
+            .also { updateNextFireHintLater() }
     }
 
     // ── Next fire hint ────────────────────────────────────────────
@@ -225,7 +235,8 @@ class AlarmEditViewModel @Inject constructor(
 
     private fun updateNextFireHint() {
         val alarm = buildAlarm(_state.value)
-        _state.update { it.copy(nextFireHint = nextFireHintFor(alarm)) }
+        val next = scheduler.effectiveNextFireTime(alarm)
+        _state.update { it.copy(nextFireHint = formatNextFire(next), neverFires = next == null) }
     }
 
     /** 23:59:59.999 device-local on the day [utcMidnightMillis] (a Compose DatePicker
@@ -241,8 +252,11 @@ class AlarmEditViewModel @Inject constructor(
         }.timeInMillis
     }
 
-    private fun nextFireHintFor(alarm: Alarm): String? {
-        val next = scheduler.effectiveNextFireTime(alarm) ?: return null
+    private fun nextFireHintFor(alarm: Alarm): String? =
+        formatNextFire(scheduler.effectiveNextFireTime(alarm))
+
+    private fun formatNextFire(next: Long?): String? {
+        if (next == null) return null
         val cal = Calendar.getInstance().apply { timeInMillis = next }
         val today = Calendar.getInstance()
         val isToday = cal.get(Calendar.DAY_OF_YEAR) == today.get(Calendar.DAY_OF_YEAR)

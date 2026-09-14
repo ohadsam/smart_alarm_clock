@@ -106,11 +106,14 @@ private fun HistoryLogCard(log: AlarmLog, onDelete: () -> Unit, onLoad: ((String
     val fmt = remember { SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault()) }
     var showDelete by remember { mutableStateOf(false) }
 
+    // Theme color roles, not the raw palette constants: actionColor is used as the
+    // icon tint and the status text color, and Green/Gold are pale enough that on
+    // Light mode's white card they read as blank space.
     val (actionColor, actionLabel, actionIcon) = when (log.action) {
-        "STOPPED" -> Triple(Green, "נעצר", Icons.Rounded.CheckCircle)
-        "SNOOZED" -> Triple(Gold,  "נודניק", Icons.Rounded.Bedtime)
-        "MISSED"  -> Triple(Red,   "פוספס", Icons.Rounded.ErrorOutline)
-        else      -> Triple(Blue,  "הופעל", Icons.Rounded.Alarm)
+        "STOPPED" -> Triple(MaterialTheme.colorScheme.tertiary,  "נעצר", Icons.Rounded.CheckCircle)
+        "SNOOZED" -> Triple(MaterialTheme.colorScheme.secondary, "נודניק", Icons.Rounded.Bedtime)
+        "MISSED"  -> Triple(MaterialTheme.colorScheme.error,     "פוספס", Icons.Rounded.ErrorOutline)
+        else      -> Triple(MaterialTheme.colorScheme.primary,   "הופעל", Icons.Rounded.Alarm)
     }
 
     Surface(

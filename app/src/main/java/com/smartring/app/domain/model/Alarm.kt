@@ -142,9 +142,6 @@ data class Alarm(
     val isRecurring: Boolean
         get() = repeatDaysBitmask != 0 && repeatFrequency != RepeatFrequency.NONE
 
-    val isDateTimeSpecific: Boolean
-        get() = specificDateTime != null
-
     /** Whether recurrence has ended based on end rules. */
     fun isRecurrenceExpired(): Boolean = when (recurrenceEnd.type) {
         RecurrenceEndType.FOREVER -> false
@@ -197,13 +194,16 @@ data class Alarm(
         return days + cadence
     }
 
+    /** Whether the *sound* half of this alarm is playing yet, [e] seconds into the
+     *  ring. Only VIBRATION_THEN_SOUND has a window where it isn't: the configured
+     *  vibrate-first period. Single source of truth for that rule — AlarmRingScreen's
+     *  "רטט בלבד" countdown badge reads it rather than re-deriving the comparison, so
+     *  the badge can't drift out of step with what is actually audible. */
     fun soundActiveAt(e: Int) = when (vibrationMode) {
         VibrationMode.VIBRATION_ONLY        -> false
         VibrationMode.VIBRATION_THEN_SOUND  -> e >= vibrationOnlySeconds
         else                                -> true
     }
-
-    fun vibrateActiveAt(e: Int) = vibrationMode != VibrationMode.SOUND_ONLY
 
     private companion object {
         // bit0=Sun … bit6=Sat, matching repeatDaysBitmask.

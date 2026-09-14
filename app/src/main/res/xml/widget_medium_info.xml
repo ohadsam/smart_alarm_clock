@@ -1,5 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+    minWidth/minHeight are what every host below API 31 sizes this widget by:
+    the targetCellWidth/targetCellHeight pair below was only added in API 31, and this
+    app's minSdk is 26, so without these two the widget declared no size at all on
+    Android 8-11 and the launcher had nothing to lay it out from. The values follow
+    the platform's documented cell formula, 70 * cells - 30.
+
+    initialLayout is required by the AppWidgetProviderInfo contract — it is what the
+    host shows between placement and Glance's first render.
+-->
 <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:minWidth="250dp" android:minHeight="110dp"
     android:targetCellWidth="4" android:targetCellHeight="2"
     android:updatePeriodMillis="1800000"
+    android:initialLayout="@layout/widget_loading"
+    android:resizeMode="horizontal|vertical"
+    android:description="@string/widget_medium_desc"
     android:widgetCategory="home_screen" android:previewImage="@mipmap/ic_launcher"/>

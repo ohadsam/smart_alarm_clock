@@ -126,7 +126,22 @@ fun AlarmEditScreen(
                     Text("לחץ לשינוי שעה", Modifier.align(Alignment.CenterHorizontally),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    // Next fire hint
+                    // Next fire hint — or, when there is no next fire at all, an
+                    // explicit warning in its place. The hint simply disappearing (all
+                    // this used to do) gave no clue that the alarm as configured will
+                    // never ring: a date/time already in the past, or every specific
+                    // date passed, saved and sat in the list looking completely normal.
+                    if (s.neverFires) {
+                        Spacer(Modifier.height(6.dp))
+                        Row(Modifier.fillMaxWidth(), Arrangement.Center, Alignment.CenterVertically) {
+                            Icon(Icons.Rounded.ErrorOutline, null, Modifier.size(13.dp),
+                                tint = MaterialTheme.colorScheme.error)
+                            Spacer(Modifier.width(4.dp))
+                            Text("לא נקבע מועד צלצול עתידי — השעמור לא יצלצל",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
                     s.nextFireHint?.let { hint ->
                         Spacer(Modifier.height(6.dp))
                         Row(Modifier.fillMaxWidth(), Arrangement.Center, Alignment.CenterVertically) {
@@ -283,7 +298,7 @@ fun AlarmEditScreen(
             item { SectionLabel("צלצול") }
             item {
                 EditCard {
-                    LabeledSlider("משך צלצול", s.ringDurationSeconds, "שנ׳", 5f, 600f, 118, Blue,
+                    LabeledSlider("משך צלצול", s.ringDurationSeconds, "שנ׳", 5f, 600f, 118, MaterialTheme.colorScheme.primary,
                         info = "כמה זמן השעמור ימשיך לצלצול לפני שהוא נעצר אוטומטית, אם לא תעצור אותו ידנית.",
                         formatter = ::formatDurationSeconds, onChange = vm::setRingDuration)
                 }
@@ -313,7 +328,7 @@ fun AlarmEditScreen(
                     }
                     if (s.vibrationMode == VibrationMode.VIBRATION_THEN_SOUND) {
                         Spacer(Modifier.height(8.dp))
-                        LabeledSlider("רטט לפני צלצול", s.vibrationOnlySeconds, "שנ׳", 3f, 120f, 38, Red,
+                        LabeledSlider("רטט לפני צלצול", s.vibrationOnlySeconds, "שנ׳", 3f, 120f, 38, MaterialTheme.colorScheme.error,
                             info = "כמה זמן לרטוט לפני שהצליל מתחיל להתנגן.",
                             formatter = ::formatDurationSeconds, onChange = vm::setVibrationOnlySeconds)
                     }
@@ -336,15 +351,15 @@ fun AlarmEditScreen(
                     }
                     if (s.crescendoEnabled) {
                         Spacer(Modifier.height(8.dp)); HorizontalDivider(); Spacer(Modifier.height(8.dp))
-                        LabeledSlider("עוצמה התחלתית", s.crescendoStartVolume, "%", 5f, 80f, 14, Green,
+                        LabeledSlider("עוצמה התחלתית", s.crescendoStartVolume, "%", 5f, 80f, 14, MaterialTheme.colorScheme.tertiary,
                             info = "עוצמת הקול בתחילת הצלצול, לפני שהיא מתחילה לעלות.",
                             onChange = vm::setCrescendoStartVolume)
                         Spacer(Modifier.height(6.dp))
-                        LabeledSlider("כל כמה שניות עולה", s.crescendoStepSeconds, "שנ׳", 5f, 60f, 10, Blue,
+                        LabeledSlider("כל כמה שניות עולה", s.crescendoStepSeconds, "שנ׳", 5f, 60f, 10, MaterialTheme.colorScheme.primary,
                             info = "כל כמה שניות עוצמת הקול תעלה לשלב הבא.",
                             formatter = ::formatDurationSeconds, onChange = vm::setCrescendoStepSeconds)
                         Spacer(Modifier.height(6.dp))
-                        LabeledSlider("עלייה בכל צעד", s.crescendoStepPercent, "%", 5f, 30f, 4, Gold,
+                        LabeledSlider("עלייה בכל צעד", s.crescendoStepPercent, "%", 5f, 30f, 4, MaterialTheme.colorScheme.secondary,
                             info = "כמה אחוזים עוצמת הקול עולה בכל שלב.",
                             onChange = vm::setCrescendoStepPercent)
                     }
@@ -362,7 +377,7 @@ fun AlarmEditScreen(
                     }
                     if (s.snoozeEnabled) {
                         Spacer(Modifier.height(8.dp)); HorizontalDivider(); Spacer(Modifier.height(8.dp))
-                        LabeledSlider("משך נודניק", s.snoozeMinutes, "דק׳", 1f, 60f, 58, Gold,
+                        LabeledSlider("משך נודניק", s.snoozeMinutes, "דק׳", 1f, 60f, 58, MaterialTheme.colorScheme.secondary,
                             info = "כמה זמן השעמור יידחה כאשר לוחצים על נודניק.",
                             onChange = vm::setSnoozeMinutes)
                         Spacer(Modifier.height(8.dp)); HorizontalDivider(); Spacer(Modifier.height(8.dp))
@@ -540,18 +555,18 @@ private fun RingsSection(
                 Text(ringtoneDisplayName(context, ring.ringtoneUri), maxLines = 1)
             }
             Spacer(Modifier.height(8.dp))
-            LabeledSlider("משך", ring.durationSeconds, "שנ׳", 5f, 300f, 58, Blue,
+            LabeledSlider("משך", ring.durationSeconds, "שנ׳", 5f, 300f, 58, MaterialTheme.colorScheme.primary,
                 info = "כמה זמן הסבב הזה מנגן לפני שעובר לסבב הבא.",
                 formatter = ::formatDurationSeconds) {
                 onUpdate(i, ring.copy(durationSeconds = it))
             }
             Spacer(Modifier.height(6.dp))
-            LabeledSlider("עוצמה", ring.volumePercent, "%", 10f, 100f, 17, Green,
+            LabeledSlider("עוצמה", ring.volumePercent, "%", 10f, 100f, 17, MaterialTheme.colorScheme.tertiary,
                 info = "עוצמת הקול של הסבב הזה, כאחוז מהעוצמה המקסימלית.") {
                 onUpdate(i, ring.copy(volumePercent = it))
             }
             Spacer(Modifier.height(6.dp))
-            LabeledSlider("השהיה אחרי סבב זה", ring.delayAfterSeconds, "שנ׳", 0f, 600f, 59, Gold,
+            LabeledSlider("השהיה אחרי סבב זה", ring.delayAfterSeconds, "שנ׳", 0f, 600f, 59, MaterialTheme.colorScheme.secondary,
                 info = "כמה זמן להמתין בשקט אחרי שהסבב הזה מסתיים, לפני שהסבב הבא (או החזרה לסבב הראשון) מתחיל.",
                 formatter = ::formatDurationSeconds) {
                 onUpdate(i, ring.copy(delayAfterSeconds = it))

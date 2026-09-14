@@ -36,10 +36,31 @@ class AlarmScheduler @Inject constructor(
     // an explicit refresh() here on top of that just doubled every single alarm
     // mutation's widget-rebuild work for no benefit. scheduleAt() and rescheduleAll()
     // are the two exceptions that keep their own explicit refresh — see their comments.
+    /**
+     * Arms this alarm's next occurrence — or, when there is no occurrence left to arm,
+     * makes sure the previous one is gone.
+     *
+     * That second half matters: this used to just `return` in all three of the "can't
+     * arm" cases below, which quietly left whatever was armed before still armed.
+     * Editing an alarm into a configuration that never fires again (switching it to a
+     * specific date in the past, cutting a recurrence short, freezing it) therefore
+     * still rang at the *old* time, because nothing ever cancelled the PendingIntent
+     * the previous save had registered. Cancelling here rather than at each call site
+     * keeps it true for every caller — the edit screen, the list toggles, the boot
+     * reschedule and the firing service all go through this one function.
+     */
     fun schedule(alarm: Alarm) {
-        if (!alarm.isActive) return
-        if (alarm.isRecurrenceExpired()) return
-        val t = nextFireTime(alarm) ?: return
+        val t = when {
+            !alarm.isActive            -> null
+            alarm.isRecurrenceExpired() -> null
+            else                        -> nextFireTime(alarm)
+        }
+        if (t == null) {
+            cancelQuiet(alarm.id)
+            appLogger.log("Scheduler",
+                "אין מועד צלצול הבא ל-\"${alarm.name}\" (#${alarm.id}) — תזמון קודם (אם היה) בוטל")
+            return
+        }
         armExact(t, buildIntent(alarm.id), "\"${alarm.name}\" (#${alarm.id})")
         val fmt = Calendar.getInstance().apply { timeInMillis = t }
         appLogger.log("Scheduler", "תוזמן: \"${alarm.name}\" (#${alarm.id}) ל-%02d/%02d %02d:%02d".format(

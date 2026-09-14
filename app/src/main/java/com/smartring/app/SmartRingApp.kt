@@ -26,8 +26,29 @@ class SmartRingApp : Application(), Configuration.Provider {
     @Inject lateinit var appLogger: AppLogger
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
+    // Last night-mode state this process rendered widgets for. The widgets pick their
+    // light/dark palette from the configuration at render time, so a theme flip has to
+    // trigger a re-render or they keep the old palette until the next alarm mutation or
+    // the 15-minute periodic refresh — up to a quarter of an hour of a dark widget
+    // sitting on a freshly-lightened home screen.
+    private var lastNightMode: Boolean? = null
+
     override val workManagerConfiguration: Configuration
         get() = Configuration.Builder().setWorkerFactory(workerFactory).build()
+
+    // Fully qualified: `Configuration` alone resolves to androidx.work.Configuration
+    // here, via the androidx.work.* import the WorkManager config above needs.
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
+        val night = (newConfig.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
+            android.content.res.Configuration.UI_MODE_NIGHT_YES
+        // Only on an actual day/night flip — this callback also fires for rotation,
+        // locale, font scale and more, none of which change what a widget looks like.
+        if (lastNightMode != night) {
+            lastNightMode = night
+            widgetRefresher.refresh()
+        }
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -37,6 +58,8 @@ class SmartRingApp : Application(), Configuration.Provider {
         // API 26+, which would take the receiver's "couldn't start the service"
         // fallback notification down with it on a fresh install.
         AlarmNotifications.ensureChannel(this)
+        lastNightMode = (resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
+            android.content.res.Configuration.UI_MODE_NIGHT_YES
         // Runs daily (not every 3 days) so a log written right after one cleanup pass
         // is trimmed within ~1 day of crossing the 3-day retention line, not ~3 more.
         WorkManager.getInstance(this).enqueueUniquePeriodicWork(

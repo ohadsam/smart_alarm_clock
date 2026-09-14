@@ -1,2 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
-<resources><color name="dark_bg">#FF0A0C10</color></resources>
+<resources>
+    <color name="dark_bg">#FF0A0C10</color>
+    <!-- Light (default) values for the widget placeholder. The -night variants live
+         in values-night/colors.xml; RemoteViews are inflated in the host process
+         against this app's resources with the host's configuration, so the correct
+         one is picked automatically without the app being running. -->
+    <color name="widget_loading_bg">#F2F7F8FC</color>
+    <color name="widget_loading_text">#FF5A6478</color>
+</resources>

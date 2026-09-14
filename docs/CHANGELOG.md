@@ -1,5 +1,91 @@
 # SmartRing – Changelog
 
+## v1.6.0 (2026-09-14)
+
+A second full-project review, deliberately run through four lenses — system architect,
+UX, UI, and QA — with the home-screen widgets as the explicit focus. The widgets were
+the only subsystem in the app with no test coverage at all, and they turned out to be
+carrying the oldest bug in this release.
+
+**Widgets — the descriptors were incomplete:**
+- **All four widget sizes declared no minimum size on Android 8–11.** The provider XMLs
+  used only `targetCellWidth`/`targetCellHeight`, which the platform added in API 31;
+  this app's `minSdk` is 26. Below API 31 a launcher had nothing at all to size the
+  widget from. Every provider now declares `minWidth`/`minHeight` via the platform's
+  documented `70 * cells - 30` formula.
+- **No `initialLayout`** — required by the `AppWidgetProviderInfo` contract, and what the
+  host draws between the widget being placed and Glance's first render landing. A newly
+  placed widget was a blank hole until then. There is now a real placeholder layout,
+  with its own light/dark colors.
+- **The widgets are now resizable** (`resizeMode="horizontal|vertical"`) and each one
+  carries a `description`, so the widget picker no longer offers four entries that can
+  only be told apart by placing them.
+
+**Widgets — what they showed:**
+- **Hard-coded dark, on every device.** The palette was a single fixed near-black set, so
+  on a light home screen the widget was a dark slab. Light and dark palettes are now
+  resolved from the device's night-mode configuration (the conventional behaviour for a
+  home-screen widget), and a theme flip re-renders them immediately instead of leaving
+  the old palette up for as long as 15 minutes.
+- **A snoozed alarm showed two numbers that contradicted each other.** The countdown came
+  from the snooze's real trigger time but the big time came from the alarm's configured
+  `hour`/`minute`, so at 07:52 a snoozed alarm read "07:00 · בעוד 8 דק׳". The displayed
+  time is now derived from the same timestamp the countdown is.
+- The wide and large widgets' rows now carry the recurrence summary the alarm list
+  already showed, so two 07:00 rows — one every weekday, one a single reminder — are no
+  longer indistinguishable.
+
+**Alarms that didn't ring, or rang when they shouldn't:**
+- **Vibration was suppressed by Do Not Disturb.** `vibrate(VibrationEffect)` with no
+  attributes is treated as `USAGE_UNKNOWN`, which the platform silences under DND (and,
+  on many OEM builds, plain silent mode). An alarm set to "רטט" or "רטט→צלצול" therefore
+  did not vibrate on a phone left in DND overnight — exactly the night it is relied on.
+  The vibration is now declared `USAGE_ALARM`, matching the `AudioAttributes` the
+  MediaPlayer already used for the sound half.
+- **Editing an alarm into a never-firing configuration left the old trigger armed.**
+  `schedule()` simply returned in each of its three "nothing to arm" cases — inactive,
+  recurrence expired, no next fire time — without cancelling what a previous save had
+  registered. Switching an alarm to a date in the past, freezing it, or ending its
+  recurrence therefore kept it ringing at the *old* time. The cancel now happens at that
+  one choke point, so it holds for every caller.
+
+**UI and UX:**
+- **Light mode had unreadable accents across four screens.** The palette constants are
+  tuned for the dark scheme's near-black surfaces and are used as literal text and icon
+  colors: every slider value badge in the edit screen, the history status labels, the
+  ring screen's snooze button and vibration badge. They now read from theme color roles,
+  which carry a per-theme value (`secondary` was added to both schemes for the gold accent).
+- **Back escaped a ringing alarm.** It never stopped the ringtone — only Stop/Snooze do —
+  it just navigated away from the one screen with those buttons, leaving the alarm
+  blaring with no visible way to silence it, and drove a hole straight through Shabbat
+  mode. Back is now consumed while an alarm is ringing.
+- **A frozen alarm looked switched on.** It keeps `isEnabled = true` while never ringing,
+  and the only hint was the colour of an 8dp dot. It now carries a "מוקפא — לא יצלצל"
+  badge, and the switch's accessibility label says "מוקפא" rather than "פעיל".
+- **An alarm with no future occurrence saved silently.** A specific date/time already in
+  the past just made the "next fire" hint disappear, which reads as a rendering quirk.
+  The edit screen now says so explicitly, and recomputes that check when the recurrence
+  end or the specific-dates list changes, not only the time and weekdays.
+- The delete hint under each card mentions the swipe gesture, which had been added
+  alongside long-press but was never named.
+
+**Tests (the widgets had none at all):**
+- The widgets' selection and ordering rules were extracted into a pure, testable
+  `buildUpcomingAlarms` — 9 JVM tests covering ordering by real fire time, snooze
+  precedence, the snoozed-time display bug above, and the expired-recurrence rules.
+- `WidgetProviderInfoTest` (Robolectric) asserts all four provider descriptors declare a
+  pre-API-31 minimum size, an initial layout, a resize mode and a description, and that
+  the minimum size matches the declared cell count.
+- `WidgetProviderInstrumentedTest` is the end-to-end half: the real `AppWidgetManager` on
+  an emulator must report all four providers with a non-zero minimum size.
+- `AlarmListViewModelTest` — 8 tests for a ViewModel that had none, covering every bulk
+  operation behind "שליטה כללית" and specifically that `disableAll`/`freezeAll` read the
+  active set *before* the write that clears it.
+- Three new `AlarmSchedulerTest` cases pin the disarm-on-unfireable behaviour above.
+- Dead code removed from the domain model (`vibrateActiveAt`, `isDateTimeSpecific`), and
+  `soundActiveAt` — previously unused — is now what the ring screen's "רטט בלבד" badge
+  reads, instead of re-deriving the same comparison.
+
 ## v1.5.0 (2026-09-13)
 
 A full-project review pass over the core alarm flows — scheduling, ringing, snoozing,

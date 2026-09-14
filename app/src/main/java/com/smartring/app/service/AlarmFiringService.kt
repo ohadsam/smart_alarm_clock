@@ -274,11 +274,37 @@ class AlarmFiringService : Service() {
         }
     }
 
+    /**
+     * The vibration is always declared as an *alarm* vibration, never an untagged one.
+     *
+     * `vibrate(VibrationEffect)` with no attributes is treated as USAGE_UNKNOWN, and
+     * the platform suppresses unknown-usage vibrations whenever the device's
+     * interruption policy says to — Do Not Disturb, and on many OEM builds plain
+     * silent mode. So an alarm set to "רטט" or "רטט→צלצול" simply did not vibrate on a
+     * phone left in DND overnight, which is exactly the night someone is relying on
+     * it. USAGE_ALARM is exempt from that suppression, matching the USAGE_ALARM
+     * AudioAttributes the MediaPlayer already uses for the sound half.
+     */
     private fun startVibration() {
         val pattern = longArrayOf(0, 600, 900)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
-            vibrator?.vibrate(VibrationEffect.createWaveform(pattern, 0))
-        else @Suppress("DEPRECATION") vibrator?.vibrate(pattern, 0)
+        val v = vibrator ?: return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            v.vibrate(
+                VibrationEffect.createWaveform(pattern, 0),
+                VibrationAttributes.createForUsage(VibrationAttributes.USAGE_ALARM),
+            )
+        } else {
+            // API 26–32: the VibrationAttributes overload doesn't exist yet, but the
+            // AudioAttributes one carries the same USAGE_ALARM meaning.
+            @Suppress("DEPRECATION")
+            v.vibrate(
+                VibrationEffect.createWaveform(pattern, 0),
+                AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_ALARM)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .build(),
+            )
+        }
     }
 
     private fun stopAll() {
