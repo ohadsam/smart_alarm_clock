@@ -58,12 +58,20 @@ throw the same way; both now keep their state and show a line instead.
 Settings' back button had no `contentDescription` — the only one of the app's four
 screens missing it, so a screen reader announced an unlabeled button.
 
-**Tests (244 → 252):** `ThemeContrastTest` (5) measures every role against every
+The first version of that helper still crashed from a non-Activity context: only an
+Activity may start another one without `FLAG_ACTIVITY_NEW_TASK`, and Android signals
+that with `AndroidRuntimeException` — a different type from `ActivityNotFoundException`,
+which sailed straight past the narrow catch. Its own new test caught it before release.
+The catch is now deliberately broad, because the list of ways `startActivity` can fail
+is device-specific and narrowing it is exactly how this got through.
+
+**Tests (244 → 253):** `ThemeContrastTest` (5) measures every role against every
 surface it can be drawn on, in both schemes, plus the label-on-filled-accent pairs, and
 asserts the dark-tuned raw constants never appear in the light scheme. `SystemScreensTest`
-(3) uses Robolectric's `checkActivities(true)` — without which every intent "resolves"
+(4) uses Robolectric's `checkActivities(true)` — without which every intent "resolves"
 and this entire class of bug is invisible to tests — to pin that a missing screen
-reports failure rather than throwing.
+reports failure rather than throwing, and that a non-Activity context doesn't throw
+either.
 
 ## v1.6.5 (2026-09-14)
 

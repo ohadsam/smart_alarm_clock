@@ -29,6 +29,19 @@ class SystemScreensTest {
     private val app: Application get() = ApplicationProvider.getApplicationContext()
 
     @Test
+    fun `starting from a non-Activity context does not throw`() {
+        // The Application context is what this test class holds, and it is what caught
+        // the hole the helper shipped with: only an Activity may start another one
+        // without FLAG_ACTIVITY_NEW_TASK, and Android signals that with
+        // AndroidRuntimeException — a different type from ActivityNotFoundException,
+        // which sailed straight past the original narrower catch. Every caller today is
+        // a Compose screen holding the Activity context, so nothing in the app hits
+        // this; the point is that the next caller that isn't cannot reintroduce the
+        // crash this whole file exists to prevent.
+        assertTrue(openSystemScreen(app, Intent(Settings.ACTION_DATE_SETTINGS)))
+    }
+
+    @Test
     fun `a screen that exists is opened directly, with no detour`() {
         val intent = Intent(Settings.ACTION_SOUND_SETTINGS)
 

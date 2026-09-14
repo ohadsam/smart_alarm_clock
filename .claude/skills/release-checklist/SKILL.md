@@ -796,6 +796,21 @@ If the user asks for a PR-based workflow going forward, follow that instead and 
   passed `null` — the kind of gap that only shows up when you grep the whole repo for the
   icon rather than reading one screen at a time.
 
+- **`startActivity` has more than one failure type, and a narrow catch misses them.**
+  A missing activity is `ActivityNotFoundException`, but calling it from a non-Activity
+  context without `FLAG_ACTIVITY_NEW_TASK` is `AndroidRuntimeException`, and OEM builds
+  can throw `SecurityException`. When the whole point of a wrapper is "this may fail but
+  must never crash the app", catch `Exception` and say in a comment why the breadth is
+  deliberate — `util/SystemScreens.kt` shipped with the narrow version and its own new
+  test caught the gap the same day.
+- **Read the CI console log, not just its tail, when tests fail.** `testLogging` here is
+  configured with `events("passed", "skipped", "failed")` and `exceptionFormat = FULL`,
+  so the per-test failure and its stack trace *are* in the log — but several hundred
+  PASSED lines sit between them and the end, and a tail of 200-300 lines lands in the
+  Gradle stack trace instead. Ask for a tail large enough to reach "N tests completed, M
+  failed" and read upward from there; the artifact download is blocked in this
+  environment, so the console is the only copy.
+
 ## Known limitations (don't re-report these as new findings unless you're the batch fixing them)
 
 - **Settings' English toggle doesn't change any visible UI text.** Every screen hardcodes Hebrew

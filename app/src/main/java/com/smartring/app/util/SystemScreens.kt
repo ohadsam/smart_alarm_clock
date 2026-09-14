@@ -1,6 +1,6 @@
 package com.smartring.app.util
 
-import android.content.ActivityNotFoundException
+import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -33,11 +33,22 @@ fun openSystemScreen(context: Context, intent: Intent): Boolean {
 
 private fun launches(context: Context, intent: Intent): Boolean =
     try {
+        // Only an Activity may start another one without this flag; from the
+        // Application context (or a Service) Android throws AndroidRuntimeException —
+        // which is not an ActivityNotFoundException and sailed straight past the
+        // narrower catch this function shipped with. Today every caller is a Compose
+        // screen holding the Activity context, so the flag is never actually needed;
+        // it is here so the next caller that isn't cannot reintroduce the exact crash
+        // this file exists to prevent.
+        if (context !is Activity) intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         context.startActivity(intent)
         true
-    } catch (e: ActivityNotFoundException) {
-        false
-    } catch (e: SecurityException) {
-        // Some OEM builds guard these screens behind a permission the app doesn't hold.
+    } catch (e: Exception) {
+        // Deliberately catching Exception rather than an enumerated list. The contract
+        // is "opening a settings screen may fail, but may never take the app down",
+        // and the list of ways startActivity can fail is device-specific: a missing
+        // activity, an OEM build guarding the screen behind a permission, a context
+        // that cannot start activities. Narrowing this is how the AndroidRuntimeException
+        // above got through in the first place.
         false
     }
