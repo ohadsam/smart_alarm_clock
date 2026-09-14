@@ -131,11 +131,11 @@ class MigrationTest {
      * Writes an old-version database to disk and closes it, leaving `PRAGMA
      * user_version` at [version] so Room sees a real upgrade to perform.
      */
-    private fun seedOldDatabase(version: Int, seed: SupportSQLiteDatabase.() -> Unit) {
+    private fun seedOldDatabase(schemaVersion: Int, seed: SupportSQLiteDatabase.() -> Unit) {
         val helper = FrameworkSQLiteOpenHelperFactory().create(
             SupportSQLiteOpenHelper.Configuration.builder(context)
                 .name(dbName)
-                .callback(object : SupportSQLiteOpenHelper.Callback(version) {
+                .callback(object : SupportSQLiteOpenHelper.Callback(schemaVersion) {
                     override fun onCreate(db: SupportSQLiteDatabase) = Unit
                     override fun onUpgrade(db: SupportSQLiteDatabase, old: Int, new: Int) = Unit
                 })
@@ -143,7 +143,7 @@ class MigrationTest {
         )
         helper.writableDatabase.apply {
             seed()
-            this.version = version
+            version = schemaVersion
         }
         helper.close()
     }

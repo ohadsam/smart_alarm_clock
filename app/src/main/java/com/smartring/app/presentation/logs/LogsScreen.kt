@@ -156,6 +156,9 @@ fun LogsScreen(onBack: () -> Unit, vm: LogsViewModel = hiltViewModel()) {
 
 @Composable
 private fun LogRow(log: AppLogEntry) {
+    // Remembered per row rather than shared at file level: SimpleDateFormat is not
+    // thread-safe, and the export path now formats on a background dispatcher.
+    val rowFmt = remember { logTimeFormat() }
     Surface(
         shape = RoundedCornerShape(10.dp),
         color = MaterialTheme.colorScheme.surface,
@@ -166,7 +169,7 @@ private fun LogRow(log: AppLogEntry) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text(log.tag, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.primary)
-                Text(logFmt.format(Date(log.timestamp)), style = MaterialTheme.typography.labelSmall,
+                Text(rowFmt.format(Date(log.timestamp)), style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
             }
             Spacer(Modifier.height(2.dp))
