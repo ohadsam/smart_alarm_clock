@@ -100,6 +100,9 @@
 | 71 | טסט קצה-לקצה של יצירת שעמור דרך ה-UI, כולל אימות שנשמר וקיבל מועד עתידי | `AlarmCreationFlowInstrumentedTest` (v1.6.10) |
 | 72 | בדיקת העשן מאמתת גם שהפלטפורמה רואה את ספקי הווידג'טים ב-APK המוקטן | `scripts/release-smoke-test.sh` (v1.6.10) |
 | 73 | `SCHEDULE_EXACT_ALARM` מוגבל ל-API 32; מ-33 ואילך רק `USE_EXACT_ALARM` | `AndroidManifest.xml` (v1.6.10) |
+| 74 | סכמת Room מקובצת ב-git; הבילד נכשל אם הסכמה שנוצרה שונה מזו שמקובצת | `app/schemas/` + שלב ב-`build-apk.yml` (v1.6.10) |
+| 75 | החצי המהיר של אותה בדיקה — נכשל בשניות אם `@Database(version)` זז בלי JSON תואם | `RoomSchemaTest` (v1.6.10) |
+| 76 | פלט Gradle של האמולטור נשמר ומודפס בכישלון; כשלי JUnit מודפסים כשלב אחרון | `scripts/instrumented-test.sh` + `build-apk.yml` (v1.6.10) |
 
 ---
 
