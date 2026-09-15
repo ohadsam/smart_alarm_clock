@@ -15,10 +15,17 @@ launch for whoever installs the release APK, and every step in CI was blind to i
 That matters more here than in most apps, because the committed keystore exists
 precisely so people side-load the release APK as an update.
 
-The emulator job now installs the release APK, launches `MainActivity`, and fails if
-the process isn't alive ten seconds later — which exercises the whole startup path
-through minified code: Hilt's graph, Room's generated implementation, WorkManager's
-factory, Compose, DataStore.
+The emulator job now runs `scripts/release-smoke-test.sh`: it installs the release
+APK, launches `MainActivity`, and fails if the process isn't alive twelve seconds
+later — which exercises the whole startup path through minified code (Hilt's graph,
+Room's generated implementation, WorkManager's factory, Compose, DataStore) and dumps
+the crash buffer when it isn't.
+
+It lives in a script rather than inline YAML because
+`reactivecircus/android-emulator-runner` executes its `script:` input one line at a
+time, each through its own `sh -c` — so the first version's multi-line `if` was split
+into fragments and died with `Syntax error: end of file unexpected`, after the emulator
+had booted and the tests had run.
 
 ### Lint had never run either
 

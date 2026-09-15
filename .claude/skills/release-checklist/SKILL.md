@@ -837,6 +837,13 @@ If the user asks for a PR-based workflow going forward, follow that instead and 
   languages in the widget picker and the notification channel. Keep it complete or
   delete it; `MissingTranslation` is error-severity for this reason.
 
+- **`reactivecircus/android-emulator-runner` runs its `script:` input one line at a
+  time, each through its own `sh -c`.** A multi-line `if`/`for`/`while` is split into
+  fragments and dies with `Syntax error: end of file unexpected (expecting "fi")` —
+  after the emulator has booted and the tests have run, so it costs a full ~8-minute
+  cycle to discover. Anything beyond a single command belongs in a checked-in script
+  (`scripts/release-smoke-test.sh`) that the YAML calls in one line.
+
 ## Known limitations (don't re-report these as new findings unless you're the batch fixing them)
 
 - **Settings' English toggle doesn't change any visible UI text.** Every screen hardcodes Hebrew
