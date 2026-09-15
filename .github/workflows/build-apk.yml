@@ -66,6 +66,23 @@ jobs:
           retention-days: 30
           if-no-files-found: warn
 
+      # ── 4c. Android Lint ─────────────────────────
+      # Until v1.6.7 only lintVitalRelease ran (fatal issues only, as part of
+      # assembleRelease), so error- and warning-severity checks — most of them — had
+      # never seen this code. Errors fail; warnings are reported and don't (see the
+      # lint{} block in app/build.gradle.kts for why).
+      - name: Run Android Lint
+        run: ./gradlew lintDebug --stacktrace --no-daemon
+        env:
+          GRADLE_OPTS: "-Dorg.gradle.daemon=false"
+
+      # The HTML report goes to an artifact, but artifact downloads aren't reachable
+      # from every environment that needs to read this — so put the text report in the
+      # log, where it always is. `always()` so a failing lint still shows what it found.
+      - name: Show lint report
+        if: always()
+        run: cat app/build/reports/lint-results-debug.txt || echo "(no lint text report produced)"
+
       # ── 5. Build Debug APK ───────────────────────
       - name: Build Debug APK
         run: ./gradlew assembleDebug --stacktrace --no-daemon
@@ -161,7 +178,29 @@ jobs:
           ram-size: 4096M
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
-          script: ./gradlew connectedDebugAndroidTest --stacktrace --no-daemon
+          script: |
+            set -e
+            ./gradlew connectedDebugAndroidTest --stacktrace --no-daemon
+
+            # The release APK is the one people actually install, and until v1.6.7
+            # nothing ever ran it: minify and resource shrinking are both on, the
+            # instrumented suite runs the *debug* build, and a missing R8 keep rule
+            # shows up as a crash on launch that every other step here is blind to.
+            # Launching it and checking the process is still alive exercises the whole
+            # startup path through minified code — Hilt's graph, Room's generated
+            # implementation, WorkManager's factory, Compose, DataStore.
+            echo "── Release APK launch smoke test ──"
+            ./gradlew assembleRelease --stacktrace --no-daemon
+            adb logcat -c
+            adb install -r app/build/outputs/apk/release/app-release.apk
+            adb shell am start -W -n com.smartring.app/com.smartring.app.MainActivity
+            sleep 10
+            if [ -z "$(adb shell pidof com.smartring.app | tr -d '[:space:]')" ]; then
+              echo "::error::The minified release APK is not running 10s after launch — R8 or resource shrinking has stripped something the app needs at startup."
+              adb logcat -d -b crash | tail -200
+              exit 1
+            fi
+            echo "Release APK launched and still alive."
         env:
           GRADLE_OPTS: "-Dorg.gradle.daemon=false"
 

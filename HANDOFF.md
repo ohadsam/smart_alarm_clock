@@ -90,6 +90,9 @@
 | 61 | כללי כפתורי ההתראה (שבת/נודניק כבוי/תקרת נודניקים) כפונקציה טהורה ונבדקת | `util/NotificationActions.kt` (v1.6.5) |
 | 62 | ניגודיות AA לכל תפקיד צבע בשתי הערכות, כולל טקסט על כפתור צבוע | `presentation/theme/Theme.kt` + `ThemeContrastTest` (v1.6.6) |
 | 63 | מעבר בטוח למסכי הגדרות מערכת (עם נפילה חלקה למסך האפליקציה) | `util/SystemScreens.kt` (v1.6.6) |
+| 64 | Android Lint רץ ב-CI (שגיאות מפילות את הבילד, הדוח מודפס ללוג) | `lint {}` ב-`app/build.gradle.kts` + שלב ב-`build-apk.yml` (v1.6.7) |
+| 65 | בדיקת עשן ל-APK ה-release המוקטן (R8 + shrinkResources) על האמולטור | `build-apk.yml`, job `instrumented` (v1.6.7) |
+| 66 | קבועי הצבע הגולמיים private — מסכים חייבים לעבור דרך תפקידי הצבע | `presentation/theme/Theme.kt` (v1.6.7) |
 
 ---
 

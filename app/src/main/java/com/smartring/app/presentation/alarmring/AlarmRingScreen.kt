@@ -165,7 +165,15 @@ fun AlarmRingScreen(alarmId: Long, onDismiss: () -> Unit,
             // ringDurationSeconds (fireAlarm()'s autoStopJob), which isn't a
             // user-initiated action.
             val shabbat = !alarm.acceptsInteraction
-            val stopColor = if (shabbat) MaterialTheme.colorScheme.outline else Red
+            // Paired color roles, not a raw constant with hard-coded White on top. The
+            // Red constant is a fairly light pink, so white text on it measured 3.14:1
+            // — on the single most important control in the app, read half-awake in the
+            // dark. error/onError is 6.24:1 in dark and 6.85:1 in light, and both are
+            // pinned by ThemeContrastTest.
+            val stopColor = if (shabbat) MaterialTheme.colorScheme.surfaceVariant
+                            else MaterialTheme.colorScheme.error
+            val stopContentColor = if (shabbat) MaterialTheme.colorScheme.onSurfaceVariant
+                                   else MaterialTheme.colorScheme.onError
 
             // STOP button
             Box(Modifier.size(160.dp).scale(if (shabbat) 1f else scale), contentAlignment = Alignment.Center) {
@@ -174,8 +182,8 @@ fun AlarmRingScreen(alarmId: Long, onDismiss: () -> Unit,
                 IconButton(vm::stop, Modifier.size(130.dp).clip(CircleShape).background(stopColor),
                     enabled = !shabbat) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(Icons.Rounded.Stop, null, Modifier.size(52.dp), tint = White)
-                        Text("עצור", color = White, fontWeight = FontWeight.ExtraBold, fontSize = 16.sp)
+                        Icon(Icons.Rounded.Stop, null, Modifier.size(52.dp), tint = stopContentColor)
+                        Text("עצור", color = stopContentColor, fontWeight = FontWeight.ExtraBold, fontSize = 16.sp)
                     }
                 }
             }

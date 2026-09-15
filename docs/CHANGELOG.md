@@ -1,5 +1,70 @@
 # SmartRing – Changelog
 
+## v1.6.7 (2026-09-15)
+
+This round went looking in places seven previous rounds hadn't opened at all: the
+build configuration, the CI workflow, and the resource files. Two of the three
+findings are about what *isn't being checked* rather than what's broken.
+
+### Nothing had ever run the release APK
+
+`isMinifyEnabled` and `isShrinkResources` are both on, and the instrumented suite runs
+`connectedDebugAndroidTest` — the **debug**, unminified build. So R8 and resource
+shrinking were completely untested: a missing keep rule shows up as a crash on first
+launch for whoever installs the release APK, and every step in CI was blind to it.
+That matters more here than in most apps, because the committed keystore exists
+precisely so people side-load the release APK as an update.
+
+The emulator job now installs the release APK, launches `MainActivity`, and fails if
+the process isn't alive ten seconds later — which exercises the whole startup path
+through minified code: Hilt's graph, Room's generated implementation, WorkManager's
+factory, Compose, DataStore.
+
+### Lint had never run either
+
+Only `lintVitalRelease` ran (fatal-severity issues, as part of `assembleRelease`), so
+the error- and warning-severity checks — most of them — had never seen this code. That
+is the automated half of several things previous rounds found by hand: a missing
+`contentDescription`, an icon that isn't `AutoMirrored` in an RTL app, a
+half-translated resource file. `lintDebug` now runs in CI with errors failing the
+build and the text report cat'd into the console (artifact downloads aren't reachable
+from every environment that needs to read it).
+
+One error it would have caught immediately: `values-en/strings.xml` had 9 of the 15
+strings. That file is a *locale* qualifier, so an English-locale device gets it
+regardless of the in-app language setting — meaning the widget picker showed some
+entries in English and some in Hebrew. Now complete.
+
+### White on a light accent, three times
+
+The v1.6.6 round fixed the color *scheme*; three call sites bypassed it by hard-coding
+`White` on top of a theme accent — correct in light mode, wrong in dark:
+
+| | Was | Now |
+|---|---|---|
+| Ring screen **STOP** button | **3.14:1** (white on the raw `Red`) | 6.24 dark / 6.85 light |
+| Alarm list **+** FAB | **3.19:1** in dark | 6.14 / 7.16 |
+| Selected weekday circle | **3.19:1** in dark | 6.14 / 7.16 |
+
+The STOP button is the single most important control in the app, read half-awake in
+the dark.
+
+**The structural fix matters more than the three edits.** `Blue`/`Green`/`Red`/`Gold`/
+`White` are now **file-private** in `Theme.kt`. A screen reaching for one directly is
+the most-repeated bug in this app's history — Green as text on Light mode's white
+surface, Gold as the snooze label there, and now White on three accent backgrounds —
+and each was previously found and fixed one call site at a time. File-private is the
+only version of that fix the compiler enforces: screens have no way to name these now,
+and must go through the color roles, which `ThemeContrastTest` measures.
+
+### Accessibility
+
+Five icon-only `IconButton`s had no `contentDescription` — both stepper pairs
+(snooze maximum, repeat count) and the remove button on each specific date.
+
+**Tests:** 253, unchanged in count; `ThemeContrastTest`'s raw-palette check now asserts
+against literal values, since the constants it used to name are private.
+
 ## v1.6.6 (2026-09-14)
 
 Two findings, and both are the same shape as something already fixed elsewhere in the

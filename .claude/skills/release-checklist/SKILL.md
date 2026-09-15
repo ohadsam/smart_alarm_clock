@@ -811,6 +811,32 @@ If the user asks for a PR-based workflow going forward, follow that instead and 
   failed" and read upward from there; the artifact download is blocked in this
   environment, so the console is the only copy.
 
+- **The release APK is minified and, until v1.6.7, was never run by anything.**
+  `isMinifyEnabled` and `isShrinkResources` are both on, while the instrumented suite
+  runs `connectedDebugAndroidTest` — the debug, unminified build. A missing R8 keep rule
+  therefore surfaces as a crash on launch for whoever side-loads the release APK, with
+  CI fully green. The emulator job now installs it, launches MainActivity and fails if
+  the process isn't alive 10s later. If that step ever goes red, the fix is a keep rule
+  in `app/proguard-rules.pro` — read the crash buffer it dumps, don't guess.
+- **`lintVitalRelease` is not lint.** Until v1.6.7 only that ran (fatal-severity issues,
+  during `assembleRelease`), so error- and warning-severity checks had never seen this
+  code — which is why several rounds found by hand what lint reports automatically
+  (`ContentDescription`, `MissingTranslation`, RTL icon issues). `lintDebug` now runs in
+  CI with errors failing the build; the text report is cat'd into the console because
+  artifact downloads aren't reachable from every environment that needs to read it.
+- **A color constant a screen *can* name is a color constant a screen *will* misuse.**
+  The dark-tuned accents were hard-coded into screens three separate times across
+  rounds — Green as text on a white surface, Gold as the snooze label, and `White` on
+  top of `Red`/`primary` for the STOP button, the FAB and the weekday circles (3.1-3.2:1
+  in dark). Each was fixed one call site at a time, and each time another was waiting.
+  They are file-private in `Theme.kt` now; keep them that way, and add new accents the
+  same way — with a paired `on*` role, never as a public constant.
+- **`values-<locale>` qualifiers apply regardless of any in-app language setting.** This
+  app's language picker is deliberately disabled, but `values-en/strings.xml` still
+  takes effect on an English-locale device — so a partial translation there mixes
+  languages in the widget picker and the notification channel. Keep it complete or
+  delete it; `MissingTranslation` is error-severity for this reason.
+
 ## Known limitations (don't re-report these as new findings unless you're the batch fixing them)
 
 - **Settings' English toggle doesn't change any visible UI text.** Every screen hardcodes Hebrew

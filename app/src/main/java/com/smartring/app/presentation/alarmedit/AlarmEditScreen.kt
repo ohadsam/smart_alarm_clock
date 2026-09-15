@@ -267,8 +267,11 @@ fun AlarmEditScreen(
                                             ),
                                         contentAlignment = Alignment.Center,
                                     ) {
+                                        // onPrimary on the selected circle: white on the
+                                        // dark scheme's light-blue primary is 3.19:1.
                                         Text(d, fontWeight = FontWeight.Bold,
-                                            color = if (sel) White else MaterialTheme.colorScheme.onSurfaceVariant)
+                                            color = if (sel) MaterialTheme.colorScheme.onPrimary
+                                                    else MaterialTheme.colorScheme.onSurfaceVariant)
                                     }
                                 }
                             }
@@ -456,11 +459,11 @@ fun AlarmEditScreen(
                                 info = "כמה פעמים ניתן ללחוץ על נודניק לפני שהאפשרות נעלמת.")
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 IconButton({ if (s.snoozeMaxCount > 1) vm.setSnoozeMaxCount(s.snoozeMaxCount - 1) }, Modifier.size(36.dp)) {
-                                    Icon(Icons.Rounded.Remove, null)
+                                    Icon(Icons.Rounded.Remove, "הפחת מקסימום נודניקים")
                                 }
                                 Text("${s.snoozeMaxCount}", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold)
                                 IconButton({ if (s.snoozeMaxCount < 10) vm.setSnoozeMaxCount(s.snoozeMaxCount + 1) }, Modifier.size(36.dp)) {
-                                    Icon(Icons.Rounded.Add, null)
+                                    Icon(Icons.Rounded.Add, "הוסף מקסימום נודניקים")
                                 }
                             }
                         }
@@ -726,11 +729,11 @@ private fun RecurrenceEndSection(s: AlarmEditUiState, vm: AlarmEditViewModel) {
                 Text("מספר חזרות", fontWeight = FontWeight.SemiBold)
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     IconButton({ if (s.recurrenceCount > 1) vm.setRecurrenceCount(s.recurrenceCount - 1) },
-                        Modifier.size(36.dp)) { Icon(Icons.Rounded.Remove, null) }
+                        Modifier.size(36.dp)) { Icon(Icons.Rounded.Remove, "הפחת מספר חזרות") }
                     Text("${s.recurrenceCount}",
                         style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold)
                     IconButton({ if (s.recurrenceCount < 100) vm.setRecurrenceCount(s.recurrenceCount + 1) },
-                        Modifier.size(36.dp)) { Icon(Icons.Rounded.Add, null) }
+                        Modifier.size(36.dp)) { Icon(Icons.Rounded.Add, "הוסף מספר חזרות") }
                 }
             }
         }
@@ -800,7 +803,7 @@ private fun SpecificDatesSection(
                         }
                     }
                     IconButton({ onRemove(i) }, Modifier.size(32.dp)) {
-                        Icon(Icons.Rounded.Close, null, Modifier.size(16.dp),
+                        Icon(Icons.Rounded.Close, "הסר את ${formatPickedDay(d.date)}", Modifier.size(16.dp),
                             tint = MaterialTheme.colorScheme.error)
                     }
                 }

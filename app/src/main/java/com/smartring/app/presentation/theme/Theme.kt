@@ -4,11 +4,19 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 
-val Blue   = Color(0xFF5B8DF6)
-val Green  = Color(0xFF5BF6B0)
-val Red    = Color(0xFFF65B7A)
-val Gold   = Color(0xFFF6C25B)
-val White  = Color(0xFFFFFFFF)
+// private, and deliberately so. These are the dark scheme's raw accent values, and a
+// screen reaching for one directly is the single most repeated bug in this app's
+// history: Green as text on Light mode's white surface (1.5:1), Gold as the snooze
+// button's label there, and most recently White hard-coded on top of Red for the ring
+// screen's STOP button (3.14:1) and on primary for the FAB and the weekday circles
+// (3.19:1 in dark). Each was found and fixed one call site at a time. File-private is
+// the only version of that fix the compiler enforces: screens now have no way to name
+// these, and must go through the color roles — which ThemeContrastTest measures.
+private val Blue   = Color(0xFF5B8DF6)
+private val Green  = Color(0xFF5BF6B0)
+private val Red    = Color(0xFFF65B7A)
+private val Gold   = Color(0xFFF6C25B)
+private val White  = Color(0xFFFFFFFF)
 
 // The four accent constants above are tuned for the dark scheme's near-black surfaces
 // and are unreadable as text or icon tints on Light mode's white ones (Green is a pale

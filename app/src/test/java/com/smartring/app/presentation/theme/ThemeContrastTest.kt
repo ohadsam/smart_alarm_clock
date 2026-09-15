@@ -103,17 +103,30 @@ class ThemeContrastTest {
     }
 
     @Test
-    fun `the raw palette constants stay out of the light scheme`() {
-        // Blue/Green/Red/Gold are tuned for near-black surfaces — Green is a pale mint
-        // at about 1.5:1 on white. They are legitimate on a fixed dark background and
-        // nowhere else, so their appearing in the light scheme is always a mistake.
-        listOf("Blue" to Blue, "Green" to Green, "Red" to Red, "Gold" to Gold).forEach { (n, raw) ->
-            listOf("primary" to LightColors.primary, "secondary" to LightColors.secondary,
-                "tertiary" to LightColors.tertiary, "error" to LightColors.error)
-                .forEach { (role, used) ->
-                    assertTrue("LightColors.$role must not be the dark-tuned $n constant",
-                        used.toArgb() != raw.toArgb())
-                }
+    fun `the raw dark-tuned palette values stay out of the light scheme`() {
+        // Spelled as literals because the constants themselves are file-private in
+        // Theme.kt now — which is the point: a screen can no longer name them, so the
+        // only way one of these values reaches Light mode is by being typed into the
+        // light scheme by hand. Green is a pale mint at roughly 1.5:1 on white.
+        val darkTuned = mapOf(
+            "Blue" to 0xFF5B8DF6.toInt(),
+            "Green" to 0xFF5BF6B0.toInt(),
+            "Red" to 0xFFF65B7A.toInt(),
+            "Gold" to 0xFFF6C25B.toInt(),
+        )
+        val lightRoles = mapOf(
+            "primary" to LightColors.primary,
+            "secondary" to LightColors.secondary,
+            "tertiary" to LightColors.tertiary,
+            "error" to LightColors.error,
+        )
+        darkTuned.forEach { (name, raw) ->
+            lightRoles.forEach { (role, used) ->
+                assertTrue(
+                    "LightColors." + role + " must not be the dark-tuned " + name + " value",
+                    used.toArgb() != raw,
+                )
+            }
         }
     }
 }

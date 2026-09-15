@@ -14,8 +14,8 @@ android {
         applicationId   = "com.smartring.app"
         minSdk          = 26
         targetSdk       = 34
-        versionCode     = 15
-        versionName     = "1.6.6"
+        versionCode     = 16
+        versionName     = "1.6.7"
         // Hilt's own runner, so @HiltAndroidTest instrumented tests get a real DI
         // graph on the device instead of the app's @HiltAndroidApp Application.
         testInstrumentationRunner = "com.smartring.app.HiltTestRunner"
@@ -64,6 +64,30 @@ android {
 
     packaging {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
+    }
+
+    /**
+     * Lint only ran as `lintVitalRelease` (fatal-severity issues, during
+     * assembleRelease) until v1.6.7 — so the error- and warning-severity checks, which
+     * are most of them, had never run against this code at all. That is the automated
+     * half of several things previous review rounds found by hand: a missing
+     * contentDescription, an icon that isn't AutoMirrored in an RTL app, a
+     * half-translated resource file.
+     *
+     * Errors fail the build; warnings don't. There are legitimately noisy warnings in
+     * an app like this (BatteryLife fires on the very permission the reliability
+     * section exists to request), and turning them all into errors would mean either
+     * a suppression file nobody reads or a red build nobody can act on.
+     *
+     * textReport puts the whole thing in a file the CI step cats into the console —
+     * this environment can't download the HTML report artifact, so the console is the
+     * only copy anyone can actually read.
+     */
+    lint {
+        abortOnError     = true
+        warningsAsErrors = false
+        textReport       = true
+        checkDependencies = false
     }
 
     // Robolectric needs the merged manifest/resources on the unit-test classpath —

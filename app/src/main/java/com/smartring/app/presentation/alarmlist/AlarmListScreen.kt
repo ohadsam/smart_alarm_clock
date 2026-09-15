@@ -59,8 +59,10 @@ fun AlarmListScreen(onAddAlarm: ()->Unit, onEditAlarm: (Long)->Unit, onOpenHisto
                 })
         },
         floatingActionButton={
+            // onPrimary, not a hard-coded White: primary is a light blue in the dark
+            // scheme, where white on it is 3.19:1.
             FloatingActionButton(onAddAlarm,shape=CircleShape,containerColor=MaterialTheme.colorScheme.primary){
-                Icon(Icons.Rounded.Add,null,tint=White)
+                Icon(Icons.Rounded.Add,"הוסף שעמור",tint=MaterialTheme.colorScheme.onPrimary)
             }
         },
         containerColor=MaterialTheme.colorScheme.background,

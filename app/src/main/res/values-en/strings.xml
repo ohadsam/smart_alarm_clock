@@ -1,7 +1,25 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+    Note this is a *locale* qualifier, not the in-app language setting: Android picks
+    it on any English-locale device regardless of what Settings → שפה says (that
+    setting is deliberately disabled — see SettingsScreen's comment — because every
+    screen still holds hardcoded Hebrew literals). So what actually varies here is the
+    handful of strings the *system* renders on the app's behalf: the widget picker's
+    names and descriptions, and the notification channel.
+
+    Kept complete rather than partial. Lint's MissingTranslation is an error-severity
+    check for exactly this reason: a half-translated resource file silently mixes
+    languages in whichever surface happens to use the missing key.
+-->
 <resources>
+    <string name="app_name">SmartRing</string>
+    <string name="channel_name">SmartRing Alarms</string>
     <string name="action_stop">Stop</string>
     <string name="action_snooze">Snooze</string>
+    <string name="widget_small">SmartRing Small</string>
+    <string name="widget_medium">SmartRing Medium</string>
+    <string name="widget_wide">SmartRing Wide</string>
+    <string name="widget_large">SmartRing Large</string>
     <string name="widget_small_desc">Live clock and the next alarm</string>
     <string name="widget_medium_desc">Live clock, the next alarm and its name</string>
     <string name="widget_wide_desc">Live clock and the next three alarms</string>
