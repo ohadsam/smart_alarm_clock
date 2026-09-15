@@ -32,6 +32,12 @@ adb install -r "$APK"
 echo "── Launching $PKG/.MainActivity ──"
 adb shell am start -W -n "$PKG/$PKG.MainActivity"
 
+# The pid as launched. Everything below compares against this, because "a process with
+# this package name exists" is not the same claim as "the process we started is the one
+# still running" — see the pid-identity check at the bottom.
+FIRST_PID="$(adb shell pidof "$PKG" 2>/dev/null | tr -d '[:space:]' || true)"
+echo "Launched as pid ${FIRST_PID:-<not captured>}"
+
 # Long enough for Application.onCreate (Hilt graph, Room open, WorkManager enqueue) and
 # the first composition to have run and thrown, if they were going to.
 sleep 12
@@ -59,4 +65,17 @@ if [ -z "$PID" ]; then
   exit 1
 fi
 
-echo "Release APK launched, still alive (pid $PID), and nothing in the crash buffer."
+# Pid identity, not just pid existence. The crash-buffer check above is the primary
+# signal, but it is only as good as the buffer: on an emulator image where `logcat -b
+# crash` comes back empty for any reason, this script would silently fall back to the
+# bare `pidof` check — which is precisely the vacuous check that let v1.6.7 go green
+# with a fatal exception in the log. A process that died and was restarted by Android
+# gets a *new* pid, so comparing the two catches that case with no dependence on the
+# crash buffer at all.
+if [ -n "$FIRST_PID" ] && [ "$PID" != "$FIRST_PID" ]; then
+  echo "::error::The minified release APK restarted during the 12s after launch (pid $FIRST_PID -> $PID). Android respawns a process that dies on startup, so this is a crash even though the crash buffer did not show one."
+  adb logcat -d | grep -F "$PKG" | tail -120 || true
+  exit 1
+fi
+
+echo "Release APK launched, still alive (pid $PID, unchanged since launch), and nothing in the crash buffer."

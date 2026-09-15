@@ -41,6 +41,14 @@ keep rules are deliberately broad enough to hold whichever name-based lookup ins
 those two packages is the one that was missing, and `scripts/release-smoke-test.sh`
 is what adjudicates it.
 
+**And one more hole closed in the check itself.** The crash-buffer test is only as good
+as the buffer: on an image where `logcat -b crash` came back empty for any reason, the
+script fell back to bare `pidof` — the vacuous check that let v1.6.7 go green with a
+fatal exception in the log. It now records the pid at launch and compares it at the end,
+because Android respawns a process that dies on startup with a *new* pid. That catches
+a launch crash with no dependence on the crash buffer at all, and the two checks are
+independent.
+
 ## v1.6.8 (2026-09-15)
 
 **The release APK crashed on launch, and had been doing so unnoticed.** The smoke test
