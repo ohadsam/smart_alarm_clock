@@ -211,17 +211,10 @@ jobs:
           # One command per line: this action runs the script line by line, each in
           # its own `sh -c`, so anything multi-line (an `if`, a loop) has to live in a
           # file. See scripts/release-smoke-test.sh.
-          #
-          # Install first, then grant, then test: POST_NOTIFICATIONS is a runtime
-          # permission from API 33 on, and an ungranted one turns into a system dialog
-          # over the app mid-test. `pm grant` cannot run before the package exists, and
-          # a reinstall keeps the grant, so the order matters. `|| true` because below
-          # 33 the permission is install-time and `pm grant` refuses it — which is not
-          # a failure, just a level where there is nothing to grant.
+          # Both steps are scripts for the same reason: no pipefail, no multi-line
+          # constructs, and no way to react to a failure in a per-line `sh -c`.
           script: |
-            ./gradlew installDebug installDebugAndroidTest --stacktrace --no-daemon
-            adb shell pm grant com.smartring.app.debug android.permission.POST_NOTIFICATIONS || true
-            ./gradlew connectedDebugAndroidTest --stacktrace --no-daemon
+            ./scripts/instrumented-test.sh
             ./scripts/release-smoke-test.sh
         env:
           GRADLE_OPTS: "-Dorg.gradle.daemon=false"
@@ -234,3 +227,18 @@ jobs:
           path: app/build/reports/androidTests/connected/
           retention-days: 30
           if-no-files-found: warn
+
+      # Deliberately the LAST step in the job, and only on failure. Artifact downloads
+      # are not reachable from every environment that has to read this, and the log
+      # reader returns only the tail of a job — so a failure printed in the middle of a
+      # 900-line log is a failure nobody can see. Putting the assertion text at the very
+      # end is what makes a red emulator run diagnosable at all.
+      - name: Show instrumented test failures
+        if: failure()
+        run: |
+          echo "── which result files exist ──"
+          find app/build/outputs/androidTest-results app/build/reports/androidTests -type f 2>/dev/null | head -40 || true
+          echo "── failures and errors ──"
+          grep -rhE -A 25 "<(failure|error)[ >]" \
+            app/build/outputs/androidTest-results --include='*.xml' 2>/dev/null \
+            | head -150 || echo "(no androidTest-results XML — the run died before any test reported)"

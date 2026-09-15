@@ -93,12 +93,23 @@ fi
 # be checked from outside is whether the platform still sees them in the minified,
 # resource-shrunk APK — which is precisely what stripping or renaming would destroy.
 
-echo "── Widget providers registered by the platform ──"
-WIDGETS="$(adb shell dumpsys appwidget 2>/dev/null | grep -c "$PKG/" || true)"
-echo "AppWidget entries mentioning $PKG: $WIDGETS"
-if [ "${WIDGETS:-0}" -lt 1 ]; then
-  echo "::error::The platform sees no widget provider for $PKG in the minified APK. R8 or resource shrinking has stripped or renamed the Glance receivers, or their provider XML — the widgets would be missing from the picker entirely."
-  adb shell dumpsys appwidget 2>/dev/null | head -60 || true
+# Two independent probes, because neither is portable on its own: `dumpsys appwidget`
+# formats its provider list differently across releases (and on some images lists only
+# *bound* instances, of which a freshly installed app has none), while `dumpsys package`
+# resolves receivers by their real class names. Failing only when BOTH come back empty
+# keeps this a test of the APK rather than a test of a particular emulator image's
+# dumpsys formatting.
+echo "── Widget receivers visible to the platform ──"
+APPWIDGET_HITS="$(adb shell dumpsys appwidget 2>/dev/null | grep -c "$PKG/" || true)"
+PACKAGE_HITS="$(adb shell dumpsys package "$PKG" 2>/dev/null | grep -c "SmartRingWidget" || true)"
+echo "dumpsys appwidget entries for $PKG: ${APPWIDGET_HITS:-0}"
+echo "dumpsys package receivers named SmartRingWidget*: ${PACKAGE_HITS:-0}"
+if [ "${APPWIDGET_HITS:-0}" -lt 1 ] && [ "${PACKAGE_HITS:-0}" -lt 1 ]; then
+  echo "::error::Neither dumpsys appwidget nor dumpsys package can see a widget receiver for $PKG in the minified APK. R8 or resource shrinking has stripped or renamed the Glance receivers — the widgets would be missing from the picker entirely."
+  echo "── dumpsys appwidget ──"
+  adb shell dumpsys appwidget 2>/dev/null | head -40 || true
+  echo "── dumpsys package (receivers) ──"
+  adb shell dumpsys package "$PKG" 2>/dev/null | grep -i -A2 "receiver" | head -40 || true
   exit 1
 fi
 
