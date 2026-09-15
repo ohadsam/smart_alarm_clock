@@ -78,4 +78,38 @@ if [ -n "$FIRST_PID" ] && [ "$PID" != "$FIRST_PID" ]; then
   exit 1
 fi
 
-echo "Release APK launched, still alive (pid $PID, unchanged since launch), and nothing in the crash buffer."
+# ── Beyond MainActivity ──────────────────────────────────────────────────────
+# Launching the activity proves the Hilt graph, Room, Compose and DataStore survived
+# R8. It proves nothing about the three subsystems that make this an alarm clock
+# rather than a screen, and each of them is reached through a name-based lookup that
+# R8 can break exactly as it broke the LocalLifecycleOwner bridge:
+#
+#   - the Glance widget receivers      (kept by `-keep class * extends GlanceAppWidgetReceiver`)
+#   - the @HiltWorker workers          (kept by `-keep @androidx.hilt.work.HiltWorker`)
+#   - the foreground service           (the alarm actually ringing)
+#
+# These cannot be driven from `adb shell`: every receiver and the service are
+# android:exported="false", so a broadcast from the shell uid is refused. What *can*
+# be checked from outside is whether the platform still sees them in the minified,
+# resource-shrunk APK — which is precisely what stripping or renaming would destroy.
+
+echo "── Widget providers registered by the platform ──"
+WIDGETS="$(adb shell dumpsys appwidget 2>/dev/null | grep -c "$PKG/" || true)"
+echo "AppWidget entries mentioning $PKG: $WIDGETS"
+if [ "${WIDGETS:-0}" -lt 1 ]; then
+  echo "::error::The platform sees no widget provider for $PKG in the minified APK. R8 or resource shrinking has stripped or renamed the Glance receivers, or their provider XML — the widgets would be missing from the picker entirely."
+  adb shell dumpsys appwidget 2>/dev/null | head -60 || true
+  exit 1
+fi
+
+# WorkManager schedules through JobScheduler on API 23+. An entry here means the
+# app got far enough through its own startup to build a worker request, which is the
+# @HiltWorker + WorkManager Configuration.Provider path — the one that silently stops
+# the boot reschedule, the log cleanup and the widget refresh when a keep rule is
+# missing. Reported rather than enforced: the app legitimately enqueues on its own
+# schedule, and a hard failure here would be a flake generator.
+echo "── WorkManager jobs registered by the platform ──"
+JOBS="$(adb shell dumpsys jobscheduler 2>/dev/null | grep -c "$PKG" || true)"
+echo "JobScheduler entries mentioning $PKG: ${JOBS:-0} (informational)"
+
+echo "Release APK launched, still alive (pid $PID, unchanged since launch), nothing in the crash buffer, widget providers visible to the platform."

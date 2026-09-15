@@ -9,7 +9,17 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE"/>
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
-    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"/>
+    <!-- The two exact-alarm permissions are a pair, and the split matters.
+         SCHEDULE_EXACT_ALARM is the user-revocable one introduced in API 31; from
+         API 33 on it is superseded by USE_EXACT_ALARM, which is granted at install
+         and cannot be revoked, and which Google Play allows precisely for apps whose
+         core function is an alarm clock. Requesting the revocable one on 33+ as well
+         is redundant — it asks for a permission the app already has by another route,
+         and it is the kind of over-broad declaration Play review flags. maxSdkVersion
+         confines it to the levels where it is the only option.
+         Nothing branches on this: every call site goes through
+         ReliabilityChecks.canScheduleExactAlarms(), which returns true on 33+. -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" android:maxSdkVersion="32"/>
     <uses-permission android:name="android.permission.USE_EXACT_ALARM"/>
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO"/>

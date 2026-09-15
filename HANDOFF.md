@@ -96,6 +96,10 @@
 | 67 | כללי keep ל-R8 לכל מה ש-Hilt מאתר לפי שם (ViewModel/EntryPoint/Worker) | `app/proguard-rules.pro` (v1.6.8) |
 | 68 | כללי keep ל-R8 לגשר בין `LocalLifecycleOwner` של lifecycle לזה של compose-ui — בלעדיהם ה-APK הסופי קורס בפתיחה | `app/proguard-rules.pro` (v1.6.9) |
 | 69 | הבדיקה ששומרת על שני אלה: `ProguardRulesTest` נכשלת אם כלל keep קריטי נמחק | `ProguardRulesTest` (v1.6.9) |
+| 70 | הטסטים על האמולטור רצים על מטריצת API 26/30/34 (minSdk / baseline / targetSdk) | `.github/workflows/build-apk.yml` (v1.6.10) |
+| 71 | טסט קצה-לקצה של יצירת שעמור דרך ה-UI, כולל אימות שנשמר וקיבל מועד עתידי | `AlarmCreationFlowInstrumentedTest` (v1.6.10) |
+| 72 | בדיקת העשן מאמתת גם שהפלטפורמה רואה את ספקי הווידג'טים ב-APK המוקטן | `scripts/release-smoke-test.sh` (v1.6.10) |
+| 73 | `SCHEDULE_EXACT_ALARM` מוגבל ל-API 32; מ-33 ואילך רק `USE_EXACT_ALARM` | `AndroidManifest.xml` (v1.6.10) |
 
 ---
 

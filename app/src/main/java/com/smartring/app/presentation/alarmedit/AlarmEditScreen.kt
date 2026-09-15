@@ -26,6 +26,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.*
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.core.content.ContextCompat
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -41,6 +42,13 @@ import com.smartring.app.util.localInstantOnPickedDay
 import com.smartring.app.util.localInstantToPickedDay
 import java.text.SimpleDateFormat
 import java.util.*
+
+
+/** Test tags for [AlarmEditScreen]. Declared beside the screen so renaming one has to
+ *  pass through the same file as the UI it identifies. */
+object AlarmEditTags {
+    const val NAME_FIELD = "alarm_edit_name_field"
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -134,7 +142,10 @@ fun AlarmEditScreen(
                 OutlinedTextField(
                     value         = s.name,
                     onValueChange = vm::setName,
-                    modifier      = Modifier.fillMaxWidth(),
+                    // Tagged for the end-to-end UI test: this screen has several text
+                    // fields, and matching this one by its label would be matching on a
+                    // user-visible Hebrew string that a copy change breaks silently.
+                    modifier      = Modifier.fillMaxWidth().testTag(AlarmEditTags.NAME_FIELD),
                     label         = { Text("שם השעמור") },
                     placeholder   = { Text("למשל: קום לעבודה") },
                     leadingIcon   = { Icon(Icons.AutoMirrored.Rounded.Label, null) },
