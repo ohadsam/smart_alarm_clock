@@ -1,5 +1,46 @@
 # SmartRing – Changelog
 
+## v1.6.9 (2026-09-15)
+
+**The launch crash, actually diagnosed.** v1.6.8 added Hilt keep rules on a plausible
+reading of an obfuscated stack and they did not fix anything — the release APK still
+died on launch. Printing the crash with `head` instead of `tail` (the v1.6.8 fix to the
+smoke test) finally showed the exception header the earlier dump had been discarding:
+
+```
+java.lang.IllegalStateException: CompositionLocal LocalLifecycleOwner not present
+    at p0.s.setOnViewTreeOwnersAvailable(Unknown Source:6)
+    at p0.s.onAttachedToWindow(Unknown Source:97)
+```
+
+Not Hilt at all. Two observations pin it down:
+
+- The trace *reaches* `setOnViewTreeOwnersAvailable`, so the ViewTree owners were found
+  — resource shrinking had not stripped the lifecycle id tag, and the host view was
+  wired correctly.
+- The instrumented suite launches the real `MainActivity` and renders `AlarmListScreen`
+  — which reads this very CompositionLocal through `collectAsStateWithLifecycle()` —
+  and passes. So lifecycle 2.8.2 and Compose UI 1.6.8 are compatible at runtime. The
+  difference between the two builds is R8, and nothing else.
+
+What breaks is the bridge between the two `LocalLifecycleOwner`s. lifecycle-runtime-
+compose 2.8.x declares its own `androidx.lifecycle.compose.LocalLifecycleOwner`, while
+Compose UI 1.6.8 (BOM 2024.06.00) only ever provides
+`androidx.compose.ui.platform.LocalLifecycleOwner`; 2.8.x reaches across to the
+compose-ui one *by name*, and a top-level `val` compiles into the facade class
+`AndroidCompositionLocals_AndroidKt`. R8 renames it, the bridge misses, and the
+lifecycle local falls through to its default — which throws. Every screen in this app
+reads it, so the app cannot draw a first frame.
+
+`androidx.compose.ui.platform.**`, `androidx.lifecycle.**` and anything implementing
+`LifecycleOwner` are now kept.
+
+**The honest caveat:** this diagnosis is read off the evidence above, not off a
+decompiled bridge — the AndroidX sources aren't reachable from this environment. The
+keep rules are deliberately broad enough to hold whichever name-based lookup inside
+those two packages is the one that was missing, and `scripts/release-smoke-test.sh`
+is what adjudicates it.
+
 ## v1.6.8 (2026-09-15)
 
 **The release APK crashed on launch, and had been doing so unnoticed.** The smoke test
@@ -12,23 +53,16 @@ The stack was fully obfuscated (`Q.a.invoke`, `I.s.b`, `p0.d0.a` — proof in it
 it came from the minified build) and died inside the first composition:
 `onAttachedToWindow` → `setOnViewTreeOwnersAvailable` → composition.
 
-**Cause.** Three things in this app are resolved by *name* at runtime, and R8 was free
-to rename all of them:
-
-- `@HiltViewModel` generates a multibinding keyed by the ViewModel's fully-qualified
-  class-name **string**, while `hiltViewModel()` looks it up with
-  `modelClass.getName()`. Rename the class and the two stop agreeing — the factory
-  throws during composition, which is exactly where this crashed. `MainActivity`'s
-  `setContent` calls `hiltViewModel<SettingsViewModel>()` to pick the theme, so this
-  fired on the very first frame.
-- `@EntryPoint` interfaces are fetched by `Class` — `EntryPointAccessors.fromApplication(
-  ctx, WidgetEntryPoint::class.java)` is how every widget reaches the repository and
-  the scheduler.
-- `@HiltWorker`'s generated assisted factories are reached through a map from worker
-  class name to factory; without them WorkManager can build no worker, so the boot
-  reschedule, the log cleanup and the widget refresh would all stop silently.
-
-All three now have keep rules.
+**A first guess that was wrong, stated plainly.** The stack was fully obfuscated
+(`Q.a.invoke`, `I.s.b`, `p0.d0.a` — proof in itself that it came from the minified
+build), and the first reading of it blamed Hilt: `@HiltViewModel` keys its multibinding
+on the ViewModel's fully-qualified class-name **string** while `hiltViewModel()` looks
+it up with `modelClass.getName()`, so R8 renaming the class breaks the lookup during
+composition. That is a real hazard and it now has keep rules — along with `@EntryPoint`
+interfaces (fetched by `Class`, which is how every widget reaches the repository) and
+`@HiltWorker`'s assisted factories (reached through a map from worker class name to
+factory, without which the boot reschedule, the log cleanup and the widget refresh all
+stop silently). But it was **not** this crash. See v1.6.9.
 
 **The check was also too weak to fail on it.** Android restarts a process that dies on
 launch, so `pidof` found the *replacement* (pid 2718, where the crash was in 2679) and

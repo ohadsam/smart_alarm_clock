@@ -49,3 +49,23 @@
 # class name to factory. Without them WorkManager can build no worker at all, so the
 # boot reschedule, the log cleanup and the widget refresh all stop silently.
 -keep @androidx.hilt.work.HiltWorker class * { <init>(...); }
+
+# ── The Compose ↔ Lifecycle CompositionLocal bridge ──────────────────────────
+# lifecycle-runtime-compose 2.8.x declares its own androidx.lifecycle.compose.
+# LocalLifecycleOwner, while compose-ui 1.6.8 (BOM 2024.06.00) only ever provides
+# androidx.compose.ui.platform.LocalLifecycleOwner. 2.8.x bridges the two by reaching
+# for the compose-ui one *by name* — the top-level val compiles into the facade class
+# AndroidCompositionLocals_AndroidKt, so R8 renaming it makes the bridge miss and the
+# lifecycle local falls through to its default, which throws
+#   java.lang.IllegalStateException: CompositionLocal LocalLifecycleOwner not present
+# on the very first composition. Every screen in this app reads it through
+# collectAsStateWithLifecycle(), so the app dies at launch.
+#
+# This is invisible to every other check here: the JVM suite never runs R8, and the
+# instrumented suite installs the *debug* APK, which isn't minified — so the emulator
+# happily renders MainActivity while the shipped APK cannot start at all. Only
+# scripts/release-smoke-test.sh, which launches the real release build, sees it.
+-keep class androidx.compose.ui.platform.** { *; }
+-keep class androidx.lifecycle.compose.** { *; }
+-keep class androidx.lifecycle.** { *; }
+-keepclassmembers class * implements androidx.lifecycle.LifecycleOwner { *; }
