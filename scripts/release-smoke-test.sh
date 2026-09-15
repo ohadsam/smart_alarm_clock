@@ -23,7 +23,10 @@ echo "── Building the release APK (minified + resource-shrunk) ──"
 ./gradlew assembleRelease --stacktrace --no-daemon
 
 echo "── Installing $APK ──"
-adb logcat -c
+# -b all: `logcat -c` alone does not reliably clear the crash buffer, and a stale
+# crash from the instrumented run that preceded this would be indistinguishable from
+# a real one.
+adb logcat -b all -c || true
 adb install -r "$APK"
 
 echo "── Launching $PKG/.MainActivity ──"
@@ -33,20 +36,27 @@ adb shell am start -W -n "$PKG/$PKG.MainActivity"
 # the first composition to have run and thrown, if they were going to.
 sleep 12
 
-PID="$(adb shell pidof "$PKG" | tr -d '[:space:]')"
-if [ -z "$PID" ]; then
-  echo "::error::The minified release APK is not running 12s after launch. R8 or resource shrinking has very likely stripped something needed at startup — add a keep rule to app/proguard-rules.pro based on the crash below."
-  echo "── crash buffer ──"
-  adb logcat -d -b crash | tail -200
-  echo "── last 200 lines mentioning $PKG ──"
-  adb logcat -d | grep -F "$PKG" | tail -200 || true
+# The crash buffer is the real check, not pidof. Android restarts a process that dies
+# on launch, so pidof finds the *replacement* and reports a healthy app — which is
+# exactly what happened the first time this script ran: the release APK crashed during
+# its first composition, the process came back with a new pid, and the run went green.
+#
+# "Process: com.smartring.app," with the trailing comma is deliberate: the debug build
+# installed by the instrumented suite is com.smartring.app.debug, and a substring match
+# would blame this on that.
+CRASH="$(adb logcat -d -b crash 2>/dev/null || true)"
+if printf '%s' "$CRASH" | grep -q "Process: $PKG,"; then
+  echo "::error::The minified release APK crashed on launch. R8 or resource shrinking has stripped something the app needs — add a keep rule to app/proguard-rules.pro based on the trace below."
+  echo "── crash buffer (head: the exception and its cause are at the TOP) ──"
+  printf '%s\n' "$CRASH" | head -120
   exit 1
 fi
 
-echo "Release APK is alive (pid $PID)."
+PID="$(adb shell pidof "$PKG" | tr -d '[:space:]')"
+if [ -z "$PID" ]; then
+  echo "::error::The minified release APK is not running 12s after launch, with nothing in the crash buffer — it may have been killed rather than have thrown."
+  adb logcat -d | grep -F "$PKG" | tail -120 || true
+  exit 1
+fi
 
-# Printed even on success: a caught-and-logged startup failure (a runCatching that
-# swallowed a missing class, say) leaves the process up but the app broken, and this is
-# the only place anyone would see it.
-echo "── crash buffer (expected to be empty) ──"
-adb logcat -d -b crash | tail -50 || true
+echo "Release APK launched, still alive (pid $PID), and nothing in the crash buffer."

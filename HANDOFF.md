@@ -93,6 +93,7 @@
 | 64 | Android Lint רץ ב-CI (שגיאות מפילות את הבילד, הדוח מודפס ללוג) | `lint {}` ב-`app/build.gradle.kts` + שלב ב-`build-apk.yml` (v1.6.7) |
 | 65 | בדיקת עשן ל-APK ה-release המוקטן (R8 + shrinkResources) על האמולטור | `build-apk.yml`, job `instrumented` (v1.6.7) |
 | 66 | קבועי הצבע הגולמיים private — מסכים חייבים לעבור דרך תפקידי הצבע | `presentation/theme/Theme.kt` (v1.6.7) |
+| 67 | כללי keep ל-R8 לכל מה ש-Hilt מאתר לפי שם (ViewModel/EntryPoint/Worker) | `app/proguard-rules.pro` (v1.6.8) |
 
 ---
 

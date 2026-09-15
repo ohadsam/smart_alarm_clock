@@ -844,6 +844,26 @@ If the user asks for a PR-based workflow going forward, follow that instead and 
   cycle to discover. Anything beyond a single command belongs in a checked-in script
   (`scripts/release-smoke-test.sh`) that the YAML calls in one line.
 
+- **Anything Hilt resolves by name must be kept from R8, and the debug build will never
+  tell you.** `@HiltViewModel` is keyed by the ViewModel's fully-qualified class-name
+  *string* while `hiltViewModel()` looks it up with `modelClass.getName()`; `@EntryPoint`
+  interfaces are fetched by `Class`; `@HiltWorker` factories live in a map keyed by
+  worker class name. R8 renames all three by default, and the result is a crash in the
+  first composition of the release APK while every test stays green. The keep rules are
+  in `app/proguard-rules.pro` — if a new `@HiltViewModel`, `@EntryPoint` or `@HiltWorker`
+  appears, the annotation-based rules already cover it; don't remove them.
+- **"The process is alive" is not "the app didn't crash".** Android restarts a process
+  that dies on launch, so a `pidof` check finds the replacement and reports health. The
+  first version of `scripts/release-smoke-test.sh` did exactly that and went green with
+  a fatal exception in the log. Check the crash buffer, match the package with a
+  trailing comma (`Process: com.smartring.app,`) so a `.debug` variant can't be blamed,
+  and clear it with `logcat -b all -c` first — plain `logcat -c` does not reliably clear
+  the crash buffer.
+- **Print a crash trace with `head`, not `tail`.** The exception type, its message and
+  the `Caused by` chain are at the *top*; `tail -50` keeps the framework frames, which
+  are the least useful part, and throws away the only lines that identify the bug. This
+  cost a round.
+
 ## Known limitations (don't re-report these as new findings unless you're the batch fixing them)
 
 - **Settings' English toggle doesn't change any visible UI text.** Every screen hardcodes Hebrew

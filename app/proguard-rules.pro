@@ -28,3 +28,24 @@
 # Hilt generated components
 -keep class hilt_aggregated_deps.** { *; }
 -keep class **_HiltComponents { *; }
+
+# ── Things Hilt resolves by *name* at runtime ────────────────────────────────
+# All three of these are looked up through a string or a Class at runtime, so
+# obfuscating them makes the lookup miss — and the failure is invisible to every test
+# here except the release smoke test, because the debug build isn't minified.
+
+# @HiltViewModel generates a multibinding keyed by the ViewModel's fully-qualified
+# class-name string, and hiltViewModel() resolves it with modelClass.getName(). Rename
+# the class and the two no longer agree: the factory throws during composition, which
+# is the crash scripts/release-smoke-test.sh caught on its first working run.
+-keep @dagger.hilt.android.lifecycle.HiltViewModel class * { <init>(...); }
+
+# @EntryPoint interfaces are fetched by Class — EntryPointAccessors.fromApplication(
+# ctx, WidgetEntryPoint::class.java) in SmartRingWidget, which is how every widget
+# reaches the repository and the scheduler.
+-keep @dagger.hilt.EntryPoint interface * { *; }
+
+# @HiltWorker's generated assisted factories, reached through Dagger's map from worker
+# class name to factory. Without them WorkManager can build no worker at all, so the
+# boot reschedule, the log cleanup and the widget refresh all stop silently.
+-keep @androidx.hilt.work.HiltWorker class * { <init>(...); }

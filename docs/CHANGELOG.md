@@ -1,5 +1,44 @@
 # SmartRing – Changelog
 
+## v1.6.8 (2026-09-15)
+
+**The release APK crashed on launch, and had been doing so unnoticed.** The smoke test
+added in v1.6.7 found it on its first working run — which is the entire reason that
+test exists, and it is hard to overstate how invisible this was: every unit test, every
+instrumented test and both APK builds were green, because the instrumented suite runs
+the *debug* build and debug isn't minified.
+
+The stack was fully obfuscated (`Q.a.invoke`, `I.s.b`, `p0.d0.a` — proof in itself that
+it came from the minified build) and died inside the first composition:
+`onAttachedToWindow` → `setOnViewTreeOwnersAvailable` → composition.
+
+**Cause.** Three things in this app are resolved by *name* at runtime, and R8 was free
+to rename all of them:
+
+- `@HiltViewModel` generates a multibinding keyed by the ViewModel's fully-qualified
+  class-name **string**, while `hiltViewModel()` looks it up with
+  `modelClass.getName()`. Rename the class and the two stop agreeing — the factory
+  throws during composition, which is exactly where this crashed. `MainActivity`'s
+  `setContent` calls `hiltViewModel<SettingsViewModel>()` to pick the theme, so this
+  fired on the very first frame.
+- `@EntryPoint` interfaces are fetched by `Class` — `EntryPointAccessors.fromApplication(
+  ctx, WidgetEntryPoint::class.java)` is how every widget reaches the repository and
+  the scheduler.
+- `@HiltWorker`'s generated assisted factories are reached through a map from worker
+  class name to factory; without them WorkManager can build no worker, so the boot
+  reschedule, the log cleanup and the widget refresh would all stop silently.
+
+All three now have keep rules.
+
+**The check was also too weak to fail on it.** Android restarts a process that dies on
+launch, so `pidof` found the *replacement* (pid 2718, where the crash was in 2679) and
+the run went green with a fatal exception sitting in the log. The smoke test now treats
+the crash buffer as the real signal — failing on `Process: com.smartring.app,` (with
+the comma, so the instrumented suite's `com.smartring.app.debug` can't be blamed for
+it) — clears that buffer with `-b all` beforehand, and prints the crash with `head`
+rather than `tail`, because the exception and its cause are at the *top* of a stack
+trace and the first version threw exactly that part away.
+
 ## v1.6.7 (2026-09-15)
 
 This round went looking in places seven previous rounds hadn't opened at all: the
