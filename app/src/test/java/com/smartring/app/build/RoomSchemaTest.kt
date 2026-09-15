@@ -1,6 +1,5 @@
 package com.smartring.app.build
 
-import androidx.room.Database
 import com.smartring.app.data.db.AppDatabase
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -31,8 +30,21 @@ class RoomSchemaTest {
             ?: error("schemas/ not found from ${File(".").absolutePath}")
     }
 
-    private val declaredVersion: Int
-        get() = AppDatabase::class.java.getAnnotation(Database::class.java)!!.version
+    /**
+     * Read out of the source rather than off the class.
+     * `androidx.room.Database` is declared with BINARY retention, so it is not present
+     * at runtime and `getAnnotation()` returns null — reflection here would fail for a
+     * reason that has nothing to do with what this test is checking.
+     */
+    private val declaredVersion: Int by lazy {
+        val src = listOf(
+            File("src/main/java/com/smartring/app/data/db/AppDatabase.kt"),
+            File("app/src/main/java/com/smartring/app/data/db/AppDatabase.kt"),
+        ).firstOrNull { it.isFile }
+            ?: error("AppDatabase.kt not found from ${File(".").absolutePath}")
+        Regex("""version\s*=\s*(\d+)""").find(src.readText())?.groupValues?.get(1)?.toInt()
+            ?: error("no `version = N` found in ${src.path}")
+    }
 
     @Test
     fun `a schema is committed for the database version the code declares`() {
