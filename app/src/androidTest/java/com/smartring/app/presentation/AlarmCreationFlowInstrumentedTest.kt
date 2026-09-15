@@ -66,8 +66,21 @@ class AlarmCreationFlowInstrumentedTest {
     @After
     fun tearDown() = clearAlarms()
 
+    /**
+     * Cancels before deleting, exactly as the production delete path does.
+     *
+     * Deleting the row alone is not enough and the difference is not local to this
+     * class: saving an alarm arms a real AlarmManager registration, and
+     * AlarmManager.getNextAlarmClock() is a *user-wide* property — one alarm left armed
+     * here is visible to every other test on the device. That is what this test broke
+     * the first time it ran: AlarmSchedulerInstrumentedTest asserts that cancel()
+     * leaves no alarm clock registered, and found this test's leftover instead.
+     */
     private fun clearAlarms() = runBlocking {
-        repository.observeAlarms().first().forEach { repository.deleteAlarm(it.id) }
+        repository.observeAlarms().first().forEach {
+            scheduler.cancel(it.id)
+            repository.deleteAlarm(it.id)
+        }
     }
 
     /**

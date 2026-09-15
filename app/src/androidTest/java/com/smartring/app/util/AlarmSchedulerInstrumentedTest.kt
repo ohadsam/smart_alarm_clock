@@ -9,6 +9,7 @@ import com.smartring.app.domain.model.RepeatFrequency
 import java.util.Calendar
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -82,11 +83,22 @@ class AlarmSchedulerInstrumentedTest {
     fun cancelRemovesTheRegisteredAlarmClock() {
         val alarm = dailyAlarmTwelveHoursOut(id = 102, name = "Cancel me")
         scheduler.schedule(alarm)
-        assertNotNull(alarmManager.nextAlarmClock)
+        val armed = alarmManager.nextAlarmClock
+        assertNotNull("schedule() must register an alarm clock before cancel can clear it", armed)
 
         scheduler.cancel(alarm.id)
 
-        assertNull("cancel() must clear the registration", alarmManager.nextAlarmClock)
+        // Asserting `nextAlarmClock == null` would be asserting that *no app on this
+        // device* has an alarm clock set: getNextAlarmClock() is a user-wide property,
+        // not this app's registration. It held only for as long as nothing else on the
+        // emulator ever armed one, and the moment another test in this suite created an
+        // alarm through the UI, this test failed for a reason that had nothing to do
+        // with cancel(). Comparing trigger times keeps the assertion about this alarm.
+        assertNotEquals(
+            "cancel() must clear this alarm's registration",
+            armed!!.triggerTime,
+            alarmManager.nextAlarmClock?.triggerTime,
+        )
     }
 
     @Test
