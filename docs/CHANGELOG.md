@@ -1,5 +1,59 @@
 # SmartRing – Changelog
 
+## v1.6.12 (2026-09-16)
+
+### Warning about another app's alarm — and what could not be built
+
+The request was a toggle that suspends alarms set in other apps (the stock Clock, say)
+for as long as an alarm here is active — for Shabbat and holidays, when the weekday alarm
+would otherwise go off.
+
+**That half cannot be built, on any Android version.** An alarm is a `PendingIntent` owned
+by the UID that created it; nothing outside that UID can cancel, pause or mute it. There is
+no permission that unlocks it and no OEM that allows it. This is a deliberate boundary
+rather than a missing API — an app able to silence a stranger's wake-up alarm would be a
+weapon — and every alarm clock on the Play Store lives behind the same wall.
+
+The second option in the request, an indication, **is** buildable and is what shipped.
+`AlarmManager.getNextAlarmClock()` is device-wide rather than per-app: it returns the next
+`setAlarmClock` registration for the whole user, whoever made it, and that registration's
+`showIntent` carries its creator's package. That turns "an alarm exists" into "Clock has an
+alarm at 06:30" — enough to warn with, and to deep-link into the app that owns it.
+
+Off by default (Settings → "שעמורים מאפליקציות אחרות"), because it is a niche need and an
+app that comments on other apps' alarms uninvited is being nosy.
+
+**The limitation, stated rather than buried.** The OS reports only the *next* alarm clock.
+When this app's own alarm is sooner, that is the one reported and a later foreign alarm is
+invisible here. So the warning covers a foreign alarm that would ring **before** ours and
+stays silent about one scheduled after it. That happens to be the case worth warning about
+— an alarm going off ahead of the Shabbat alarm is the one that wakes you — but it is
+coverage, not completeness, and neither the UI nor the setting's description claims
+otherwise.
+
+The banner also only appears while at least one alarm here is actually armed: it says the
+other alarm rings *before ours*, and with everything here disabled there is no "ours" for
+it to come before.
+
+`ForeignAlarmsTest` covers the wording as well as the logic, including a test that the
+sentence "אנדרואיד לא מאפשר לאפליקציה אחת לכבות שעמור של אפליקציה אחרת" is always present
+and that the text never promises action. That is the feature's real risk: a user who
+believes their other alarm has been switched off will sleep through the alarm they were
+trying to avoid — the exact failure this is meant to prevent.
+
+### The v1.6.11 emulator failure
+
+All three API levels went red with no JUnit XML at all. The cause was in the new
+instrumented test, not the app: its method name was a backticked sentence with spaces.
+That is fine for the JVM suite and fine in Kotlin, but instrumented tests are dexed, and
+D8 rejects spaces in method names below API 30 — minSdk here is 26. Every other class in
+`androidTest` already used camelCase; this one broke the convention and the build with it.
+
+The diagnostics could not show that: with no XML, the report dump had nothing to print, and
+the reason existed only in Gradle's own output, 150 lines back from the end of the job. The
+final `if: failure()` step now also prints the tail of the Gradle log that
+`scripts/instrumented-test.sh` saves, specifically for the case where no test ever reported.
+
 ## v1.6.11 (2026-09-16)
 
 A UI round driven by a screenshot of the edit screen. Three defects were visible in it,

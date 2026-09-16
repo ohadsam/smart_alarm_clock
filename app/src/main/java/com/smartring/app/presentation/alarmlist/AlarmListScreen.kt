@@ -28,7 +28,14 @@ import com.smartring.app.domain.model.Alarm
 import com.smartring.app.presentation.theme.*
 import com.smartring.app.presentation.whatsnew.WhatsNewDialog
 import com.smartring.app.presentation.whatsnew.WhatsNewViewModel
+import com.smartring.app.presentation.settings.SettingsViewModel
+import com.smartring.app.util.ForeignAlarm
+import com.smartring.app.util.ForeignAlarms
 import com.smartring.app.util.ReliabilityChecks
+import com.smartring.app.util.foreignAlarmWarning
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -36,6 +43,11 @@ fun AlarmListScreen(onAddAlarm: ()->Unit, onEditAlarm: (Long)->Unit, onOpenHisto
     vm: AlarmListViewModel = hiltViewModel()) {
     val state by vm.uiState.collectAsStateWithLifecycle()
     var showControls by remember { mutableStateOf(false) }
+
+    // Only meaningful while this app actually has something armed: the warning says the
+    // other alarm rings *before ours*, and with every alarm here disabled there is no
+    // "ours" for it to come before.
+    val foreignAlarm = rememberForeignAlarm(enabled = state.alarms.any { it.isActive })
 
     val whatsNewVm: WhatsNewViewModel = hiltViewModel()
     val whatsNewState by whatsNewVm.state.collectAsStateWithLifecycle()
@@ -80,6 +92,11 @@ fun AlarmListScreen(onAddAlarm: ()->Unit, onEditAlarm: (Long)->Unit, onOpenHisto
         } else {
             LazyColumn(Modifier.padding(pad),contentPadding=PaddingValues(16.dp,8.dp,16.dp,96.dp),
                 verticalArrangement=Arrangement.spacedBy(10.dp)) {
+                // Above the alarms, because it is about to ring before all of them.
+                // Added conditionally rather than letting the banner render nothing: an
+                // empty item still takes a slot, and this list is spacedBy(10.dp), so an
+                // invisible banner would leave a visible gap at the top.
+                if (foreignAlarm != null) item { ForeignAlarmBanner(foreignAlarm) }
                 items(state.alarms,key={it.id}) { alarm ->
                     AlarmCardItem(alarm,{vm.toggle(alarm,it)},{onEditAlarm(alarm.id)},{vm.delete(alarm)})
                 }
@@ -230,6 +247,98 @@ private fun AlarmCardItem(alarm: Alarm, onToggle:(Boolean)->Unit, onEdit:()->Uni
  * Settings screen (which has the real per-item fix buttons) rather than duplicating
  * that Intent-construction logic here.
  */
+
+/**
+ * Re-reads the device's next foreign alarm on every resume, or null when there is none.
+ *
+ * Opt-in (Settings → "שעמורים מאפליקציות אחרות", off by default) because it is a niche
+ * need — the Shabbat and holiday case, where someone's weekday alarm from the stock Clock
+ * would go off regardless of what is set here — and an app that comments on other apps'
+ * alarms uninvited is being nosy.
+ *
+ * ON_RESUME rather than once: the entire user journey is a trip to the other app and
+ * back, and a banner still naming an alarm the user has just cancelled would be worse
+ * than no banner at all.
+ */
+@Composable
+private fun rememberForeignAlarm(
+    enabled: Boolean,
+    settingsVm: SettingsViewModel = hiltViewModel(),
+): ForeignAlarm? {
+    val settings by settingsVm.state.collectAsStateWithLifecycle()
+    val on = enabled && settings.warnForeignAlarms
+
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var found by remember { mutableStateOf<ForeignAlarm?>(null) }
+
+    DisposableEffect(lifecycleOwner, on) {
+        if (!on) {
+            // Clear rather than leave the last reading behind: switching the setting off
+            // has to remove the banner immediately, not at the next resume.
+            found = null
+            onDispose { }
+        } else {
+            found = ForeignAlarms.next(context)
+            val observer = LifecycleEventObserver { _, event ->
+                if (event == Lifecycle.Event.ON_RESUME) found = ForeignAlarms.next(context)
+            }
+            lifecycleOwner.lifecycle.addObserver(observer)
+            onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+        }
+    }
+    // The alarm is filtered through the same pure check that produces the text, so a
+    // stale registration (one already in the past) never reaches the banner.
+    return found?.takeIf { foreignAlarmWarning(it) != null }
+}
+
+/**
+ * The banner itself.
+ *
+ * The wording never promises to switch the other alarm off, because this app cannot: an
+ * alarm belongs to the UID that created it and Android has no API for reaching across.
+ * See [ForeignAlarms]. The one action offered is to open the other app, where the user
+ * can turn it off themselves.
+ */
+@Composable
+private fun ForeignAlarmBanner(alarm: ForeignAlarm) {
+    val context = LocalContext.current
+    val text = foreignAlarmWarning(alarm) ?: return
+
+    Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.error.copy(alpha = 0.10f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.35f)),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(Modifier.padding(14.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Rounded.Warning, null, Modifier.size(18.dp),
+                    tint = MaterialTheme.colorScheme.error)
+                Spacer(Modifier.width(8.dp))
+                Text("שעמור מאפליקציה אחרת",
+                    Modifier.weight(1f),
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.error)
+            }
+            Spacer(Modifier.height(6.dp))
+            Text(text, style = MaterialTheme.typography.bodySmall)
+            val launch = remember(alarm.packageName) {
+                // Null for an app with no launcher activity — nothing to open, so the
+                // button is not offered rather than offered and doing nothing.
+                context.packageManager.getLaunchIntentForPackage(alarm.packageName)
+            }
+            if (launch != null) {
+                Spacer(Modifier.height(4.dp))
+                TextButton({ runCatching { context.startActivity(launch) } }) {
+                    Text("פתח את ${alarm.appLabel}")
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun ReliabilityGate(onOpenSettings: () -> Unit) {
     val context = LocalContext.current

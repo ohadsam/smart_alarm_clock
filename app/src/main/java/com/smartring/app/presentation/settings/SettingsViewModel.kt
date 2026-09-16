@@ -13,12 +13,22 @@ import java.io.IOException
 import javax.inject.Inject
 
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore("settings")
-data class SettingsUiState(val language: String = "he", val themeMode: String = "auto")
+data class SettingsUiState(
+    val language: String = "he",
+    val themeMode: String = "auto",
+    /**
+     * Whether to warn when another app has an alarm set that will ring before ours.
+     * Off by default: it is a niche need (the Shabbat / holiday case), and an app that
+     * starts commenting on other apps' alarms uninvited is being nosy.
+     */
+    val warnForeignAlarms: Boolean = false,
+)
 
 @HiltViewModel
 class SettingsViewModel @Inject constructor(@ApplicationContext private val ctx: Context) : ViewModel() {
     private val kLang  = stringPreferencesKey("language")
     private val kTheme = stringPreferencesKey("theme_mode")
+    private val kWarnForeign = booleanPreferencesKey("warn_foreign_alarms")
 
     // catch{} is not optional on a DataStore flow: it surfaces read failures (a
     // corrupted or unreadable preferences file) by throwing into the collector, and
@@ -28,13 +38,14 @@ class SettingsViewModel @Inject constructor(@ApplicationContext private val ctx:
     // documented recovery.
     val state = ctx.dataStore.data
         .catch { e -> if (e is IOException) emit(emptyPreferences()) else throw e }
-        .map { SettingsUiState(it[kLang] ?: "he", it[kTheme] ?: "auto") }
+        .map { SettingsUiState(it[kLang] ?: "he", it[kTheme] ?: "auto", it[kWarnForeign] ?: false) }
         .stateIn(viewModelScope, SharingStarted.Eagerly, SettingsUiState())
 
     // Writes can fail the same way; a preference that didn't stick is not worth
     // crashing over.
     fun setLanguage(v: String) = edit { it[kLang] = v }
     fun setThemeMode(v: String) = edit { it[kTheme] = v }
+    fun setWarnForeignAlarms(v: Boolean) = edit { it[kWarnForeign] = v }
 
     private fun edit(block: suspend (MutablePreferences) -> Unit) = viewModelScope.launch {
         runCatching { ctx.dataStore.edit(block) }

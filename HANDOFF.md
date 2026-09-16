@@ -106,6 +106,8 @@
 | 77 | הזנת משך זמן בשני שדות (דקות/שניות) עם תצוגה מקדימה, וולידציה וגלישה אוטומטית | `util/DurationInput.kt` + `DurationInputDialog` (v1.6.11) |
 | 78 | כל שורת תווית+פקד מקבלת `weight(1f)` — מתג לא נצבע על הטקסט שלצידו | `AlarmEditScreen`/`HistoryScreen`/`LogsScreen`/`AlarmRingScreen` (v1.6.11) |
 | 79 | כפתורי התאריך והשעה ברוחב מלא; שעה עם `softWrap = false` ולא נשברת לשורות | `DateTimePickerInline` (v1.6.11) |
+| 80 | התרעה על שעמור מאפליקציה אחרת (כבוי כברירת מחדל) — זיהוי בלבד, כיבוי בלתי אפשרי ב-Android | `util/ForeignAlarms.kt` + `ForeignAlarmBanner` (v1.6.12) |
+| 81 | שמות מתודות ב-androidTest חייבים להיות camelCase — D8 פוסל רווחים מתחת ל-API 30 | `DurationInputInstrumentedTest` (v1.6.12) |
 
 ---
 

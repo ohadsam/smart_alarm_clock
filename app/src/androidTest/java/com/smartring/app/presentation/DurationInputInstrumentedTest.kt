@@ -73,7 +73,11 @@ class DurationInputInstrumentedTest {
     }
 
     @Test
-    fun `typing 120 seconds is stored as two minutes`() {
+    // camelCase, not a backticked sentence. Backticked names with spaces are fine for
+    // the JVM suite but these are dexed: D8 rejects spaces in method names below API 30,
+    // and minSdk here is 26. It fails at compile time with no JUnit XML produced at all,
+    // which is why the first run of this test reported nothing to look at.
+    fun typing120SecondsIsStoredAsTwoMinutes() {
         composeRule.onNodeWithContentDescription("הוסף שעמור").performClick()
         composeRule.waitForIdle()
 

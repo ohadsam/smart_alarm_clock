@@ -35,7 +35,17 @@ fun formatCountdownUntil(targetMillis: Long, nowMillis: Long = System.currentTim
  * 31st of December no date was ever "מחר", because the 1st of January is day 1, not
  * day 366.
  */
-fun formatNextFireAt(targetMillis: Long, nowMillis: Long = System.currentTimeMillis()): String {
+fun formatNextFireAt(targetMillis: Long, nowMillis: Long = System.currentTimeMillis()): String =
+    "הצלצול הבא: " + formatDayAndTime(targetMillis, nowMillis)
+
+/**
+ * "היום בשעה 07:00", "מחר בשעה 07:00", or "17/09/2026 בשעה 07:00".
+ *
+ * Split out of [formatNextFireAt] so the foreign-alarm warning can describe *someone
+ * else's* alarm in the same words this app uses for its own — the point of that warning
+ * is that the two are directly comparable.
+ */
+fun formatDayAndTime(targetMillis: Long, nowMillis: Long = System.currentTimeMillis()): String {
     val target = Calendar.getInstance().apply { timeInMillis = targetMillis }
     val today = Calendar.getInstance().apply { timeInMillis = nowMillis }
     val tomorrow = Calendar.getInstance().apply { timeInMillis = nowMillis; add(Calendar.DAY_OF_YEAR, 1) }
@@ -45,7 +55,7 @@ fun formatNextFireAt(targetMillis: Long, nowMillis: Long = System.currentTimeMil
         else -> "%02d/%02d/%04d".format(
             target.get(Calendar.DAY_OF_MONTH), target.get(Calendar.MONTH) + 1, target.get(Calendar.YEAR))
     }
-    return "הצלצול הבא: $dateStr בשעה %02d:%02d".format(
+    return "$dateStr בשעה %02d:%02d".format(
         target.get(Calendar.HOUR_OF_DAY), target.get(Calendar.MINUTE))
 }
 

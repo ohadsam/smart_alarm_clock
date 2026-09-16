@@ -241,4 +241,15 @@ jobs:
           echo "── failures and errors ──"
           grep -rhE -A 25 "<(failure|error)[ >]" \
             app/build/outputs/androidTest-results --include='*.xml' 2>/dev/null \
-            | head -150 || echo "(no androidTest-results XML — the run died before any test reported)"
+            | head -150 || true
+          # When no XML exists at all the run died before any test reported — a compile
+          # or dex failure in an androidTest source. The reason is only in Gradle's own
+          # output, which scripts/instrumented-test.sh saved; print its tail here,
+          # because this step is the last thing in the job and a job's tail is the only
+          # part retrievable from the environment these changes are authored in.
+          if [ ! -d app/build/outputs/androidTest-results ]; then
+            echo "(no androidTest-results — the run died before any test reported)"
+            echo "── gradle output (tail) ──"
+            tail -60 "${RUNNER_TEMP:-/tmp}/instrumented-test.log" 2>/dev/null \
+              || echo "(no gradle log captured)"
+          fi

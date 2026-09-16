@@ -76,6 +76,28 @@ fun SettingsScreen(onBack: () -> Unit, onOpenLogs: () -> Unit = {}, vm: Settings
                 HorizontalDivider(Modifier.padding(horizontal = 16.dp))
                 RadioRow("בהיר",               "light", s.themeMode) { vm.setThemeMode("light") }
             }
+            SettingsGroup("שעמורים מאפליקציות אחרות") {
+                ListItem(
+                    headlineContent   = { Text("התרע על שעמור מאפליקציה אחרת", fontWeight = FontWeight.Medium) },
+                    supportingContent = {
+                        // Says what it does and what it cannot do, in the same breath.
+                        // Promising to "disable" the other alarm would be a promise no
+                        // Android app can keep — see util/ForeignAlarms.kt — and a user
+                        // who believed it would sleep through the alarm they meant to
+                        // avoid. Which is the exact failure this setting exists to prevent.
+                        Text(
+                            "מציג התרעה במסך הראשי כאשר מוגדר שעמור באפליקציה אחרת " +
+                            "(למשל שעון המערכת) שיצלצל לפני השעמור הקרוב של SmartRing — " +
+                            "שימושי לשבת ולחג. אנדרואיד לא מאפשר לאפליקציה לכבות שעמור " +
+                            "של אפליקציה אחרת, ולכן זו התרעה בלבד והכיבוי נעשה שם."
+                        )
+                    },
+                    leadingContent    = { Icon(Icons.Rounded.NotificationsActive, null) },
+                    trailingContent   = {
+                        Switch(s.warnForeignAlarms, onCheckedChange = vm::setWarnForeignAlarms)
+                    },
+                )
+            }
             SettingsGroup("אבחון") {
                 ListItem(
                     headlineContent   = { Text("לוגים", fontWeight = FontWeight.Medium) },
