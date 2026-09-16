@@ -86,8 +86,10 @@ class DurationInputInstrumentedTest {
             .performScrollToNode(hasText("משך צלצול"))
         composeRule.waitForIdle()
 
-        // The badge beside the label is the entry point; its text is the formatted value.
-        composeRule.onNodeWithText("1 דק׳").performClick()
+        // By tag, not by text: several sliders here legitimately read "1 דק׳" at their
+        // defaults (ring duration, snooze length, per-round duration), so matching on the
+        // text finds three nodes and the click fails with "more than one node matched".
+        composeRule.onNodeWithTag(AlarmEditTags.RING_DURATION_BADGE).performClick()
         composeRule.waitForIdle()
 
         composeRule.onNodeWithTag(AlarmEditTags.DURATION_MINUTES).performTextClearance()

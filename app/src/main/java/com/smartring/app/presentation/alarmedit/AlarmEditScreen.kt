@@ -59,6 +59,12 @@ object AlarmEditTags {
     const val FORM_LIST        = "alarm_edit_form_list"
     const val DURATION_MINUTES = "duration_input_minutes"
     const val DURATION_SECONDS = "duration_input_seconds"
+    /**
+     * The ring-duration badge. Tagged because its *text* is not unique: several sliders
+     * on this screen legitimately read "1 דק׳" at their defaults (ring duration, snooze
+     * length, per-round duration), so matching by text finds three nodes and fails.
+     */
+    const val RING_DURATION_BADGE = "ring_duration_badge"
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -364,7 +370,9 @@ fun AlarmEditScreen(
                 EditCard {
                     LabeledSlider("משך צלצול", s.ringDurationSeconds, "שנ׳", 5f, 600f, 118, MaterialTheme.colorScheme.primary,
                         info = "כמה זמן השעמור ימשיך לצלצול לפני שהוא נעצר אוטומטית, אם לא תעצור אותו ידנית.",
-                        formatter = ::formatDurationSeconds, durationInput = true, onChange = vm::setRingDuration)
+                        formatter = ::formatDurationSeconds, durationInput = true,
+                        badgeTestTag = AlarmEditTags.RING_DURATION_BADGE,
+                        onChange = vm::setRingDuration)
                 }
             }
 
@@ -932,6 +940,7 @@ fun EditCard(content: @Composable ColumnScope.() -> Unit) = Surface(
 fun EditableValueBadge(
     value: Int, unit: String, color: androidx.compose.ui.graphics.Color,
     min: Int, max: Int, onChange: (Int) -> Unit,
+    modifier: Modifier = Modifier,
     displayText: String = "$value $unit",
     /**
      * Whether [value] is a number of seconds, and should therefore be typed as minutes +
@@ -944,6 +953,7 @@ fun EditableValueBadge(
     var showDialog by remember { mutableStateOf(false) }
     Surface(
         onClick = { showDialog = true },
+        modifier = modifier,
         shape = RoundedCornerShape(999.dp), color = color.copy(.12f),
         border = BorderStroke(1.dp, color.copy(.3f)),
     ) {
@@ -1127,6 +1137,7 @@ fun LabeledSlider(
     info: String? = null,
     formatter: (Int) -> String = { "$it $unit" },
     durationInput: Boolean = false,
+    badgeTestTag: String? = null,
     onChange: (Int) -> Unit,
 ) {
     Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {
@@ -1136,6 +1147,7 @@ fun LabeledSlider(
         // a phone-width card at the default font scale, never mind a larger one.
         FieldLabel(label, info, Modifier.weight(1f).padding(end = 8.dp))
         EditableValueBadge(value, unit, color, min.toInt(), max.toInt(), onChange,
+            modifier = if (badgeTestTag != null) Modifier.testTag(badgeTestTag) else Modifier,
             displayText = formatter(value), durationInput = durationInput)
     }
     // Math.round, not toInt(): toInt() truncates, so any step position that doesn't
