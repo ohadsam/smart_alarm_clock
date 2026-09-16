@@ -4,9 +4,12 @@ import android.app.AlarmManager
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.smartring.app.data.repository.AlarmRepository
 import com.smartring.app.domain.model.Alarm
 import com.smartring.app.domain.model.RepeatFrequency
 import java.util.Calendar
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
@@ -39,6 +42,7 @@ class AlarmSchedulerInstrumentedTest {
     @get:Rule val hiltRule = HiltAndroidRule(this)
 
     @Inject lateinit var scheduler: AlarmScheduler
+    @Inject lateinit var repository: AlarmRepository
 
     private lateinit var context: Context
     private lateinit var alarmManager: AlarmManager
@@ -54,14 +58,29 @@ class AlarmSchedulerInstrumentedTest {
     @After
     fun tearDown() = clearAlarms()
 
+    /**
+     * Clears this class's own ids *and* every alarm the app has stored.
+     *
+     * The second half matters because getNextAlarmClock() is device-wide. A UI test
+     * elsewhere in this suite creates an alarm at the app's default 07:00, and on a run
+     * starting in the evening that is sooner than anything armed here — so the OS
+     * reported *that* alarm and these tests compared trigger times against an alarm they
+     * never armed. Cancelling by id alone cannot catch it: the id is assigned by Room,
+     * not chosen here.
+     */
     private fun clearAlarms() {
-        // Ids used by the tests below; cancel() is a no-op for anything not armed.
         listOf(101L, 102L, 103L).forEach { scheduler.cancel(it) }
+        runBlocking {
+            repository.observeAlarms().first().forEach {
+                scheduler.cancel(it.id)
+                repository.deleteAlarm(it.id)
+            }
+        }
     }
 
     @Test
     fun scheduleRegistersARealAlarmClockWithTheSystem() {
-        val alarm = dailyAlarmTwelveHoursOut(id = 101, name = "Instrumented")
+        val alarm = dailyAlarmMinutesOut(id = 101, name = "Instrumented")
             .copy(repeatFrequency = RepeatFrequency.WEEKLY)
 
         scheduler.schedule(alarm)
@@ -81,29 +100,33 @@ class AlarmSchedulerInstrumentedTest {
 
     @Test
     fun cancelRemovesTheRegisteredAlarmClock() {
-        val alarm = dailyAlarmTwelveHoursOut(id = 102, name = "Cancel me")
+        val alarm = dailyAlarmMinutesOut(id = 102, name = "Cancel me")
+        val ourTrigger = scheduler.nextFireTime(alarm)
+        assertNotNull("the test alarm must resolve to a fire time", ourTrigger)
+
         scheduler.schedule(alarm)
-        val armed = alarmManager.nextAlarmClock
-        assertNotNull("schedule() must register an alarm clock before cancel can clear it", armed)
+        assertEquals(
+            "schedule() must register this alarm before cancel can clear it",
+            ourTrigger, alarmManager.nextAlarmClock?.triggerTime,
+        )
 
         scheduler.cancel(alarm.id)
 
-        // Asserting `nextAlarmClock == null` would be asserting that *no app on this
-        // device* has an alarm clock set: getNextAlarmClock() is a user-wide property,
-        // not this app's registration. It held only for as long as nothing else on the
-        // emulator ever armed one, and the moment another test in this suite created an
-        // alarm through the UI, this test failed for a reason that had nothing to do
-        // with cancel(). Comparing trigger times keeps the assertion about this alarm.
+        // Compared against the time *we* computed, not against whatever the OS reported
+        // a moment ago. getNextAlarmClock() is device-wide, so `armed` could have been
+        // some other app's alarm entirely — and then this would assert that cancel()
+        // removed a registration it never made. Asserting `== null` is worse still: that
+        // claims no app on the device has any alarm set.
         assertNotEquals(
             "cancel() must clear this alarm's registration",
-            armed!!.triggerTime,
+            ourTrigger,
             alarmManager.nextAlarmClock?.triggerTime,
         )
     }
 
     @Test
     fun snoozeIsArmedAndVisibleAsThePendingDeadline() {
-        val alarm = dailyAlarmTwelveHoursOut(id = 103, name = "Snoozed")
+        val alarm = dailyAlarmMinutesOut(id = 103, name = "Snoozed")
         val snoozeAt = System.currentTimeMillis() + 5 * 60_000L
 
         scheduler.scheduleAt(alarm, snoozeAt)
@@ -123,19 +146,32 @@ class AlarmSchedulerInstrumentedTest {
      * snooze deadlines below, and one due *right now* can recompute differently
      * between two calls a millisecond apart.
      */
-    private fun dailyAlarmTwelveHoursOut(id: Long, name: String): Alarm {
-        val inTwelveHours = Calendar.getInstance().apply { add(Calendar.HOUR_OF_DAY, 12) }
+    /**
+     * A daily alarm [minutesOut] from now.
+     *
+     * Deliberately minutes rather than the twelve hours this used to use. The OS reports
+     * a single, device-wide next alarm clock, so a test that reads it can only be talking
+     * about its own alarm when its own alarm is the soonest one on the device. Twelve
+     * hours out lost that race to an ordinary 07:00 alarm; ten minutes does not lose it
+     * to anything this suite creates, now that [clearAlarms] also deletes stored alarms.
+     *
+     * Ten and not two: an alarm that actually fires mid-suite would launch the ring
+     * screen over the next test. Each @After cancels within milliseconds of arming, so
+     * the window is already tiny — this just keeps it impossible rather than unlikely.
+     */
+    private fun dailyAlarmMinutesOut(id: Long, name: String, minutesOut: Int = 10): Alarm {
+        val target = Calendar.getInstance().apply { add(Calendar.MINUTE, minutesOut) }
         return Alarm(
             id = id, name = name,
-            hour = inTwelveHours.get(Calendar.HOUR_OF_DAY),
-            minute = inTwelveHours.get(Calendar.MINUTE),
+            hour = target.get(Calendar.HOUR_OF_DAY),
+            minute = target.get(Calendar.MINUTE),
             repeatDaysBitmask = 0b1111111,
         )
     }
 
     @Test
     fun aRebootRescheduleKeepsAnInFlightSnooze() {
-        val alarm = dailyAlarmTwelveHoursOut(id = 103, name = "Snoozed")
+        val alarm = dailyAlarmMinutesOut(id = 103, name = "Snoozed")
         val snoozeAt = System.currentTimeMillis() + 5 * 60_000L
         scheduler.scheduleAt(alarm, snoozeAt)
 
