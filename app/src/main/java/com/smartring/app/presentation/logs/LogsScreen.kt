@@ -19,6 +19,7 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -171,7 +172,11 @@ private fun LogRow(log: AppLogEntry) {
     ) {
         Column(Modifier.padding(10.dp, 8.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(log.tag, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold,
+                // The tag is free text supplied by whatever logged the line, so it has no
+                // bounded length — it has to yield rather than push the timestamp out.
+                Text(log.tag, Modifier.weight(1f).padding(end = 8.dp),
+                    style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis,
                     color = MaterialTheme.colorScheme.primary)
                 Text(rowFmt.format(Date(log.timestamp)), style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)

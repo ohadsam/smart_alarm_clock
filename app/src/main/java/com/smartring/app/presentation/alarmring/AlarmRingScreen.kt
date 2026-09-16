@@ -128,7 +128,10 @@ fun AlarmRingScreen(alarmId: Long, onDismiss: () -> Unit,
                     border = BorderStroke(1.dp, accent.copy(.2f)), modifier = Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(12.dp)) {
                         Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
+                            // The label grows with the round counter ("· סבב 3/10"), so it
+                            // has to yield to the percentage rather than push it off.
+                            Row(Modifier.weight(1f).padding(end = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically) {
                                 Icon(Icons.AutoMirrored.Rounded.TrendingUp, null, Modifier.size(14.dp), tint = accent)
                                 Spacer(Modifier.width(6.dp))
                                 Text("צלצול מתחזק$roundLabel", style = MaterialTheme.typography.labelMedium,

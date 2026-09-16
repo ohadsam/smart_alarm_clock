@@ -27,8 +27,11 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.*
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.core.content.ContextCompat
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.*
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -36,6 +39,11 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.smartring.app.domain.model.*
 import com.smartring.app.presentation.theme.*
 import com.smartring.app.util.formatDurationSeconds
+import com.smartring.app.util.durationPartsOf
+import com.smartring.app.util.durationPreview
+import com.smartring.app.util.durationRangeError
+import com.smartring.app.util.durationRangeHint
+import com.smartring.app.util.normalizeDurationParts
 import com.smartring.app.util.ringSetupWarnings
 import com.smartring.app.util.formatPickedDay
 import com.smartring.app.util.localInstantOnPickedDay
@@ -47,7 +55,10 @@ import java.util.*
 /** Test tags for [AlarmEditScreen]. Declared beside the screen so renaming one has to
  *  pass through the same file as the UI it identifies. */
 object AlarmEditTags {
-    const val NAME_FIELD = "alarm_edit_name_field"
+    const val NAME_FIELD       = "alarm_edit_name_field"
+    const val FORM_LIST        = "alarm_edit_form_list"
+    const val DURATION_MINUTES = "duration_input_minutes"
+    const val DURATION_SECONDS = "duration_input_seconds"
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -112,6 +123,10 @@ fun AlarmEditScreen(
             vm.scrollToNameRequests.collect { listState.animateScrollToItem(0) }
         }
         LazyColumn(
+            // Tagged so a UI test can scroll to a field deterministically: a LazyColumn
+            // only composes what is on screen, so anything below the fold does not exist
+            // to look for until something has scrolled to it.
+            modifier              = Modifier.testTag(AlarmEditTags.FORM_LIST),
             state                 = listState,
             contentPadding        = PaddingValues(start=16.dp, end=16.dp, top=pad.calculateTopPadding()+8.dp, bottom=80.dp),
             verticalArrangement   = Arrangement.spacedBy(12.dp),
@@ -214,7 +229,10 @@ fun AlarmEditScreen(
             item {
                 EditCard {
                     Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {
-                        Column {
+                        // weight(1f) so the trailing control keeps its own space. Without it this
+                        // text takes its full intrinsic width and the switch is drawn over the end
+                        // of it — visible on a stock phone, not only at a large font scale.
+                        Column(Modifier.weight(1f).padding(end = 12.dp)) {
                             FieldLabel("תאריך ושעה ספציפיים",
                                 info = "השעמור יצלצל פעם אחת בלבד, בתאריך ובשעה שתבחר, במקום לפי ימים קבועים.")
                             Text("הצלצול יהיה פעם אחת בלבד בתאריך שתבחר",
@@ -346,7 +364,7 @@ fun AlarmEditScreen(
                 EditCard {
                     LabeledSlider("משך צלצול", s.ringDurationSeconds, "שנ׳", 5f, 600f, 118, MaterialTheme.colorScheme.primary,
                         info = "כמה זמן השעמור ימשיך לצלצול לפני שהוא נעצר אוטומטית, אם לא תעצור אותו ידנית.",
-                        formatter = ::formatDurationSeconds, onChange = vm::setRingDuration)
+                        formatter = ::formatDurationSeconds, durationInput = true, onChange = vm::setRingDuration)
                 }
             }
 
@@ -376,7 +394,7 @@ fun AlarmEditScreen(
                         Spacer(Modifier.height(8.dp))
                         LabeledSlider("רטט לפני צלצול", s.vibrationOnlySeconds, "שנ׳", 3f, 120f, 38, MaterialTheme.colorScheme.error,
                             info = "כמה זמן לרטוט לפני שהצליל מתחיל להתנגן.",
-                            formatter = ::formatDurationSeconds, onChange = vm::setVibrationOnlySeconds)
+                            formatter = ::formatDurationSeconds, durationInput = true, onChange = vm::setVibrationOnlySeconds)
                     }
                 }
             }
@@ -386,7 +404,8 @@ fun AlarmEditScreen(
             item {
                 EditCard {
                     Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                        Row(Modifier.weight(1f).padding(end = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.AutoMirrored.Rounded.TrendingUp, null, Modifier.size(18.dp),
                                 tint = MaterialTheme.colorScheme.primary)
                             Spacer(Modifier.width(8.dp))
@@ -403,7 +422,7 @@ fun AlarmEditScreen(
                         Spacer(Modifier.height(6.dp))
                         LabeledSlider("כל כמה שניות עולה", s.crescendoStepSeconds, "שנ׳", 5f, 60f, 10, MaterialTheme.colorScheme.primary,
                             info = "כל כמה שניות עוצמת הקול תעלה לשלב הבא.",
-                            formatter = ::formatDurationSeconds, onChange = vm::setCrescendoStepSeconds)
+                            formatter = ::formatDurationSeconds, durationInput = true, onChange = vm::setCrescendoStepSeconds)
                         Spacer(Modifier.height(6.dp))
                         LabeledSlider("עלייה בכל צעד", s.crescendoStepPercent, "%", 5f, 30f, 4, MaterialTheme.colorScheme.secondary,
                             info = "כמה אחוזים עוצמת הקול עולה בכל שלב.",
@@ -456,7 +475,8 @@ fun AlarmEditScreen(
                 EditCard {
                     Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {
                         FieldLabel("אפשר נודניק לשעמור זה",
-                            info = "כאשר כבוי, לא תוצג אפשרות נודניק כלל עבור השעמור הזה — לא במסך הצלצול ולא בהתראה.")
+                            info = "כאשר כבוי, לא תוצג אפשרות נודניק כלל עבור השעמור הזה — לא במסך הצלצול ולא בהתראה.",
+                            modifier = Modifier.weight(1f).padding(end = 12.dp))
                         Switch(s.snoozeEnabled, vm::setSnoozeEnabled)
                     }
                     if (s.snoozeEnabled) {
@@ -467,7 +487,8 @@ fun AlarmEditScreen(
                         Spacer(Modifier.height(8.dp)); HorizontalDivider(); Spacer(Modifier.height(8.dp))
                         Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {
                             FieldLabel("מקסימום נודניקים",
-                                info = "כמה פעמים ניתן ללחוץ על נודניק לפני שהאפשרות נעלמת.")
+                                info = "כמה פעמים ניתן ללחוץ על נודניק לפני שהאפשרות נעלמת.",
+                                modifier = Modifier.weight(1f).padding(end = 8.dp))
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 IconButton({ if (s.snoozeMaxCount > 1) vm.setSnoozeMaxCount(s.snoozeMaxCount - 1) }, Modifier.size(36.dp)) {
                                     Icon(Icons.Rounded.Remove, "הפחת מקסימום נודניקים")
@@ -513,18 +534,43 @@ private fun DateTimePickerInline(epochMillis: Long, onChanged: (Long) -> Unit) {
     var showDatePicker by remember { mutableStateOf(false) }
     var showTimePicker by remember { mutableStateOf(false) }
 
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        OutlinedButton(onClick = { showDatePicker = true }, modifier = Modifier.weight(1f),
+    // Stacked, not side by side. As a 1f/0.6f split these two never fit: the date reads
+    // "יום חמישי, 17/09/2026" and was ellipsized down to "יום חמישי," — the part that
+    // actually identifies the day was the part thrown away — while the time button was
+    // narrow enough that "07:00" wrapped mid-value onto two lines ("07:0" / "0"). Any
+    // horizontal split has that problem somewhere, because the weekday name's length is
+    // language- and locale-dependent and the font scale is the user's to choose. Full
+    // width each is the layout that cannot be squeezed, and it gives both a bigger tap
+    // target as well.
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        OutlinedButton(onClick = { showDatePicker = true }, modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(10.dp)) {
-            Icon(Icons.Rounded.CalendarMonth, null, Modifier.size(16.dp))
-            Spacer(Modifier.width(6.dp))
-            Text(fmt.format(cal.time), fontSize = 11.sp, maxLines = 1)
+            Icon(Icons.Rounded.CalendarMonth, null, Modifier.size(18.dp))
+            Spacer(Modifier.width(8.dp))
+            Text(
+                fmt.format(cal.time),
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.bodyMedium,
+                textAlign = TextAlign.Center,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
-        OutlinedButton(onClick = { showTimePicker = true }, modifier = Modifier.weight(.6f),
+        OutlinedButton(onClick = { showTimePicker = true }, modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(10.dp)) {
-            Icon(Icons.Rounded.Schedule, null, Modifier.size(16.dp))
-            Spacer(Modifier.width(4.dp))
-            Text("%02d:%02d".format(cal.get(Calendar.HOUR_OF_DAY), cal.get(Calendar.MINUTE)))
+            Icon(Icons.Rounded.Schedule, null, Modifier.size(18.dp))
+            Spacer(Modifier.width(8.dp))
+            Text(
+                "%02d:%02d".format(cal.get(Calendar.HOUR_OF_DAY), cal.get(Calendar.MINUTE)),
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center,
+                // softWrap = false is the direct fix for the two-line "07:0 / 0": a time
+                // is one token and must never be broken across lines, whatever the width.
+                softWrap = false,
+                maxLines = 1,
+            )
         }
     }
 
@@ -659,10 +705,13 @@ private fun RingsSection(
         }
         rings.forEachIndexed { i, ring ->
             Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {
-                Text("סבב ${i + 1}", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall)
+                Text("סבב ${i + 1}", Modifier.weight(1f), fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.titleSmall)
                 if (rings.size > 1) {
-                    IconButton({ onRemove(i) }, Modifier.size(28.dp)) {
-                        Icon(Icons.Rounded.Close, "הסר סבב ${i + 1}", Modifier.size(16.dp),
+                    // Destructive, and was a 28dp target — the easiest button on the
+                    // screen to miss and the worst one to hit by accident.
+                    IconButton({ onRemove(i) }, Modifier.size(40.dp)) {
+                        Icon(Icons.Rounded.Close, "הסר סבב ${i + 1}", Modifier.size(18.dp),
                             tint = MaterialTheme.colorScheme.error)
                     }
                 }
@@ -679,7 +728,7 @@ private fun RingsSection(
             Spacer(Modifier.height(8.dp))
             LabeledSlider("משך", ring.durationSeconds, "שנ׳", 5f, 300f, 58, MaterialTheme.colorScheme.primary,
                 info = "כמה זמן הסבב הזה מנגן לפני שעובר לסבב הבא.",
-                formatter = ::formatDurationSeconds) {
+                formatter = ::formatDurationSeconds, durationInput = true) {
                 onUpdate(i, ring.copy(durationSeconds = it))
             }
             Spacer(Modifier.height(6.dp))
@@ -690,7 +739,7 @@ private fun RingsSection(
             Spacer(Modifier.height(6.dp))
             LabeledSlider("השהיה אחרי סבב זה", ring.delayAfterSeconds, "שנ׳", 0f, 600f, 59, MaterialTheme.colorScheme.secondary,
                 info = "כמה זמן להמתין בשקט אחרי שהסבב הזה מסתיים, לפני שהסבב הבא (או החזרה לסבב הראשון) מתחיל.",
-                formatter = ::formatDurationSeconds) {
+                formatter = ::formatDurationSeconds, durationInput = true) {
                 onUpdate(i, ring.copy(delayAfterSeconds = it))
             }
             if (i < rings.size - 1) HorizontalDivider(Modifier.padding(vertical = 10.dp))
@@ -737,7 +786,7 @@ private fun RecurrenceEndSection(s: AlarmEditUiState, vm: AlarmEditViewModel) {
         if (s.recurrenceEndType == RecurrenceEndType.COUNT) {
             Spacer(Modifier.height(10.dp))
             Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {
-                Text("מספר חזרות", fontWeight = FontWeight.SemiBold)
+                Text("מספר חזרות", Modifier.weight(1f).padding(end = 8.dp), fontWeight = FontWeight.SemiBold)
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     IconButton({ if (s.recurrenceCount > 1) vm.setRecurrenceCount(s.recurrenceCount - 1) },
                         Modifier.size(36.dp)) { Icon(Icons.Rounded.Remove, "הפחת מספר חזרות") }
@@ -884,6 +933,13 @@ fun EditableValueBadge(
     value: Int, unit: String, color: androidx.compose.ui.graphics.Color,
     min: Int, max: Int, onChange: (Int) -> Unit,
     displayText: String = "$value $unit",
+    /**
+     * Whether [value] is a number of seconds, and should therefore be typed as minutes +
+     * seconds rather than as a single seconds box. Passed explicitly rather than inferred
+     * from [unit]: keying behaviour off a display string means a copy edit silently
+     * changes which dialog opens.
+     */
+    durationInput: Boolean = false,
 ) {
     var showDialog by remember { mutableStateOf(false) }
     Surface(
@@ -894,7 +950,13 @@ fun EditableValueBadge(
         Text(displayText, Modifier.padding(horizontal = 10.dp, vertical = 3.dp),
             style = MaterialTheme.typography.labelMedium, color = color, fontWeight = FontWeight.ExtraBold)
     }
-    if (showDialog) {
+    if (showDialog && durationInput) {
+        DurationInputDialog(
+            initialSeconds = value, minSeconds = min, maxSeconds = max,
+            onDismiss = { showDialog = false },
+            onConfirm = { onChange(it); showDialog = false },
+        )
+    } else if (showDialog) {
         var text by remember { mutableStateOf(value.toString()) }
         AlertDialog(
             onDismissRequest = { showDialog = false },
@@ -920,15 +982,130 @@ fun EditableValueBadge(
     }
 }
 
+
+/**
+ * Types a duration as minutes + seconds instead of as one seconds box.
+ *
+ * The seconds-only box it replaces was technically complete and practically unusable:
+ * "450" gives no sense of whether the alarm will ring for seven minutes or twelve, and
+ * the values here go to 600. Three things make this one workable —
+ *
+ *  - it normalises as you go, so 120 in the seconds field becomes 2 minutes 0 seconds
+ *    (carried on focus loss and again on confirm, not on every keystroke: rewriting
+ *    mid-typing would fight anyone typing "1", "2", "0");
+ *  - it previews the result in words under the fields, next to the raw total, so the
+ *    friendly form and the number that actually gets stored can be checked against each
+ *    other before committing;
+ *  - it refuses to confirm an out-of-range total and says which bound was missed,
+ *    rather than silently clamping to it.
+ */
+@Composable
+private fun DurationInputDialog(
+    initialSeconds: Int,
+    minSeconds: Int,
+    maxSeconds: Int,
+    onDismiss: () -> Unit,
+    onConfirm: (Int) -> Unit,
+) {
+    val initial = remember(initialSeconds) { durationPartsOf(initialSeconds) }
+    var minText by remember { mutableStateOf(initial.minutes.toString()) }
+    var secText by remember { mutableStateOf(initial.seconds.toString()) }
+
+    val parts = normalizeDurationParts(minText.toIntOrNull() ?: 0, secText.toIntOrNull() ?: 0)
+    val error = durationRangeError(parts.totalSeconds, minSeconds, maxSeconds)
+
+    fun carryOverflow() {
+        minText = parts.minutes.toString()
+        secText = parts.seconds.toString()
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("הזן משך זמן") },
+        text = {
+            Column {
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    OutlinedTextField(
+                        value = minText,
+                        onValueChange = { minText = it.filter(Char::isDigit).take(4) },
+                        // Tagged because a dialog is its own window: a test matching
+                        // "any editable field" would also find the name field on the
+                        // screen behind this one.
+                        modifier = Modifier.weight(1f).testTag(AlarmEditTags.DURATION_MINUTES),
+                        singleLine = true,
+                        label = { Text("דקות") },
+                        isError = error != null,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    )
+                    OutlinedTextField(
+                        value = secText,
+                        onValueChange = { secText = it.filter(Char::isDigit).take(4) },
+                        // Carrying on focus loss is what makes "120 שניות" turn into
+                        // "2 דקות" by itself, which is the whole point of the pair of
+                        // fields — without it the seconds box just holds an odd number.
+                        modifier = Modifier.weight(1f)
+                            .testTag(AlarmEditTags.DURATION_SECONDS)
+                            .onFocusChanged { if (!it.isFocused) carryOverflow() },
+                        singleLine = true,
+                        label = { Text("שניות") },
+                        isError = error != null,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    )
+                }
+                Spacer(Modifier.height(12.dp))
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = if (error == null) MaterialTheme.colorScheme.primary.copy(.10f)
+                            else MaterialTheme.colorScheme.error.copy(.10f),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Column(Modifier.padding(12.dp)) {
+                        Text(
+                            durationPreview(parts.totalSeconds),
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = if (error == null) MaterialTheme.colorScheme.primary
+                                    else MaterialTheme.colorScheme.error,
+                        )
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            error ?: durationRangeHint(minSeconds, maxSeconds),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (error == null) MaterialTheme.colorScheme.onSurfaceVariant
+                                    else MaterialTheme.colorScheme.error,
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { carryOverflow(); onConfirm(parts.totalSeconds) },
+                enabled = error == null,
+            ) { Text("אישור") }
+        },
+        dismissButton = { TextButton(onDismiss) { Text("ביטול") } },
+    )
+}
+
 /** A field's label text with an optional (i) button opening a short explanation. */
 @Composable
 fun FieldLabel(text: String, info: String? = null, modifier: Modifier = Modifier) {
     Row(modifier, verticalAlignment = Alignment.CenterVertically) {
-        Text(text, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
+        // weight(1f, fill = false): the text yields space to the (i) button when the row
+        // is tight, but does not stretch to fill the row when it is not — so a short
+        // label still sits right next to its own info button rather than a gap away.
+        Text(text, Modifier.weight(1f, fill = false),
+            fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
         if (info != null) {
             var show by remember { mutableStateOf(false) }
-            IconButton({ show = true }, Modifier.size(22.dp)) {
-                Icon(Icons.Rounded.Info, "מידע על $text", Modifier.size(15.dp),
+            // 32dp, not 22dp. Material's minimum touch target is 48dp and Compose's
+            // IconButton defaults to it — an explicit Modifier.size() opts out, and 22dp
+            // is small enough to be genuinely hard to hit. 32dp is the compromise this
+            // layout can absorb: these sit inline beside every field label, so a full
+            // 48dp would set the row height of the entire screen. The glyph stays small.
+            IconButton({ show = true }, Modifier.size(32.dp)) {
+                Icon(Icons.Rounded.Info, "מידע על $text", Modifier.size(16.dp),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             if (show) {
@@ -949,11 +1126,17 @@ fun LabeledSlider(
     steps: Int, color: androidx.compose.ui.graphics.Color,
     info: String? = null,
     formatter: (Int) -> String = { "$it $unit" },
+    durationInput: Boolean = false,
     onChange: (Int) -> Unit,
 ) {
     Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {
-        FieldLabel(label, info)
-        EditableValueBadge(value, unit, color, min.toInt(), max.toInt(), onChange, displayText = formatter(value))
+        // weight(1f) on the label, not on nothing: without it the label takes its full
+        // intrinsic width and the badge is pushed past the edge of the card. Labels here
+        // run to "השהיה אחרי סבב זה" and badges to "10 דק׳ 30 שנ׳", so the pair overflows
+        // a phone-width card at the default font scale, never mind a larger one.
+        FieldLabel(label, info, Modifier.weight(1f).padding(end = 8.dp))
+        EditableValueBadge(value, unit, color, min.toInt(), max.toInt(), onChange,
+            displayText = formatter(value), durationInput = durationInput)
     }
     // Math.round, not toInt(): toInt() truncates, so any step position that doesn't
     // land exactly on an integer (most of them, for ranges that don't divide evenly by

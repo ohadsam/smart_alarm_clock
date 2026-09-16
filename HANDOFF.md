@@ -103,6 +103,9 @@
 | 74 | סכמת Room מקובצת ב-git; הבילד נכשל אם הסכמה שנוצרה שונה מזו שמקובצת | `app/schemas/` + שלב ב-`build-apk.yml` (v1.6.10) |
 | 75 | החצי המהיר של אותה בדיקה — נכשל בשניות אם `@Database(version)` זז בלי JSON תואם | `RoomSchemaTest` (v1.6.10) |
 | 76 | פלט Gradle של האמולטור נשמר ומודפס בכישלון; כשלי JUnit מודפסים כשלב אחרון | `scripts/instrumented-test.sh` + `build-apk.yml` (v1.6.10) |
+| 77 | הזנת משך זמן בשני שדות (דקות/שניות) עם תצוגה מקדימה, וולידציה וגלישה אוטומטית | `util/DurationInput.kt` + `DurationInputDialog` (v1.6.11) |
+| 78 | כל שורת תווית+פקד מקבלת `weight(1f)` — מתג לא נצבע על הטקסט שלצידו | `AlarmEditScreen`/`HistoryScreen`/`LogsScreen`/`AlarmRingScreen` (v1.6.11) |
+| 79 | כפתורי התאריך והשעה ברוחב מלא; שעה עם `softWrap = false` ולא נשברת לשורות | `DateTimePickerInline` (v1.6.11) |
 
 ---
 

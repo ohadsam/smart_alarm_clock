@@ -205,10 +205,13 @@ private fun AlarmCardItem(alarm: Alarm, onToggle:(Boolean)->Unit, onEdit:()->Uni
                 // Mentions the swipe gesture too — it was added alongside long-press but
                 // this hint still named only long-press, so the quicker of the two ways
                 // to delete a card was undiscoverable.
+                // No fontSize override: labelSmall is already the smallest step in the
+                // type scale (11sp), and overriding it down to 9sp put this below the
+                // size Material treats as legible at all — on a hint that exists to teach
+                // a gesture the user cannot otherwise discover.
                 Text("החלק או לחץ ארוכות למחיקה",
                     style=MaterialTheme.typography.labelSmall,
-                    color=MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha=0.7f),
-                    fontSize=9.sp)
+                    color=MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha=0.7f))
             }
         }
     }
@@ -289,6 +292,9 @@ private fun ReliabilityGate(onOpenSettings: () -> Unit) {
 private fun MiniBadge(text: String, color: Color) = Surface(
     shape = RoundedCornerShape(999.dp), color = color.copy(alpha = 0.12f),
 ) {
-    Text(text, Modifier.padding(horizontal = 6.dp, vertical = 1.dp),
-        style = MaterialTheme.typography.labelSmall, color = color, fontSize = 9.sp)
+    // Same reason as the delete hint above: labelSmall, not labelSmall shrunk to 9sp.
+    // These badges carry "מוקפא" and "נודניק" — state the user needs to be able to read
+    // at a glance, on the screen they spend the most time on.
+    Text(text, Modifier.padding(horizontal = 7.dp, vertical = 2.dp),
+        style = MaterialTheme.typography.labelSmall, color = color)
 }

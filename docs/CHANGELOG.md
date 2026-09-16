@@ -1,5 +1,70 @@
 # SmartRing – Changelog
 
+## v1.6.11 (2026-09-16)
+
+A UI round driven by a screenshot of the edit screen. Three defects were visible in it,
+and all three turned out to be instances of one bug.
+
+### The switch was drawn on top of its own label
+
+`Row(SpaceBetween)` does not stop a child from taking its full intrinsic width. With no
+`weight(1f)` on the text side, the label measures itself as wide as it wants and the
+trailing control is drawn over the end of it. This was not a large-font-scale edge case —
+it is visible on a stock phone.
+
+Six rows had it: specific date/time, crescendo, snooze on/off, max snoozes, the ring-round
+header and the recurrence count. `LabeledSlider` had it for every slider in the screen,
+where labels run to "השהיה אחרי סבב זה" and badges to "10 דק׳ 30 שנ׳". Three more outside
+this screen: the history delete hint, the log tag (free text, so unbounded), and the ring
+screen's crescendo label, which grows with the round counter.
+
+`FieldLabel` now lets its text yield to the (i) button with `weight(1f, fill = false)` —
+shrinking when the row is tight, without pushing a short label away from its own button.
+
+### The date and time buttons could not fit side by side
+
+At a 1f / 0.6f split the date read "יום חמישי, 17/09/2026" and was ellipsized to
+"יום חמישי," — the half that identifies the day was the half thrown away — while the time
+button was narrow enough that "07:00" wrapped onto two lines as "07:0" / "0".
+
+Widening one starves the other, so they are stacked full width instead. The weekday name's
+length is locale-dependent and the font scale is the user's to choose; no horizontal split
+survives both. The time also gets `softWrap = false`, because a time is one token and must
+never break across lines whatever the width.
+
+### Duration entry is minutes and seconds, not a seconds box
+
+Typing a duration opened a single seconds field. That is technically complete and
+practically unusable: "450" tells you nothing about whether the alarm will ring for seven
+minutes or twelve, and these values go to 600.
+
+It is now two fields with a live preview underneath, and three behaviours that make it
+work: 120 in the seconds field carries into 2 minutes 0 seconds (on focus loss and on
+confirm — not on every keystroke, which would fight anyone typing "1", "2", "0"); the
+preview shows both the friendly form and the raw total, so the two can be checked against
+each other before committing; and an out-of-range value is refused with the bound stated in
+the units being typed ("המקסימום הוא 10 דק׳", not "600"), rather than silently clamped.
+
+The arithmetic lives in `util/DurationInput.kt`, separate from the dialog and covered by
+`DurationInputTest`, because getting it wrong means an alarm that rings for the wrong
+length of time — a correctness bug, not a cosmetic one. It clamps in `Long` before
+narrowing: both fields are free text, `minutes * 60` would overflow `Int` negative, and a
+negative total would pass a `>= min` check. `DurationInputInstrumentedTest` covers the part
+unit tests cannot — that the computed total reaches the callback and survives the save.
+
+### Accessibility
+
+Two `fontSize = 9.sp` overrides on `labelSmall` (already the smallest step in the scale at
+11sp) are gone — one on a hint that exists to teach an otherwise undiscoverable gesture,
+one on the badges carrying "מוקפא" and "נודניק". The info button's touch target went from
+22dp to 32dp and the destructive remove-round button from 28dp to 40dp; Material's minimum
+is 48dp and Compose's `IconButton` defaults to it, but an explicit `Modifier.size()` opts
+out. 48dp everywhere would set the row height of the whole screen, so 32dp is the
+compromise this layout can absorb — stated plainly rather than claimed as compliant.
+
+The widgets keep their 9sp labels: a widget cell is a fixed size, and that trade-off was
+settled in an earlier round.
+
 ## v1.6.10 (2026-09-15)
 
 ### The emulator suite now runs on three API levels, not one

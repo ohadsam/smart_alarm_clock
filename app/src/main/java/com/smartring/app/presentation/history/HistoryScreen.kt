@@ -194,7 +194,10 @@ private fun HistoryLogCard(log: AlarmLog, onDelete: () -> Unit, onLoad: ((String
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        // weight(1f): this hint is long and the button beside it is optional, so without
+        // it the pair overflows the row on a narrow screen and the button is clipped.
         Text("החלק או לחץ ארוכות למחיקה",
+            modifier = Modifier.weight(1f).padding(end = 8.dp),
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f))
         if (onLoad != null) {
