@@ -1,5 +1,86 @@
 # SmartRing – Changelog
 
+## v1.7.0 (2026-09-17)
+
+Twelve reported problems from real use. Three of them turned out to be one bug.
+
+### The worst bug this app has had
+
+`AlarmFiringService` switches a one-time alarm off once it has rung — correct, and
+deliberate. But `AlarmEditUiState.isEnabled` was documented as *"preserved verbatim from
+the loaded alarm; not editable on this screen"*, and the edit screen had no toggle for it.
+So opening an alarm that had already rung, giving it a new time and saving wrote
+`isEnabled = false` straight back, and `schedule()` cancels anything that is not active.
+
+The alarm saved perfectly. It could never ring again. Nothing on any screen said why.
+
+The same state explains two more of the twelve reports, because both the widgets and the
+status-bar indicator only ever show *armed* alarms: the widgets read `getActiveAlarms()`
+(enabled and unfrozen), and the little clock in the status bar is the OS reflecting a
+`setAlarmClock` registration. No armed alarm, nothing in either place. Three symptoms,
+one cause.
+
+The original intent — never silently re-enable an alarm the user deliberately switched
+off — was right, and still holds. It is met by making the state visible and letting the
+user decide, which is not the same as making it unreachable:
+
+- a "השעמור פעיל" switch at the top of the edit screen, with an explanation when it is
+  off that names the automatic switch-off and says saving without turning it back on will
+  not help;
+- turning it back on resets `occurrencesFired`, because re-enabling a COUNT-limited alarm
+  into an already-expired recurrence just gets it cancelled again — the toggle would
+  appear to do nothing;
+- an alarm left switched off still saves switched off. No silent revival.
+
+### A date in the past is refused, not accepted and then ignored
+
+Saving a `specificDateTime` already gone used to be allowed: `nextFireTime` returned null,
+`schedule()` cancelled, and the user had an alarm that looked saved and was not armed.
+It is now refused with a message, which is what makes duplicating and editing a finished
+one-time alarm behave — both arrive holding the old date and cannot be saved until a
+future one is picked.
+
+### The list says what state an alarm is in
+
+A finished one-time alarm rendered identically to a paused repeating one. It is now struck
+through and carries "✔ צלצל והסתיים — הפעל כדי לתזמן מחדש", which says what to do rather
+than only what happened. `Alarm.hasFinished` derives this from three existing fields
+instead of adding a column; the trade-off is written down in its KDoc and covered by
+`AlarmFinishedTest`.
+
+Duplicate and delete are now buttons on each card. Swipe and long-press still work, but a
+gesture nobody discovers is not an affordance, and duplicating had no gesture at all.
+Duplicating opens the editor on a new unsaved alarm rather than writing a copy directly —
+which is exactly what routes a copy of a finished alarm through the past-date refusal.
+
+### Defaults are the user's, not the author's
+
+Fifteen values were constants compiled into the edit screen's state, so anyone whose
+alarms are always three minutes long with vibration off corrected every new alarm by hand.
+All of them are editable in Settings now, each with its own restore button — shown only
+when the value differs from the shipped one, so the button's presence is itself the
+indication that something was changed. `AlarmDefaults.BUILT_IN` makes "restore just this
+one" a `copy()` at the call site rather than thirty near-identical repository methods.
+
+### Smaller things from the list
+
+- Save is now also at the bottom of the form. Almost all of it is below the fold, so the
+  only button sat off-screen behind a scroll back to the top.
+- A "ללא שם" toggle names an alarm "כללי" instead of demanding one. Its starting position
+  is itself a configurable default.
+- "משך צלצול" is now "משך צלצול כולל", with both the info text and a line in the rounds
+  section spelling out the relationship: the total is an envelope, the rounds play inside
+  it in sequence, and the list loops until the envelope runs out.
+- A play button per round, previewing that round's sound at that round's volume through
+  the alarm stream — so what is heard is what will be heard at 06:30, device alarm volume
+  included. It stops itself, and stops when the screen goes away.
+- The foreign-alarm feature was unfindable: off by default, and its banner only appears
+  when an alarm here is armed *and* the other app's is sooner. Settings now shows what the
+  app can see right now either way, and a second row answers the status-bar question
+  directly — nothing armed, ours, or another app's.
+- The widgets say "אין שעמור פעיל" rather than "אין שעמור". Both are true; only one
+  distinguishes "nothing is armed" from "the widget lost my alarms".
+
 ## v1.6.12 (2026-09-16)
 
 ### Warning about another app's alarm — and what could not be built

@@ -142,6 +142,24 @@ data class Alarm(
     val isRecurring: Boolean
         get() = repeatDaysBitmask != 0 && repeatFrequency != RepeatFrequency.NONE
 
+    /**
+     * A one-time alarm that has already rung and been switched off automatically.
+     *
+     * This is the state AlarmFiringService leaves behind once a non-recurring alarm
+     * fires, and it needs a name because the list has to show it differently: such an
+     * alarm is finished, not merely paused, and rendering it the same as a switched-off
+     * repeating alarm is what made "why is my alarm not working" so hard to answer.
+     *
+     * Derived rather than stored: `!isEnabled && occurrencesFired > 0 && !isRecurring`
+     * describes exactly what that code path produces, and adding a column would mean a
+     * schema migration for something already fully determined by three existing fields.
+     * The trade-off, stated: an alarm the *user* switched off after it had rung at least
+     * once, and which has no repeat days, also reads as finished. That is a fair
+     * description of it — it has rung and it will not ring again until something changes.
+     */
+    val hasFinished: Boolean
+        get() = !isEnabled && occurrencesFired > 0 && !isRecurring && specificDates.isEmpty()
+
     /** Whether recurrence has ended based on end rules. */
     fun isRecurrenceExpired(): Boolean = when (recurrenceEnd.type) {
         RecurrenceEndType.FOREVER -> false

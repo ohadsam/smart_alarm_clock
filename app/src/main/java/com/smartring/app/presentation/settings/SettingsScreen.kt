@@ -21,6 +21,7 @@ import androidx.compose.material.icons.automirrored.rounded.VolumeUp
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -31,13 +32,22 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.smartring.app.BuildConfig
+import com.smartring.app.data.repository.AlarmDefaults
+import com.smartring.app.domain.model.VibrationMode
+import com.smartring.app.util.GENERIC_ALARM_NAME
+import com.smartring.app.util.ForeignAlarms
 import com.smartring.app.util.ReliabilityChecks
+import com.smartring.app.util.formatDayAndTime
+import com.smartring.app.util.formatDurationSeconds
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
 import com.smartring.app.util.openSystemScreen
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(onBack: () -> Unit, onOpenLogs: () -> Unit = {}, vm: SettingsViewModel = hiltViewModel()) {
     val s by vm.state.collectAsStateWithLifecycle()
+    val d by vm.defaults.collectAsStateWithLifecycle()
 
     Scaffold(
         topBar = {
@@ -76,6 +86,149 @@ fun SettingsScreen(onBack: () -> Unit, onOpenLogs: () -> Unit = {}, vm: Settings
                 HorizontalDivider(Modifier.padding(horizontal = 16.dp))
                 RadioRow("בהיר",               "light", s.themeMode) { vm.setThemeMode("light") }
             }
+            // ── Defaults for a new alarm ──────────────────────────────────────────
+            // Every one of these was a constant compiled into the edit screen's state,
+            // so someone whose alarms are always 3 minutes long with vibration off had
+            // to correct every new alarm by hand. Each row restores individually: a
+            // single "restore all" would make fixing one mistake cost the other fourteen
+            // deliberate choices.
+            SettingsGroup("ברירת מחדל לשעמור חדש") {
+                DefaultTimeRow(
+                    hour = d.hour, minute = d.minute,
+                    onChange = { h, m -> vm.updateDefaults { it.copy(hour = h, minute = m) } },
+                    onReset = {
+                        vm.updateDefaults {
+                            it.copy(hour = AlarmDefaults.BUILT_IN.hour, minute = AlarmDefaults.BUILT_IN.minute)
+                        }
+                    },
+                )
+                HorizontalDivider(Modifier.padding(horizontal = 16.dp))
+                DefaultSwitchRow(
+                    title = "ללא שם (\"$GENERIC_ALARM_NAME\")",
+                    supporting = "שעמור חדש יקבל שם כללי אוטומטית במקום לדרוש שם",
+                    checked = d.unnamed, isDefault = d.unnamed == AlarmDefaults.BUILT_IN.unnamed,
+                    onChange = { v -> vm.updateDefaults { it.copy(unnamed = v) } },
+                    onReset = { vm.updateDefaults { it.copy(unnamed = AlarmDefaults.BUILT_IN.unnamed) } },
+                )
+                HorizontalDivider(Modifier.padding(horizontal = 16.dp))
+                DefaultNumberRow(
+                    title = "משך צלצול כולל", value = d.ringDurationSeconds, min = 5, max = 600,
+                    display = ::formatDurationSeconds,
+                    isDefault = d.ringDurationSeconds == AlarmDefaults.BUILT_IN.ringDurationSeconds,
+                    onChange = { v -> vm.updateDefaults { it.copy(ringDurationSeconds = v) } },
+                    onReset = { vm.updateDefaults { it.copy(ringDurationSeconds = AlarmDefaults.BUILT_IN.ringDurationSeconds) } },
+                )
+                HorizontalDivider(Modifier.padding(horizontal = 16.dp))
+                DefaultNumberRow(
+                    title = "עוצמת צלצול", value = d.ringVolumePercent, min = 10, max = 100,
+                    display = { "$it%" },
+                    isDefault = d.ringVolumePercent == AlarmDefaults.BUILT_IN.ringVolumePercent,
+                    onChange = { v -> vm.updateDefaults { it.copy(ringVolumePercent = v) } },
+                    onReset = { vm.updateDefaults { it.copy(ringVolumePercent = AlarmDefaults.BUILT_IN.ringVolumePercent) } },
+                )
+                HorizontalDivider(Modifier.padding(horizontal = 16.dp))
+                DefaultSwitchRow(
+                    title = "נודניק מופעל",
+                    supporting = "האם שעמור חדש יאפשר נודניק",
+                    checked = d.snoozeEnabled, isDefault = d.snoozeEnabled == AlarmDefaults.BUILT_IN.snoozeEnabled,
+                    onChange = { v -> vm.updateDefaults { it.copy(snoozeEnabled = v) } },
+                    onReset = { vm.updateDefaults { it.copy(snoozeEnabled = AlarmDefaults.BUILT_IN.snoozeEnabled) } },
+                )
+                HorizontalDivider(Modifier.padding(horizontal = 16.dp))
+                DefaultNumberRow(
+                    title = "משך נודניק", value = d.snoozeMinutes, min = 1, max = 60,
+                    display = { "$it דק׳" },
+                    isDefault = d.snoozeMinutes == AlarmDefaults.BUILT_IN.snoozeMinutes,
+                    onChange = { v -> vm.updateDefaults { it.copy(snoozeMinutes = v) } },
+                    onReset = { vm.updateDefaults { it.copy(snoozeMinutes = AlarmDefaults.BUILT_IN.snoozeMinutes) } },
+                )
+                HorizontalDivider(Modifier.padding(horizontal = 16.dp))
+                DefaultNumberRow(
+                    title = "מקסימום נודניקים", value = d.snoozeMaxCount, min = 1, max = 10,
+                    display = { "$it" },
+                    isDefault = d.snoozeMaxCount == AlarmDefaults.BUILT_IN.snoozeMaxCount,
+                    onChange = { v -> vm.updateDefaults { it.copy(snoozeMaxCount = v) } },
+                    onReset = { vm.updateDefaults { it.copy(snoozeMaxCount = AlarmDefaults.BUILT_IN.snoozeMaxCount) } },
+                )
+                HorizontalDivider(Modifier.padding(horizontal = 16.dp))
+                DefaultVibrationRow(
+                    mode = d.vibrationMode,
+                    isDefault = d.vibrationMode == AlarmDefaults.BUILT_IN.vibrationMode,
+                    onChange = { v -> vm.updateDefaults { it.copy(vibrationMode = v) } },
+                    onReset = { vm.updateDefaults { it.copy(vibrationMode = AlarmDefaults.BUILT_IN.vibrationMode) } },
+                )
+                HorizontalDivider(Modifier.padding(horizontal = 16.dp))
+                DefaultNumberRow(
+                    title = "רטט לפני צלצול", value = d.vibrationOnlySeconds, min = 3, max = 120,
+                    display = ::formatDurationSeconds,
+                    isDefault = d.vibrationOnlySeconds == AlarmDefaults.BUILT_IN.vibrationOnlySeconds,
+                    onChange = { v -> vm.updateDefaults { it.copy(vibrationOnlySeconds = v) } },
+                    onReset = { vm.updateDefaults { it.copy(vibrationOnlySeconds = AlarmDefaults.BUILT_IN.vibrationOnlySeconds) } },
+                )
+                HorizontalDivider(Modifier.padding(horizontal = 16.dp))
+                DefaultSwitchRow(
+                    title = "צלצול מתחזק",
+                    supporting = "העוצמה תעלה בהדרגה במקום להתחיל מלאה",
+                    checked = d.crescendoEnabled, isDefault = d.crescendoEnabled == AlarmDefaults.BUILT_IN.crescendoEnabled,
+                    onChange = { v -> vm.updateDefaults { it.copy(crescendoEnabled = v) } },
+                    onReset = { vm.updateDefaults { it.copy(crescendoEnabled = AlarmDefaults.BUILT_IN.crescendoEnabled) } },
+                )
+                HorizontalDivider(Modifier.padding(horizontal = 16.dp))
+                DefaultNumberRow(
+                    title = "עוצמה התחלתית (מתחזק)", value = d.crescendoStartVolume, min = 5, max = 80,
+                    display = { "$it%" },
+                    isDefault = d.crescendoStartVolume == AlarmDefaults.BUILT_IN.crescendoStartVolume,
+                    onChange = { v -> vm.updateDefaults { it.copy(crescendoStartVolume = v) } },
+                    onReset = { vm.updateDefaults { it.copy(crescendoStartVolume = AlarmDefaults.BUILT_IN.crescendoStartVolume) } },
+                )
+                HorizontalDivider(Modifier.padding(horizontal = 16.dp))
+                DefaultNumberRow(
+                    title = "כל כמה שניות עולה", value = d.crescendoStepSeconds, min = 5, max = 60,
+                    display = ::formatDurationSeconds,
+                    isDefault = d.crescendoStepSeconds == AlarmDefaults.BUILT_IN.crescendoStepSeconds,
+                    onChange = { v -> vm.updateDefaults { it.copy(crescendoStepSeconds = v) } },
+                    onReset = { vm.updateDefaults { it.copy(crescendoStepSeconds = AlarmDefaults.BUILT_IN.crescendoStepSeconds) } },
+                )
+                HorizontalDivider(Modifier.padding(horizontal = 16.dp))
+                DefaultNumberRow(
+                    title = "עלייה בכל צעד", value = d.crescendoStepPercent, min = 5, max = 30,
+                    display = { "$it%" },
+                    isDefault = d.crescendoStepPercent == AlarmDefaults.BUILT_IN.crescendoStepPercent,
+                    onChange = { v -> vm.updateDefaults { it.copy(crescendoStepPercent = v) } },
+                    onReset = { vm.updateDefaults { it.copy(crescendoStepPercent = AlarmDefaults.BUILT_IN.crescendoStepPercent) } },
+                )
+                HorizontalDivider(Modifier.padding(horizontal = 16.dp))
+                DefaultSwitchRow(
+                    title = "מצב שבת",
+                    supporting = "כפתורי עצירה ונודניק מושבתים בזמן הצלצול",
+                    checked = d.isShabbatMode, isDefault = d.isShabbatMode == AlarmDefaults.BUILT_IN.isShabbatMode,
+                    onChange = { v -> vm.updateDefaults { it.copy(isShabbatMode = v) } },
+                    onReset = { vm.updateDefaults { it.copy(isShabbatMode = AlarmDefaults.BUILT_IN.isShabbatMode) } },
+                )
+                HorizontalDivider(Modifier.padding(horizontal = 16.dp))
+                var confirmResetAll by remember { mutableStateOf(false) }
+                ListItem(
+                    headlineContent = { Text("שחזר את כל ברירות המחדל", fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.error) },
+                    supportingContent = { Text("לא משנה שעמורים קיימים — רק את מה שיקרה בשעמור הבא") },
+                    leadingContent = { Icon(Icons.Rounded.RestartAlt, null,
+                        tint = MaterialTheme.colorScheme.error) },
+                    modifier = Modifier.clickable { confirmResetAll = true },
+                )
+                if (confirmResetAll) {
+                    AlertDialog(
+                        onDismissRequest = { confirmResetAll = false },
+                        title = { Text("לשחזר את כל ברירות המחדל?") },
+                        text = { Text("כל ההגדרות בקטע הזה יחזרו לערכים המקוריים. שעמורים שכבר נשמרו לא ישתנו.") },
+                        confirmButton = {
+                            TextButton({ vm.resetAllDefaults(); confirmResetAll = false }) {
+                                Text("שחזר", color = MaterialTheme.colorScheme.error)
+                            }
+                        },
+                        dismissButton = { TextButton({ confirmResetAll = false }) { Text("ביטול") } },
+                    )
+                }
+            }
             SettingsGroup("שעמורים מאפליקציות אחרות") {
                 ListItem(
                     headlineContent   = { Text("התרע על שעמור מאפליקציה אחרת", fontWeight = FontWeight.Medium) },
@@ -97,6 +250,10 @@ fun SettingsScreen(onBack: () -> Unit, onOpenLogs: () -> Unit = {}, vm: Settings
                         Switch(s.warnForeignAlarms, onCheckedChange = vm::setWarnForeignAlarms)
                     },
                 )
+                HorizontalDivider(Modifier.padding(horizontal = 16.dp))
+                ForeignAlarmStatusRow()
+                HorizontalDivider(Modifier.padding(horizontal = 16.dp))
+                SystemIndicatorStatusRow()
             }
             SettingsGroup("אבחון") {
                 ListItem(
@@ -254,6 +411,282 @@ private fun ReliabilityRow(
             else TextButton(onAction) { Text(actionLabel, fontWeight = FontWeight.Bold) }
         },
     )
+}
+
+
+
+/**
+ * What the app can see right now, whether or not the warning is switched on.
+ *
+ * The warning itself only appears on the main list, only while an alarm here is armed,
+ * and only when the other app's alarm is the sooner of the two — so "is anything else
+ * set?" was a question the app could answer and never did. Answering it here makes the
+ * feature findable, and makes a silent banner distinguishable from a broken one.
+ *
+ * Re-read on resume, because the trip to the other app and back is the whole point.
+ */
+@Composable
+private fun ForeignAlarmStatusRow() {
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var found by remember { mutableStateOf(ForeignAlarms.next(context)) }
+
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) found = ForeignAlarms.next(context)
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    val alarm = found
+    ListItem(
+        headlineContent = { Text("מה מזוהה כרגע", fontWeight = FontWeight.Medium) },
+        supportingContent = {
+            Text(
+                if (alarm == null)
+                    "לא מזוהה שעמור מאפליקציה אחרת שיצלצל לפני השעמור הקרוב שלך. " +
+                    "שים לב: אנדרואיד מדווח רק על השעמור הבא במכשיר, ולכן שעמור זר " +
+                    "שמתוזמן אחרי שלך אינו נראה כאן."
+                else
+                    "\"${alarm.appLabel}\" — ${formatDayAndTime(alarm.triggerAtMillis)}",
+            )
+        },
+        leadingContent = {
+            Icon(
+                if (alarm == null) Icons.Rounded.CheckCircle else Icons.Rounded.Warning,
+                null,
+                tint = if (alarm == null) MaterialTheme.colorScheme.tertiary
+                       else MaterialTheme.colorScheme.error,
+            )
+        },
+    )
+}
+
+
+/**
+ * Whether the system's next-alarm indicator is currently showing one of this app's
+ * alarms.
+ *
+ * That indicator is not something an app draws; the OS shows it for any alarm registered
+ * with `setAlarmClock`. So when it is missing there are exactly two explanations —
+ * nothing is armed, or the exact-alarm permission was unavailable and the scheduler fell
+ * back to an inexact alarm, which the OS does not advertise. Both are actionable and
+ * neither was visible anywhere, which is why "there is no indication in the status bar"
+ * had no answer inside the app.
+ */
+@Composable
+private fun SystemIndicatorStatusRow() {
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var registered by remember { mutableStateOf(ForeignAlarms.nextRegistered(context)) }
+
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) registered = ForeignAlarms.nextRegistered(context)
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    val r = registered
+    val ours = r?.isOurs == true
+    ListItem(
+        headlineContent = { Text("אינדיקציה בשורת המצב", fontWeight = FontWeight.Medium) },
+        supportingContent = {
+            Text(
+                when {
+                    r == null -> "אין שעמור רשום במערכת, ולכן לא מופיע סמל שעמור בשורת המצב. " +
+                        "ודא שיש שעמור פעיל — שעמור חד-פעמי נכבה אוטומטית לאחר שהוא מצלצל."
+                    ours -> "רשום במערכת: השעמור שלך ל-${formatDayAndTime(r.triggerAtMillis)}. " +
+                        "סמל השעמור בשורת המצב ובמסך הנעילה מגיע מכאן."
+                    else -> "השעמור הבא הרשום במערכת שייך ל\"${r.appLabel}\", ולכן הסמל בשורת המצב " +
+                        "מציג אותו ולא את השעמור שלך."
+                },
+            )
+        },
+        leadingContent = {
+            Icon(
+                if (ours) Icons.Rounded.CheckCircle else Icons.Rounded.Info,
+                null,
+                tint = if (ours) MaterialTheme.colorScheme.tertiary
+                       else MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        },
+    )
+}
+
+// ── Rows for the "default for a new alarm" section ──────────────────────────────
+//
+// Each carries its own restore button, shown only when the value differs from the
+// shipped one. Always-visible restore buttons would put fifteen identical icons down the
+// side of the screen and say nothing; this way the icon's presence *is* the indication
+// that something was changed from the default.
+
+@Composable
+private fun RestoreButton(isDefault: Boolean, onReset: () -> Unit) {
+    if (isDefault) return
+    IconButton(onReset, Modifier.size(40.dp)) {
+        Icon(Icons.Rounded.Restore, "שחזר לברירת המחדל", Modifier.size(18.dp),
+            tint = MaterialTheme.colorScheme.primary)
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DefaultTimeRow(hour: Int, minute: Int, onChange: (Int, Int) -> Unit, onReset: () -> Unit) {
+    var showPicker by remember { mutableStateOf(false) }
+    val isDefault = hour == AlarmDefaults.BUILT_IN.hour && minute == AlarmDefaults.BUILT_IN.minute
+    ListItem(
+        headlineContent = { Text("שעה", fontWeight = FontWeight.Medium) },
+        supportingContent = { Text("השעה שתופיע בשעמור חדש") },
+        leadingContent = { Icon(Icons.Rounded.Schedule, null) },
+        trailingContent = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                RestoreButton(isDefault, onReset)
+                Text("%02d:%02d".format(hour, minute),
+                    style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary)
+            }
+        },
+        modifier = Modifier.clickable { showPicker = true },
+    )
+    if (showPicker) {
+        val state = rememberTimePickerState(hour, minute, true)
+        AlertDialog(
+            onDismissRequest = { showPicker = false },
+            title = { Text("שעת ברירת מחדל") },
+            text = { TimePicker(state) },
+            confirmButton = {
+                TextButton({ onChange(state.hour, state.minute); showPicker = false }) { Text("אישור") }
+            },
+            dismissButton = { TextButton({ showPicker = false }) { Text("ביטול") } },
+        )
+    }
+}
+
+@Composable
+private fun DefaultSwitchRow(
+    title: String, supporting: String, checked: Boolean, isDefault: Boolean,
+    onChange: (Boolean) -> Unit, onReset: () -> Unit,
+) {
+    ListItem(
+        headlineContent = { Text(title, fontWeight = FontWeight.Medium) },
+        supportingContent = { Text(supporting) },
+        trailingContent = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                RestoreButton(isDefault, onReset)
+                Switch(checked, onCheckedChange = onChange)
+            }
+        },
+    )
+}
+
+/**
+ * A numeric default, typed rather than dragged.
+ *
+ * A slider per row would make this section enormous and is the wrong control for a value
+ * set once and then left alone. The dialog validates against the same bounds the edit
+ * screen's slider uses, so a default can never be set to something the alarm editor
+ * would refuse.
+ */
+@Composable
+private fun DefaultNumberRow(
+    title: String, value: Int, min: Int, max: Int, display: (Int) -> String,
+    isDefault: Boolean, onChange: (Int) -> Unit, onReset: () -> Unit,
+) {
+    var showDialog by remember { mutableStateOf(false) }
+    ListItem(
+        headlineContent = { Text(title, fontWeight = FontWeight.Medium) },
+        trailingContent = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                RestoreButton(isDefault, onReset)
+                Text(display(value), style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+            }
+        },
+        modifier = Modifier.clickable { showDialog = true },
+    )
+    if (showDialog) {
+        var text by remember { mutableStateOf(value.toString()) }
+        val parsed = text.toIntOrNull()
+        val error = parsed == null || parsed < min || parsed > max
+        AlertDialog(
+            onDismissRequest = { showDialog = false },
+            title = { Text(title) },
+            text = {
+                Column {
+                    OutlinedTextField(
+                        value = text,
+                        onValueChange = { text = it.filter(Char::isDigit).take(4) },
+                        singleLine = true,
+                        isError = error,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        if (error) "הזן ערך בין $min ל-$max" else display(parsed!!),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (error) MaterialTheme.colorScheme.error
+                                else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton({ onChange(parsed!!); showDialog = false }, enabled = !error) { Text("אישור") }
+            },
+            dismissButton = { TextButton({ showDialog = false }) { Text("ביטול") } },
+        )
+    }
+}
+
+@Composable
+private fun DefaultVibrationRow(
+    mode: VibrationMode, isDefault: Boolean,
+    onChange: (VibrationMode) -> Unit, onReset: () -> Unit,
+) {
+    var showDialog by remember { mutableStateOf(false) }
+    ListItem(
+        headlineContent = { Text("רטט וצלצול", fontWeight = FontWeight.Medium) },
+        trailingContent = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                RestoreButton(isDefault, onReset)
+                Text(vibrationModeLabel(mode), style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+            }
+        },
+        modifier = Modifier.clickable { showDialog = true },
+    )
+    if (showDialog) {
+        AlertDialog(
+            onDismissRequest = { showDialog = false },
+            title = { Text("רטט וצלצול") },
+            text = {
+                Column {
+                    VibrationMode.entries.forEach { option ->
+                        Row(
+                            Modifier.fillMaxWidth().clickable { onChange(option); showDialog = false }
+                                .padding(vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            RadioButton(option == mode, onClick = { onChange(option); showDialog = false })
+                            Spacer(Modifier.width(8.dp))
+                            Text(vibrationModeLabel(option))
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton({ showDialog = false }) { Text("סגור") } },
+        )
+    }
+}
+
+/** Shared so the Settings row and the edit screen cannot drift apart in wording. */
+private fun vibrationModeLabel(mode: VibrationMode): String = when (mode) {
+    VibrationMode.SOUND_ONLY           -> "צליל בלבד"
+    VibrationMode.VIBRATION_ONLY       -> "רטט בלבד"
+    VibrationMode.SOUND_AND_VIBRATION  -> "צליל ורטט"
+    VibrationMode.VIBRATION_THEN_SOUND -> "רטט ואז צליל"
 }
 
 @Composable

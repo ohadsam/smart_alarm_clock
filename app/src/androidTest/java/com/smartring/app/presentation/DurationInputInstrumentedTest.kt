@@ -1,6 +1,6 @@
 package com.smartring.app.presentation
 
-import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -82,8 +82,12 @@ class DurationInputInstrumentedTest {
         composeRule.waitForIdle()
 
         composeRule.onNodeWithTag(AlarmEditTags.NAME_FIELD).performTextInput("משך")
+        // Scrolls to the *tagged badge* rather than to the label's text. The label was
+        // renamed to "משך צלצול כולל" in v1.7.0 to distinguish it from a round's own
+        // duration, and hasText matches exactly — so a matcher written against the old
+        // wording silently stops finding anything the moment the copy changes.
         composeRule.onNodeWithTag(AlarmEditTags.FORM_LIST)
-            .performScrollToNode(hasText("משך צלצול"))
+            .performScrollToNode(hasTestTag(AlarmEditTags.RING_DURATION_BADGE))
         composeRule.waitForIdle()
 
         // By tag, not by text: several sliders here legitimately read "1 דק׳" at their

@@ -4,6 +4,20 @@ import android.app.AlarmManager
 import android.content.Context
 import android.content.pm.PackageManager
 
+/**
+ * The next alarm clock the OS knows about, and whether this app is the one that set it.
+ *
+ * A null `showIntent` counts as ours: the only registration this app makes without a
+ * readable creator would be its own, and treating an unattributable alarm as somebody
+ * else's would produce a warning naming no app at all.
+ */
+data class RegisteredAlarm(
+    val packageName: String,
+    val appLabel: String,
+    val triggerAtMillis: Long,
+    val isOurs: Boolean,
+)
+
 /** An alarm clock some *other* app has registered with the OS. */
 data class ForeignAlarm(
     val packageName: String,
@@ -41,16 +55,38 @@ data class ForeignAlarm(
  */
 object ForeignAlarms {
 
-    /** The next alarm clock on this device that belongs to another app, if any. */
-    fun next(context: Context): ForeignAlarm? {
+    /**
+     * The next alarm clock registered on this device, whoever owns it — including this
+     * app.
+     *
+     * Exposed as well as [next] because it answers a second question the user asked and
+     * the app could not previously address: whether the system's own next-alarm
+     * indicator (the little clock in the status bar) is showing *their* alarm. That
+     * indicator comes from `setAlarmClock`, so "nothing in the status bar" means either
+     * nothing is armed or the exact-alarm permission forced the inexact fallback — and
+     * both are worth being able to see rather than guess at.
+     */
+    fun nextRegistered(context: Context): RegisteredAlarm? {
         val manager = context.getSystemService(AlarmManager::class.java) ?: return null
         // Reading this never throws and needs no permission, but the whole call is
         // wrapped anyway: it runs on every resume of the alarm list, and an OEM
         // AlarmManager misbehaving is not worth taking the screen down for.
         val info = runCatching { manager.nextAlarmClock }.getOrNull() ?: return null
         val owner = runCatching { info.showIntent?.creatorPackage }.getOrNull()
-        if (!isForeignOwner(owner, context.packageName)) return null
-        return ForeignAlarm(owner!!, appLabelFor(context, owner), info.triggerTime)
+        val ours = owner == null || owner == context.packageName
+        return RegisteredAlarm(
+            packageName = owner ?: context.packageName,
+            appLabel = if (ours) "" else appLabelFor(context, owner!!),
+            triggerAtMillis = info.triggerTime,
+            isOurs = ours,
+        )
+    }
+
+    /** The next alarm clock on this device that belongs to another app, if any. */
+    fun next(context: Context): ForeignAlarm? {
+        val registered = nextRegistered(context) ?: return null
+        if (registered.isOurs || !isForeignOwner(registered.packageName, context.packageName)) return null
+        return ForeignAlarm(registered.packageName, registered.appLabel, registered.triggerAtMillis)
     }
 
     /**

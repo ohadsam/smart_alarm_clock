@@ -21,6 +21,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.*
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -39,7 +40,8 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AlarmListScreen(onAddAlarm: ()->Unit, onEditAlarm: (Long)->Unit, onOpenHistory: ()->Unit, onOpenSettings: ()->Unit,
+fun AlarmListScreen(onAddAlarm: ()->Unit, onEditAlarm: (Long)->Unit,
+    onDuplicateAlarm: (Long)->Unit, onOpenHistory: ()->Unit, onOpenSettings: ()->Unit,
     vm: AlarmListViewModel = hiltViewModel()) {
     val state by vm.uiState.collectAsStateWithLifecycle()
     var showControls by remember { mutableStateOf(false) }
@@ -98,7 +100,8 @@ fun AlarmListScreen(onAddAlarm: ()->Unit, onEditAlarm: (Long)->Unit, onOpenHisto
                 // invisible banner would leave a visible gap at the top.
                 if (foreignAlarm != null) item { ForeignAlarmBanner(foreignAlarm) }
                 items(state.alarms,key={it.id}) { alarm ->
-                    AlarmCardItem(alarm,{vm.toggle(alarm,it)},{onEditAlarm(alarm.id)},{vm.delete(alarm)})
+                    AlarmCardItem(alarm,{vm.toggle(alarm,it)},{onEditAlarm(alarm.id)},
+                        {onDuplicateAlarm(alarm.id)},{vm.delete(alarm)})
                 }
             }
         }
@@ -143,7 +146,8 @@ fun AlarmListScreen(onAddAlarm: ()->Unit, onEditAlarm: (Long)->Unit, onOpenHisto
 
 @OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
-private fun AlarmCardItem(alarm: Alarm, onToggle:(Boolean)->Unit, onEdit:()->Unit, onDelete:()->Unit) {
+private fun AlarmCardItem(alarm: Alarm, onToggle:(Boolean)->Unit, onEdit:()->Unit,
+    onDuplicate:()->Unit, onDelete:()->Unit) {
     var showDel by remember { mutableStateOf(false) }
     // Theme color roles rather than the raw Blue/Green constants: those are tuned for
     // the dark scheme's near-black card, and Green (a pale mint) as a 8dp dot and a
@@ -187,9 +191,16 @@ private fun AlarmCardItem(alarm: Alarm, onToggle:(Boolean)->Unit, onEdit:()->Uni
             Box(Modifier.size(8.dp).clip(CircleShape).background(dotColor))
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)){
+                // Struck through once the alarm has rung and retired. A finished one-time
+                // alarm used to look exactly like a paused repeating one, so the list gave
+                // no way to tell "this already happened" from "this is switched off" —
+                // and the answer changes what the user should do about it.
+                val finishedDecoration = if (alarm.hasFinished) TextDecoration.LineThrough else null
                 Text(alarm.timeFormatted,style=MaterialTheme.typography.headlineMedium,fontWeight=FontWeight.ExtraBold,
+                    textDecoration = finishedDecoration,
                     color=if(alarm.isActive)MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant)
-                Text(alarm.name,style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant,maxLines=1)
+                Text(alarm.name,style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant,
+                    textDecoration = finishedDecoration, maxLines=1)
                 // Which days this actually rings on. Without it two alarms at the same
                 // time — one every weekday, one a single next-Tuesday reminder — looked
                 // completely identical in the list.
@@ -199,9 +210,13 @@ private fun AlarmCardItem(alarm: Alarm, onToggle:(Boolean)->Unit, onEdit:()->Uni
                     Spacer(Modifier.height(2.dp))
                     Text("📝 $it",style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.tertiary,maxLines=1)
                 }
-                if (alarm.isFrozen || alarm.isShabbatMode || !alarm.snoozeEnabled) {
+                if (alarm.hasFinished || alarm.isFrozen || alarm.isShabbatMode || !alarm.snoozeEnabled) {
                     Spacer(Modifier.height(3.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        // Says what to do about it, not just what happened: the fix is one
+                        // toggle away and nothing previously pointed at it.
+                        if (alarm.hasFinished)
+                            MiniBadge("✔ צלצל והסתיים — הפעל כדי לתזמן מחדש", MaterialTheme.colorScheme.secondary)
                         // A frozen alarm keeps isEnabled = true, so its switch stays
                         // visibly ON while the alarm will not ring at all — the only
                         // hint was the color of an 8dp dot. Say it in words.
@@ -219,16 +234,19 @@ private fun AlarmCardItem(alarm: Alarm, onToggle:(Boolean)->Unit, onEdit:()->Uni
                     modifier=Modifier.semantics{contentDescription=
                         "שעמור ${alarm.name.ifBlank{alarm.timeFormatted}} בשעה ${alarm.timeFormatted}, " +
                         when { alarm.isFrozen -> "מוקפא"; alarm.isEnabled -> "פעיל"; else -> "כבוי" }})
-                // Mentions the swipe gesture too — it was added alongside long-press but
-                // this hint still named only long-press, so the quicker of the two ways
-                // to delete a card was undiscoverable.
-                // No fontSize override: labelSmall is already the smallest step in the
-                // type scale (11sp), and overriding it down to 9sp put this below the
-                // size Material treats as legible at all — on a hint that exists to teach
-                // a gesture the user cannot otherwise discover.
-                Text("החלק או לחץ ארוכות למחיקה",
-                    style=MaterialTheme.typography.labelSmall,
-                    color=MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha=0.7f))
+                // Explicit buttons rather than only the swipe and long-press gestures.
+                // Those still work, but a gesture nobody discovers is not an affordance,
+                // and duplicating had no gesture at all.
+                Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                    IconButton(onDuplicate, Modifier.size(40.dp)) {
+                        Icon(Icons.Rounded.ContentCopy, "שכפל את ${alarm.name}",
+                            Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
+                    }
+                    IconButton({ showDel = true }, Modifier.size(40.dp)) {
+                        Icon(Icons.Rounded.DeleteOutline, "מחק את ${alarm.name}",
+                            Modifier.size(18.dp), tint = MaterialTheme.colorScheme.error)
+                    }
+                }
             }
         }
     }

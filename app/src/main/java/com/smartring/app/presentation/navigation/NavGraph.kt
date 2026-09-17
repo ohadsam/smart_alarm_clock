@@ -14,7 +14,7 @@ sealed class Screen(val route: String) {
     object List     : Screen("list")
     // name/hour/minute are optional prefill values for a brand-new alarm (id=0),
     // used by History's "load again" action; a real edit (id>0) ignores them.
-    object Edit     : Screen("edit/{alarmId}?name={name}&hour={hour}&minute={minute}") {
+    object Edit     : Screen("edit/{alarmId}?name={name}&hour={hour}&minute={minute}&copyOf={copyOf}") {
         fun go(id: Long, name: String? = null, hour: Int? = null, minute: Int? = null): String {
             val params = buildList {
                 name?.let { add("name=${Uri.encode(it)}") }
@@ -23,6 +23,18 @@ sealed class Screen(val route: String) {
             }
             return "edit/$id" + if (params.isEmpty()) "" else "?${params.joinToString("&")}"
         }
+
+        /**
+         * Duplicating opens the editor on a *new, unsaved* alarm copied from [sourceId],
+         * rather than writing a copy straight to the database.
+         *
+         * That is what makes duplicating a finished one-time alarm behave: the copy
+         * arrives with the original's past date, and save() refuses a date in the past —
+         * so the user is required to pick a future one before the copy can exist at all.
+         * Writing the copy directly would have produced a second alarm that could never
+         * ring, which is the bug this release is mostly about.
+         */
+        fun duplicate(sourceId: Long) = "edit/0?copyOf=$sourceId"
     }
     object Ring     : Screen("ring/{alarmId}") { fun go(id: Long) = "ring/$id" }
     object History  : Screen("history")
@@ -67,6 +79,7 @@ fun SmartRingNavGraph(alarmTrigger: Pair<Long, Long> = 0L to -1L) {
             AlarmListScreen(
                 onAddAlarm    = { nav.navigate(Screen.Edit.go(0L)) },
                 onEditAlarm   = { nav.navigate(Screen.Edit.go(it)) },
+                onDuplicateAlarm = { nav.navigate(Screen.Edit.duplicate(it)) },
                 onOpenHistory = { nav.navigate(Screen.History.route) },
                 onOpenSettings= { nav.navigate(Screen.Settings.route) },
             )
@@ -76,12 +89,14 @@ fun SmartRingNavGraph(alarmTrigger: Pair<Long, Long> = 0L to -1L) {
             navArgument("name")   { type = NavType.StringType; nullable = true; defaultValue = null },
             navArgument("hour")   { type = NavType.IntType; defaultValue = -1 },
             navArgument("minute") { type = NavType.IntType; defaultValue = -1 },
+            navArgument("copyOf") { type = NavType.LongType; defaultValue = 0L },
         )) {
             AlarmEditScreen(
                 alarmId       = it.arguments?.getLong("alarmId") ?: 0L,
                 prefillName   = it.arguments?.getString("name"),
                 prefillHour   = it.arguments?.getInt("hour")?.takeIf { h -> h >= 0 },
                 prefillMinute = it.arguments?.getInt("minute")?.takeIf { m -> m >= 0 },
+                copyOfAlarmId = it.arguments?.getLong("copyOf")?.takeIf { c -> c > 0L } ?: 0L,
                 onBack        = { nav.popBackStack() },
             )
         }

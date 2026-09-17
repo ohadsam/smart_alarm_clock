@@ -108,6 +108,13 @@
 | 79 | כפתורי התאריך והשעה ברוחב מלא; שעה עם `softWrap = false` ולא נשברת לשורות | `DateTimePickerInline` (v1.6.11) |
 | 80 | התרעה על שעמור מאפליקציה אחרת (כבוי כברירת מחדל) — זיהוי בלבד, כיבוי בלתי אפשרי ב-Android | `util/ForeignAlarms.kt` + `ForeignAlarmBanner` (v1.6.12) |
 | 81 | שמות מתודות ב-androidTest חייבים להיות camelCase — D8 פוסל רווחים מתחת ל-API 30 | `DurationInputInstrumentedTest` (v1.6.12) |
+| 82 | מתג "השעמור פעיל" במסך העריכה; הפעלה מחדש מאפסת את מונה החזרות | `AlarmEditViewModel` (v1.7.0) |
+| 83 | תאריך ספציפי שעבר נדחה בשמירה — לא נשמר-ואז-מבוטל | `AlarmEditViewModel.save` (v1.7.0) |
+| 84 | `Alarm.hasFinished` — שעמור חד-פעמי שצלצל; מוצג עם קו חוצה ותגית | `domain/model/Alarm.kt` + `AlarmFinishedTest` (v1.7.0) |
+| 85 | שכפול פותח שעמור חדש לא-שמור (ולכן עובר דרך דחיית התאריך שעבר) | `NavGraph` + `loadAsCopy` (v1.7.0) |
+| 86 | 15 ברירות מחדל לשעמור חדש, עם שחזור פרטני לכל אחת | `AlarmDefaultsRepository` (v1.7.0) |
+| 87 | השמעת הצליל של סבב בעוצמה שנבחרה, דרך ערוץ ההתראה האמיתי | `util/RingtonePreview.kt` (v1.7.0) |
+| 88 | אבחון בהגדרות: מה רשום במערכת (שלנו / של אפליקציה אחרת / כלום) | `ForeignAlarms.nextRegistered` (v1.7.0) |
 
 ---
 

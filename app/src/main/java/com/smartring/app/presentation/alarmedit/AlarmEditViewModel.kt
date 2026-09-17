@@ -1,9 +1,12 @@
 package com.smartring.app.presentation.alarmedit
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.smartring.app.data.repository.AlarmDefaultsRepository
 import com.smartring.app.data.repository.AlarmRepository
 import com.smartring.app.domain.model.*
 import com.smartring.app.util.AlarmScheduler
+import com.smartring.app.util.COPY_SUFFIX
+import com.smartring.app.util.GENERIC_ALARM_NAME
 import com.smartring.app.util.AppLogger
 import com.smartring.app.util.endOfPickedDay
 import com.smartring.app.util.formatNextFireAt
@@ -65,17 +68,49 @@ data class AlarmEditUiState(
     // ring, and the screen used to say nothing at all: the "next fire" hint just
     // vanished, which reads as a rendering quirk rather than "this will not go off".
     val neverFires: Boolean                = false,
-    // Preserved verbatim from the loaded alarm; not editable on this screen but must
-    // survive save() so editing an alarm doesn't silently re-enable/un-freeze it or
-    // reset its COUNT-recurrence progress.
+    /**
+     * Editable on this screen, which it was not until v1.6.13 — and that was the single
+     * worst bug in the app.
+     *
+     * AlarmFiringService switches a one-time alarm off once it has rung, which is right.
+     * But this field was documented as "preserved verbatim, not editable here", so
+     * opening that alarm, giving it a new time and saving wrote `isEnabled = false`
+     * straight back — and `schedule()` cancels anything that is not active. The alarm
+     * saved perfectly and could never ring again, with nothing on screen to say why. It
+     * also emptied the widgets and the status-bar indicator, which both only ever show
+     * armed alarms.
+     *
+     * The original intent — never silently re-enable an alarm the user deliberately
+     * turned off — still holds. It is met by making the state visible and letting the
+     * user decide, not by making it unreachable.
+     */
     val isEnabled: Boolean                 = true,
+    /**
+     * Whether the alarm was already off when this screen opened. Saving with the toggle
+     * back on is then an explicit revival, and [AlarmEditViewModel.save] resets the
+     * COUNT-recurrence progress so a finished alarm can genuinely run again instead of
+     * being re-enabled into an already-expired recurrence.
+     */
+    val loadedDisabled: Boolean            = false,
     val isFrozen: Boolean                  = false,
     val occurrencesFired: Int              = 0,
+    /**
+     * The chosen specific date/time is in the past. Blocks the save rather than warning,
+     * because there is no reading of "ring me last Tuesday" that this app can honour.
+     */
+    val pastDateError: Boolean             = false,
+    /**
+     * The "no name needed" toggle. Mirrors `name == GENERIC_ALARM_NAME` rather than being
+     * derived from it on the fly, so that clearing the toggle can restore an empty field
+     * instead of leaving the generic name sitting there looking like the user typed it.
+     */
+    val unnamed: Boolean                   = false,
 )
 
 @HiltViewModel
 class AlarmEditViewModel @Inject constructor(
     private val repository: AlarmRepository,
+    private val defaultsRepository: AlarmDefaultsRepository,
     private val scheduler: AlarmScheduler,
     private val appLogger: AppLogger,
 ) : ViewModel() {
@@ -99,7 +134,20 @@ class AlarmEditViewModel @Inject constructor(
         editingId = id
         viewModelScope.launch {
             val a = repository.getAlarm(id) ?: return@launch
-            val loaded = AlarmEditUiState(
+            val loaded = stateFromAlarm(a)
+            originalState = loaded
+            _state.update { loaded }
+        }
+    }
+
+    /**
+     * Every field of an [Alarm] as edit-screen state. Shared by [loadAlarm] and
+     * [loadAsCopy] so a field added to one can never be forgotten by the other — the
+     * duplicate path silently dropping a setting would be invisible until an alarm rang
+     * differently from the one it was copied from.
+     */
+    private fun stateFromAlarm(a: Alarm): AlarmEditUiState =
+            AlarmEditUiState(
                     name                 = a.name,
                     hour                 = a.hour,
                     minute               = a.minute,
@@ -123,7 +171,9 @@ class AlarmEditViewModel @Inject constructor(
                     crescendoStartVolume = a.crescendoStartVolume,
                     crescendoStepSeconds = a.crescendoStepSeconds,
                     crescendoStepPercent = a.crescendoStepPercent,
+                    unnamed              = a.name == GENERIC_ALARM_NAME,
                     isEnabled            = a.isEnabled,
+                    loadedDisabled       = !a.isEnabled,
                     isFrozen             = a.isFrozen,
                     occurrencesFired     = a.occurrencesFired,
                     // Computed up front (not via a separate updateNextFireHint() call
@@ -134,28 +184,108 @@ class AlarmEditViewModel @Inject constructor(
                     nextFireHint         = nextFireHintFor(a),
                     neverFires           = scheduler.effectiveNextFireTime(a) == null,
             )
-            originalState = loaded
-            _state.update { loaded }
+
+    /**
+     * Loads [sourceId]'s settings into a brand-new, unsaved alarm.
+     *
+     * `editingId` stays 0, so saving inserts rather than overwrites. Three things are
+     * deliberately *not* copied:
+     *
+     *  - the enabled state and the occurrence counter, because a copy of a finished alarm
+     *    should arrive ready to run, not pre-retired;
+     *  - `originalState`, which stays null. `isDirty` is false while it is null, so
+     *    backing out of an unsaved copy leaves without prompting — the same as backing
+     *    out of any other new alarm, which is the existing behaviour for id 0 and is
+     *    left alone here rather than changed as a side effect of adding duplication;
+     *  - nothing about the date. The copy keeps the original's `specificDateTime` even
+     *    when it is in the past, precisely so `save()` refuses it and the user has to
+     *    choose a future one. Silently clearing or advancing the date would be guessing
+     *    at which date they meant.
+     */
+    fun loadAsCopy(sourceId: Long) {
+        if (sourceId <= 0L) return
+        editingId = 0L
+        viewModelScope.launch {
+            val a = repository.getAlarm(sourceId) ?: return@launch
+            _state.update {
+                stateFromAlarm(a).copy(
+                    name             = copyNameFor(a.name),
+                    isEnabled        = true,
+                    loadedDisabled   = false,
+                    occurrencesFired = 0,
+                    unnamed          = false,
+                )
+            }
         }
     }
+
+    /** "קום לעבודה" -> "קום לעבודה (עותק)", and left alone if it already says so. */
+    private fun copyNameFor(name: String): String =
+        if (name.endsWith(COPY_SUFFIX)) name else "$name$COPY_SUFFIX"
 
     val isDirty: Boolean get() = originalState != null && _state.value != originalState
 
-    /** Pre-fills a brand-new (unsaved) alarm from a History "load again" action. */
-    fun prefill(name: String?, hour: Int?, minute: Int?) {
-        _state.update { s ->
-            s.copy(
-                name   = name ?: s.name,
-                hour   = hour ?: s.hour,
-                minute = minute ?: s.minute,
-            )
+    /**
+     * Starts a brand-new alarm from the user's configured defaults, then applies any
+     * prefill from History's "load again" action on top.
+     *
+     * Replaces the old `prefill`, which only ever set name/hour/minute and left every
+     * other field on the compiled-in constant. Defaults are read once, not collected:
+     * a new alarm is seeded when the screen opens, and having the form mutate underneath
+     * someone because they changed a default in another window would be worse than
+     * stale.
+     */
+    fun startNew(name: String? = null, hour: Int? = null, minute: Int? = null) {
+        viewModelScope.launch {
+            val d = defaultsRepository.defaults.first()
+            _state.update {
+                AlarmEditUiState(
+                    name                 = name ?: if (d.unnamed) GENERIC_ALARM_NAME else "",
+                    unnamed              = name == null && d.unnamed,
+                    hour                 = hour ?: d.hour,
+                    minute               = minute ?: d.minute,
+                    ringDurationSeconds  = d.ringDurationSeconds,
+                    rings                = listOf(AlarmRing(volumePercent = d.ringVolumePercent)),
+                    snoozeEnabled        = d.snoozeEnabled,
+                    snoozeMinutes        = d.snoozeMinutes,
+                    snoozeMaxCount       = d.snoozeMaxCount,
+                    vibrationMode        = d.vibrationMode,
+                    vibrationOnlySeconds = d.vibrationOnlySeconds,
+                    crescendoEnabled     = d.crescendoEnabled,
+                    crescendoStartVolume = d.crescendoStartVolume,
+                    crescendoStepSeconds = d.crescendoStepSeconds,
+                    crescendoStepPercent = d.crescendoStepPercent,
+                    isShabbatMode        = d.isShabbatMode,
+                )
+            }
+            updateNextFireHintLater()
         }
-        updateNextFireHintLater()
     }
 
     // ── Setters ───────────────────────────────────────────────────
-    fun setName(v: String)                       = _state.update { it.copy(name = v, nameError = false) }
-    fun setTime(h: Int, m: Int)                   = _state.update { it.copy(hour = h, minute = m).also { updateNextFireHintLater() } }
+    // Typing clears the toggle: the field and the toggle would otherwise disagree, and
+    // the toggle is what decides whether clearing it wipes the field.
+    fun setName(v: String) = _state.update {
+        it.copy(name = v, nameError = false, unnamed = v == GENERIC_ALARM_NAME)
+    }
+    fun setEnabled(v: Boolean)                   = _state.update { it.copy(isEnabled = v) }
+
+    /**
+     * Fills in (or clears) the generic name.
+     *
+     * Turning it off only clears the field when it still holds the generic name: someone
+     * who switched it on, off, and then typed their own name must not have that erased by
+     * a later toggle.
+     */
+    fun setUnnamed(v: Boolean) = _state.update {
+        it.copy(
+            unnamed = v,
+            name = if (v) GENERIC_ALARM_NAME
+                   else if (it.name == GENERIC_ALARM_NAME) "" else it.name,
+            nameError = false,
+        )
+    }
+    fun setTime(h: Int, m: Int)                   = _state.update { it.copy(hour = h, minute = m, pastDateError = false).also { updateNextFireHintLater() } }
     /**
      * Keeps hour/minute in step with the chosen datetime. Everything that displays an
      * alarm outside this screen — the list card, every widget size, the notification —
@@ -165,13 +295,16 @@ class AlarmEditViewModel @Inject constructor(
      * picked time.
      */
     fun setSpecificDateTime(dt: Long?) = _state.update { s ->
-        if (dt == null) s.copy(specificDateTime = null)
+        if (dt == null) s.copy(specificDateTime = null, pastDateError = false)
         else {
             val cal = Calendar.getInstance().apply { timeInMillis = dt }
             s.copy(
                 specificDateTime = dt,
                 hour   = cal.get(Calendar.HOUR_OF_DAY),
                 minute = cal.get(Calendar.MINUTE),
+                // Cleared on every pick so the refusal disappears the moment the user
+                // chooses a valid date, rather than lingering until the next save.
+                pastDateError = false,
             ).also { updateNextFireHintLater() }
         }
     }
@@ -258,7 +391,16 @@ class AlarmEditViewModel @Inject constructor(
             _scrollToNameRequests.tryEmit(Unit)
             return
         }
-        _state.update { it.copy(isSaving = true, saveError = false) }
+        // A specific date/time already in the past is refused outright, not saved with a
+        // warning. It is the one configuration that is certainly a mistake: the previous
+        // behaviour let it through, `nextFireTime` returned null, `schedule()` cancelled,
+        // and the user was left with an alarm that looked saved and was not armed. This
+        // is reachable straight from editing or duplicating an alarm that already rang.
+        if (s.specificDateTime != null && s.specificDateTime <= System.currentTimeMillis()) {
+            _state.update { it.copy(pastDateError = true) }
+            return
+        }
+        _state.update { it.copy(isSaving = true, saveError = false, pastDateError = false) }
         viewModelScope.launch {
             // Without this, a failing write (a database error, an AlarmManager refusing
             // one more exact alarm) left isSaving stuck at true forever: the save button
@@ -267,6 +409,11 @@ class AlarmEditViewModel @Inject constructor(
             try {
                 val alarm = buildAlarm(s)
                 val savedId = repository.saveAlarm(alarm)
+                // Logged so a revival is visible in the diagnostics: this is the path
+                // that used to fail silently, and "why did my alarm stop working" is
+                // exactly the question the log exists to answer.
+                if (s.loadedDisabled && s.isEnabled) appLogger.log("AlarmEdit",
+                    "\"${alarm.name}\" (#$savedId) הופעל מחדש; מונה החזרות אופס")
                 scheduler.schedule(alarm.copy(id = savedId))
                 appLogger.log("AlarmEdit", (if (editingId > 0L) "שעמור עודכן: " else "שעמור חדש נוצר: ") +
                     "\"${alarm.name}\" (#$savedId) ל-%02d:%02d".format(alarm.hour, alarm.minute))
@@ -280,6 +427,14 @@ class AlarmEditViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Turning a disabled alarm back on resets [Alarm.occurrencesFired].
+     *
+     * Without it, re-enabling a COUNT-limited alarm that had run out of occurrences puts
+     * it straight back into `isRecurrenceExpired()`, and `schedule()` cancels it again —
+     * the toggle would appear to do nothing. Only on an explicit off-to-on transition:
+     * editing the name of an alarm that is mid-way through its count must not restart it.
+     */
     private fun buildAlarm(s: AlarmEditUiState) = Alarm(
         id                   = editingId,
         name                 = s.name.trim(),
@@ -288,7 +443,7 @@ class AlarmEditViewModel @Inject constructor(
         specificDateTime     = s.specificDateTime,
         isEnabled            = s.isEnabled,
         isFrozen             = s.isFrozen,
-        occurrencesFired     = s.occurrencesFired,
+        occurrencesFired     = if (s.loadedDisabled && s.isEnabled) 0 else s.occurrencesFired,
         repeatDaysBitmask    = s.repeatDaysBitmask,
         repeatFrequency      = s.repeatFrequency,
         recurrenceEnd        = RecurrenceEnd(s.recurrenceEndType, s.recurrenceUntilDate, s.recurrenceCount),

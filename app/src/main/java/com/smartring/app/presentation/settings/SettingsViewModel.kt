@@ -4,6 +4,8 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.*
 import androidx.datastore.preferences.preferencesDataStore
 import androidx.lifecycle.ViewModel
+import com.smartring.app.data.repository.AlarmDefaults
+import com.smartring.app.data.repository.AlarmDefaultsRepository
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -25,7 +27,25 @@ data class SettingsUiState(
 )
 
 @HiltViewModel
-class SettingsViewModel @Inject constructor(@ApplicationContext private val ctx: Context) : ViewModel() {
+class SettingsViewModel @Inject constructor(
+    @ApplicationContext private val ctx: Context,
+    private val alarmDefaults: AlarmDefaultsRepository,
+) : ViewModel() {
+
+    /** What a brand-new alarm starts out as; edited from the Settings screen. */
+    val defaults = alarmDefaults.defaults
+        .stateIn(viewModelScope, SharingStarted.Eagerly, AlarmDefaults.BUILT_IN)
+
+    /**
+     * Both "change this default" and "restore this default" go through here, expressed as
+     * a copy() at the call site — `{ it.copy(snoozeMinutes = 5) }` versus
+     * `{ it.copy(snoozeMinutes = AlarmDefaults.BUILT_IN.snoozeMinutes) }`. Fifteen
+     * controls times two operations would otherwise be thirty near-identical methods.
+     */
+    fun updateDefaults(transform: (AlarmDefaults) -> AlarmDefaults) =
+        viewModelScope.launch { alarmDefaults.update(transform) }
+
+    fun resetAllDefaults() = viewModelScope.launch { alarmDefaults.resetAll() }
     private val kLang  = stringPreferencesKey("language")
     private val kTheme = stringPreferencesKey("theme_mode")
     private val kWarnForeign = booleanPreferencesKey("warn_foreign_alarms")

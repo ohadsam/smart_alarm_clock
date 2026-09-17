@@ -1,5 +1,7 @@
 package com.smartring.app.presentation.alarmedit
 
+import com.smartring.app.data.repository.AlarmDefaults
+import com.smartring.app.data.repository.AlarmDefaultsRepository
 import com.smartring.app.data.repository.AlarmRepository
 import com.smartring.app.domain.model.Alarm
 import com.smartring.app.domain.model.RecurrenceEnd
@@ -11,6 +13,7 @@ import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
@@ -29,14 +32,19 @@ import java.util.Calendar
 import java.util.TimeZone
 
 /**
- * Plain JUnit (no Robolectric/Android environment needed): AlarmEditViewModel's
- * constructor only takes AlarmRepository/AlarmScheduler/AppLogger, all mocked here.
+ * Plain JUnit (no Robolectric/Android environment needed): every one of
+ * AlarmEditViewModel's dependencies is mocked here.
+ *
+ * AlarmDefaultsRepository is stubbed to emit the shipped defaults, so these tests keep
+ * describing the behaviour of a default new alarm rather than of whatever the user
+ * happens to have configured.
  */
 class AlarmEditViewModelTest {
     private val testDispatcher = StandardTestDispatcher()
     private lateinit var repository: AlarmRepository
     private lateinit var scheduler: AlarmScheduler
     private lateinit var appLogger: AppLogger
+    private lateinit var defaultsRepository: AlarmDefaultsRepository
     private lateinit var vm: AlarmEditViewModel
 
     @Before
@@ -45,7 +53,9 @@ class AlarmEditViewModelTest {
         repository = mockk(relaxed = true)
         scheduler = mockk(relaxed = true)
         appLogger = mockk(relaxed = true)
-        vm = AlarmEditViewModel(repository, scheduler, appLogger)
+        defaultsRepository = mockk(relaxed = true)
+        every { defaultsRepository.defaults } returns flowOf(AlarmDefaults.BUILT_IN)
+        vm = AlarmEditViewModel(repository, defaultsRepository, scheduler, appLogger)
     }
 
     @After
@@ -349,5 +359,242 @@ class AlarmEditViewModelTest {
         assertTrue(vm.state.value.nameError)
         coVerify(exactly = 0) { repository.saveAlarm(any()) }
     }
-}
 
+    // ── Reviving an alarm that has already rung ─────────────────────────────
+    //
+    // The bug these cover was the worst one this app has had. A one-time alarm switches
+    // itself off after ringing; the edit screen preserved that state and offered no way
+    // to change it; so opening the alarm, giving it a new time and saving wrote the off
+    // state straight back and schedule() cancelled it. It saved and could never ring,
+    // and it disappeared from the widgets and the status bar at the same time, because
+    // both only ever show armed alarms.
+
+    private fun rungOneTimeAlarm() = Alarm(
+        id = 5, name = "חד-פעמי", hour = 7, minute = 0,
+        isEnabled = false, occurrencesFired = 1, repeatDaysBitmask = 0,
+    )
+
+    @Test
+    fun `an alarm that rang loads with its off state visible`() = runTest(testDispatcher) {
+        coEvery { repository.getAlarm(5L) } returns rungOneTimeAlarm()
+
+        vm.loadAlarm(5L)
+        advanceUntilIdle()
+
+        assertFalse("the off state must be shown, not hidden", vm.state.value.isEnabled)
+        assertTrue("and remembered, so saving it back on counts as a revival",
+            vm.state.value.loadedDisabled)
+    }
+
+    @Test
+    fun `switching a rung alarm back on and saving stores it enabled`() = runTest(testDispatcher) {
+        coEvery { repository.getAlarm(5L) } returns rungOneTimeAlarm()
+        coEvery { repository.saveAlarm(any()) } returns 5L
+        vm.loadAlarm(5L)
+        advanceUntilIdle()
+
+        vm.setEnabled(true)
+        vm.save()
+        advanceUntilIdle()
+
+        coVerify { repository.saveAlarm(match { it.isEnabled }) }
+    }
+
+    /**
+     * Re-enabling without this puts a COUNT-limited alarm straight back into
+     * isRecurrenceExpired(), so schedule() cancels it again and the toggle appears to do
+     * nothing at all.
+     */
+    @Test
+    fun `reviving a rung alarm resets its occurrence counter`() = runTest(testDispatcher) {
+        coEvery { repository.getAlarm(5L) } returns rungOneTimeAlarm()
+        coEvery { repository.saveAlarm(any()) } returns 5L
+        vm.loadAlarm(5L)
+        advanceUntilIdle()
+
+        vm.setEnabled(true)
+        vm.save()
+        advanceUntilIdle()
+
+        coVerify { repository.saveAlarm(match { it.occurrencesFired == 0 }) }
+    }
+
+    /** Editing an alarm that is mid-way through a count must not restart the count. */
+    @Test
+    fun `editing an already-enabled alarm keeps its occurrence counter`() = runTest(testDispatcher) {
+        coEvery { repository.getAlarm(6L) } returns
+            rungOneTimeAlarm().copy(id = 6, isEnabled = true, occurrencesFired = 3)
+        coEvery { repository.saveAlarm(any()) } returns 6L
+        vm.loadAlarm(6L)
+        advanceUntilIdle()
+
+        vm.setName("שם אחר")
+        vm.save()
+        advanceUntilIdle()
+
+        coVerify { repository.saveAlarm(match { it.occurrencesFired == 3 }) }
+    }
+
+    @Test
+    fun `an alarm the user left switched off stays off when saved`() = runTest(testDispatcher) {
+        coEvery { repository.getAlarm(5L) } returns rungOneTimeAlarm()
+        coEvery { repository.saveAlarm(any()) } returns 5L
+        vm.loadAlarm(5L)
+        advanceUntilIdle()
+
+        // No setEnabled(true): the original intent — never silently re-enable an alarm
+        // the user deliberately turned off — still has to hold.
+        vm.save()
+        advanceUntilIdle()
+
+        coVerify { repository.saveAlarm(match { !it.isEnabled }) }
+    }
+
+    // ── A specific date/time in the past is refused ─────────────────────────
+
+    @Test
+    fun `saving a specific date in the past is refused`() = runTest(testDispatcher) {
+        vm.setName("אתמול")
+        vm.setSpecificDateTime(System.currentTimeMillis() - 86_400_000L)
+
+        vm.save()
+        advanceUntilIdle()
+
+        assertTrue(vm.state.value.pastDateError)
+        coVerify(exactly = 0) { repository.saveAlarm(any()) }
+    }
+
+    @Test
+    fun `saving a specific date in the future is allowed`() = runTest(testDispatcher) {
+        coEvery { repository.saveAlarm(any()) } returns 1L
+        vm.setName("מחר")
+        vm.setSpecificDateTime(System.currentTimeMillis() + 86_400_000L)
+
+        vm.save()
+        advanceUntilIdle()
+
+        assertFalse(vm.state.value.pastDateError)
+        coVerify { repository.saveAlarm(any()) }
+    }
+
+    @Test
+    fun `picking a new date clears the past-date refusal`() = runTest(testDispatcher) {
+        vm.setName("תיקון")
+        vm.setSpecificDateTime(System.currentTimeMillis() - 86_400_000L)
+        vm.save()
+        advanceUntilIdle()
+        assertTrue(vm.state.value.pastDateError)
+
+        vm.setSpecificDateTime(System.currentTimeMillis() + 86_400_000L)
+
+        assertFalse("the refusal must clear on the next pick, not linger until save",
+            vm.state.value.pastDateError)
+    }
+
+    // ── Duplicating ────────────────────────────────────────────────────────
+
+    @Test
+    fun `a duplicate arrives enabled, uncounted, and renamed`() = runTest(testDispatcher) {
+        coEvery { repository.getAlarm(5L) } returns rungOneTimeAlarm()
+
+        vm.loadAsCopy(5L)
+        advanceUntilIdle()
+
+        val st = vm.state.value
+        assertTrue("a copy of a finished alarm must arrive ready to run", st.isEnabled)
+        assertEquals(0, st.occurrencesFired)
+        assertEquals("חד-פעמי (עותק)", st.name)
+    }
+
+    @Test
+    fun `duplicating writes a new alarm rather than overwriting the original`() = runTest(testDispatcher) {
+        coEvery { repository.getAlarm(5L) } returns rungOneTimeAlarm()
+        coEvery { repository.saveAlarm(any()) } returns 9L
+        vm.loadAsCopy(5L)
+        advanceUntilIdle()
+
+        vm.save()
+        advanceUntilIdle()
+
+        // id 0 is what tells the DAO to insert; anything else updates alarm 5 in place.
+        coVerify { repository.saveAlarm(match { it.id == 0L }) }
+    }
+
+    @Test
+    fun `duplicating does not re-suffix a name that already says copy`() = runTest(testDispatcher) {
+        coEvery { repository.getAlarm(5L) } returns rungOneTimeAlarm().copy(name = "בוקר (עותק)")
+
+        vm.loadAsCopy(5L)
+        advanceUntilIdle()
+
+        assertEquals("בוקר (עותק)", vm.state.value.name)
+    }
+
+    // ── New alarms start from the configured defaults ───────────────────────
+
+    @Test
+    fun `a new alarm uses the user's configured defaults`() = runTest(testDispatcher) {
+        every { defaultsRepository.defaults } returns flowOf(
+            AlarmDefaults.BUILT_IN.copy(
+                hour = 5, minute = 45, ringDurationSeconds = 180,
+                snoozeEnabled = true, snoozeMinutes = 7,
+            ),
+        )
+
+        vm.startNew()
+        advanceUntilIdle()
+
+        val st = vm.state.value
+        assertEquals(5, st.hour)
+        assertEquals(45, st.minute)
+        assertEquals(180, st.ringDurationSeconds)
+        assertTrue(st.snoozeEnabled)
+        assertEquals(7, st.snoozeMinutes)
+    }
+
+    @Test
+    fun `the unnamed default fills the name in so the form is savable immediately`() = runTest(testDispatcher) {
+        every { defaultsRepository.defaults } returns
+            flowOf(AlarmDefaults.BUILT_IN.copy(unnamed = true))
+
+        vm.startNew()
+        advanceUntilIdle()
+
+        assertTrue(vm.state.value.unnamed)
+        assertEquals("כללי", vm.state.value.name)
+    }
+
+    /** A prefill from History names the alarm, so it must win over the unnamed default. */
+    @Test
+    fun `a prefilled name overrides the unnamed default`() = runTest(testDispatcher) {
+        every { defaultsRepository.defaults } returns
+            flowOf(AlarmDefaults.BUILT_IN.copy(unnamed = true))
+
+        vm.startNew(name = "מהיסטוריה")
+        advanceUntilIdle()
+
+        assertEquals("מהיסטוריה", vm.state.value.name)
+        assertFalse(vm.state.value.unnamed)
+    }
+
+    // ── The unnamed toggle ─────────────────────────────────────────────────
+
+    @Test
+    fun `switching unnamed on fills the generic name and off clears it`() = runTest(testDispatcher) {
+        vm.setUnnamed(true)
+        assertEquals("כללי", vm.state.value.name)
+
+        vm.setUnnamed(false)
+        assertEquals("", vm.state.value.name)
+    }
+
+    @Test
+    fun `switching unnamed off does not erase a name the user typed`() = runTest(testDispatcher) {
+        vm.setUnnamed(true)
+        vm.setName("שלי")
+
+        vm.setUnnamed(false)
+
+        assertEquals("שלי", vm.state.value.name)
+    }
+}

@@ -38,6 +38,8 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.smartring.app.domain.model.*
 import com.smartring.app.presentation.theme.*
+import com.smartring.app.util.GENERIC_ALARM_NAME
+import com.smartring.app.util.RingtonePreviewPlayer
 import com.smartring.app.util.formatDurationSeconds
 import com.smartring.app.util.durationPartsOf
 import com.smartring.app.util.durationPreview
@@ -74,12 +76,19 @@ fun AlarmEditScreen(
     prefillName: String? = null,
     prefillHour: Int? = null,
     prefillMinute: Int? = null,
+    /** Non-zero when this screen is a *copy* of that alarm, not an edit of it. */
+    copyOfAlarmId: Long = 0L,
     onBack: () -> Unit,
     vm: AlarmEditViewModel = hiltViewModel(),
 ) {
-    LaunchedEffect(alarmId, prefillName, prefillHour, prefillMinute) {
-        if (alarmId > 0L) vm.loadAlarm(alarmId)
-        else if (prefillName != null || prefillHour != null) vm.prefill(prefillName, prefillHour, prefillMinute)
+    LaunchedEffect(alarmId, prefillName, prefillHour, prefillMinute, copyOfAlarmId) {
+        when {
+            alarmId > 0L       -> vm.loadAlarm(alarmId)
+            copyOfAlarmId > 0L -> vm.loadAsCopy(copyOfAlarmId)
+            // Every new alarm — prefilled from History or not — starts from the user's
+            // configured defaults rather than the constants compiled into the state class.
+            else               -> vm.startNew(prefillName, prefillHour, prefillMinute)
+        }
     }
     val s by vm.state.collectAsStateWithLifecycle()
     LaunchedEffect(s.isSaved) { if (s.isSaved) onBack() }
@@ -106,7 +115,16 @@ fun AlarmEditScreen(
         topBar = {
             TopAppBar(
                 navigationIcon = { IconButton(onBackPressed) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, "חזור") } },
-                title          = { Text(if (alarmId > 0) "עריכת שעמור" else "שעמור חדש", fontWeight = FontWeight.ExtraBold) },
+                title          = {
+                    Text(
+                        when {
+                            alarmId > 0       -> "עריכת שעמור"
+                            copyOfAlarmId > 0 -> "שכפול שעמור"
+                            else              -> "שעמור חדש"
+                        },
+                        fontWeight = FontWeight.ExtraBold,
+                    )
+                },
                 actions = {
                     TextButton(onClick = vm::save, enabled = !s.isSaving) {
                         if (s.isSaving) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
@@ -158,6 +176,45 @@ fun AlarmEditScreen(
                 }
             }
 
+            // ── Off / on ──────────────────────────────────────────
+            // First thing on the screen when the alarm is off, because until v1.6.13 an
+            // alarm that had already rung was switched off automatically, could not be
+            // switched back on from here, and saving wrote the off state straight back.
+            // The alarm saved and never rang, with nothing anywhere to say why.
+            item {
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    color = if (s.isEnabled) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .5f)
+                            else MaterialTheme.colorScheme.errorContainer,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Column(Modifier.padding(14.dp)) {
+                        Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f).padding(end = 12.dp)) {
+                                Text(
+                                    if (s.isEnabled) "השעמור פעיל" else "השעמור כבוי",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (s.isEnabled) MaterialTheme.colorScheme.onSurface
+                                            else MaterialTheme.colorScheme.onErrorContainer,
+                                )
+                                Text(
+                                    if (s.isEnabled) "יצלצל במועד שנקבע למטה."
+                                    else if (s.loadedDisabled)
+                                        "שעמור חד-פעמי נכבה אוטומטית לאחר שהוא מצלצל. " +
+                                        "הפעל אותו כאן כדי שיצלצל שוב — אחרת השמירה לא תועיל."
+                                    else "כבוי — לא יצלצל, גם לא אחרי שמירה.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = if (s.isEnabled) MaterialTheme.colorScheme.onSurfaceVariant
+                                            else MaterialTheme.colorScheme.onErrorContainer,
+                                )
+                            }
+                            Switch(s.isEnabled, onCheckedChange = vm::setEnabled)
+                        }
+                    }
+                }
+            }
+
             // ── Name ──────────────────────────────────────────────
             item {
                 OutlinedTextField(
@@ -174,7 +231,23 @@ fun AlarmEditScreen(
                     supportingText = if (s.nameError) {{ Text("נדרש שם") }} else null,
                     singleLine    = true,
                     shape         = RoundedCornerShape(14.dp),
+                    enabled       = !s.unnamed,
                 )
+            }
+
+            // ── "no name needed" ──────────────────────────────────
+            // A name is required (an unnamed alarm is unidentifiable in the list, the
+            // widgets and the notification), but "קום לעבודה" is not worth typing for a
+            // one-off reminder. This gives the required name without the typing, and its
+            // starting position is configurable in Settings.
+            item {
+                Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {
+                    FieldLabel("ללא שם — קרא לו \"$GENERIC_ALARM_NAME\"",
+                        info = "מסמן את השעמור בשם כללי במקום לדרוש ממך לחשוב על אחד. " +
+                            "אפשר לקבוע בהגדרות אם המתג הזה יתחיל דלוק או כבוי.",
+                        modifier = Modifier.weight(1f).padding(end = 12.dp))
+                    Switch(s.unnamed, onCheckedChange = vm::setUnnamed)
+                }
             }
 
             // ── Time picker ───────────────────────────────────────
@@ -195,6 +268,18 @@ fun AlarmEditScreen(
                     // this used to do) gave no clue that the alarm as configured will
                     // never ring: a date/time already in the past, or every specific
                     // date passed, saved and sat in the list looking completely normal.
+                    if (s.pastDateError) {
+                        Spacer(Modifier.height(6.dp))
+                        Row(Modifier.fillMaxWidth(), Arrangement.Center, Alignment.CenterVertically) {
+                            Icon(Icons.Rounded.ErrorOutline, null, Modifier.size(13.dp),
+                                tint = MaterialTheme.colorScheme.error)
+                            Spacer(Modifier.width(4.dp))
+                            Text("התאריך שנבחר עבר — בחר תאריך ושעה עתידיים כדי לשמור",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.error,
+                                fontWeight = FontWeight.Bold)
+                        }
+                    }
                     if (s.neverFires) {
                         Spacer(Modifier.height(6.dp))
                         Row(Modifier.fillMaxWidth(), Arrangement.Center, Alignment.CenterVertically) {
@@ -368,8 +453,11 @@ fun AlarmEditScreen(
             item { SectionLabel("צלצול") }
             item {
                 EditCard {
-                    LabeledSlider("משך צלצול", s.ringDurationSeconds, "שנ׳", 5f, 600f, 118, MaterialTheme.colorScheme.primary,
-                        info = "כמה זמן השעמור ימשיך לצלצול לפני שהוא נעצר אוטומטית, אם לא תעצור אותו ידנית.",
+                    LabeledSlider("משך צלצול כולל", s.ringDurationSeconds, "שנ׳", 5f, 600f, 118, MaterialTheme.colorScheme.primary,
+                        info = "הזמן הכולל שהשעמור מצלצל עד שהוא נעצר מעצמו, אם לא תעצור אותו קודם.\n\n" +
+                            "זה לא אותו דבר כמו \"משך הסבב\" למטה: הסבבים מתנגנים בתוך הזמן הזה, בזה אחר זה, " +
+                            "והרשימה חוזרת מהתחלה עד שהזמן הכולל נגמר. לדוגמה: משך כולל 2 דקות עם סבב אחד " +
+                            "באורך 30 שניות — הסבב יתנגן ארבע פעמים.",
                         formatter = ::formatDurationSeconds, durationInput = true,
                         badgeTestTag = AlarmEditTags.RING_DURATION_BADGE,
                         onChange = vm::setRingDuration)
@@ -378,6 +466,17 @@ fun AlarmEditScreen(
 
             // ── Ring rounds (up to 10, each with its own sound/volume/duration) ────
             item { SectionLabel("סבבי צלצול") }
+            // Spelling out the relationship between the two durations, in the place where
+            // the confusion actually happens. "משך צלצול כולל" above is the envelope; a
+            // round's own length is how long its sound plays inside that envelope.
+            item {
+                Text(
+                    "כל סבב מנגן את הצליל שלו למשך הזמן שנקבע לו, אחריו ההשהיה שלו, ואז הסבב הבא. " +
+                    "כשהרשימה נגמרת היא חוזרת מהתחלה — עד שנגמר \"משך צלצול כולל\" שהגדרת למעלה.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             item { RingsSection(s.rings, vm::updateRing, vm::addRing, vm::removeRing) }
 
             // ── Vibration ─────────────────────────────────────────
@@ -528,6 +627,25 @@ fun AlarmEditScreen(
                     }
                 }
             }
+
+            // ── Save, again, at the bottom ────────────────────────
+            // The form is long enough that almost all of it is below the fold, so the
+            // only Save button sat off-screen behind a scroll back to the top. A second
+            // one at the end means the action is wherever the user finishes.
+            item {
+                Spacer(Modifier.height(4.dp))
+                Button(
+                    onClick = vm::save,
+                    enabled = !s.isSaving,
+                    modifier = Modifier.fillMaxWidth().height(52.dp),
+                    shape = RoundedCornerShape(14.dp),
+                ) {
+                    if (s.isSaving) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.onPrimary)
+                    else Text("שמור שעמור", fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.titleMedium)
+                }
+            }
         }
     }
 }
@@ -641,6 +759,16 @@ private fun RingsSection(
 ) {
     val context = LocalContext.current
     var pickingIndex by remember { mutableStateOf(-1) }
+
+    // One player for the whole section: starting a second preview stops the first, which
+    // is the only sane behaviour when each round has its own button.
+    val preview = remember { RingtonePreviewPlayer() }
+    var previewing by remember { mutableStateOf<Int?>(null) }
+    var previewFailed by remember { mutableStateOf(false) }
+    // Stopped when the screen leaves composition. Without this, navigating back mid-play
+    // leaves an alarm-volume sound playing over the rest of the app with no way to stop
+    // it short of killing the process.
+    DisposableEffect(Unit) { onDispose { preview.stop() } }
     val ringtonePicker = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         // The untyped getParcelableExtra() is deprecated from API 33 because it can
         // hand back an object of the wrong type without complaining; the typed overload
@@ -725,16 +853,44 @@ private fun RingsSection(
                 }
             }
             Spacer(Modifier.height(4.dp))
-            OutlinedButton(
-                onClick = { pickRingtone(i) },
-                modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(10.dp),
-            ) {
-                Icon(Icons.Rounded.MusicNote, null, Modifier.size(16.dp))
-                Spacer(Modifier.width(8.dp))
-                Text(ringtoneDisplayName(context, ring.ringtoneUri), maxLines = 1)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(
+                    onClick = { pickRingtone(i) },
+                    modifier = Modifier.weight(1f), shape = RoundedCornerShape(10.dp),
+                ) {
+                    Icon(Icons.Rounded.MusicNote, null, Modifier.size(16.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(ringtoneDisplayName(context, ring.ringtoneUri), maxLines = 1,
+                        overflow = TextOverflow.Ellipsis)
+                }
+                // Plays this round's sound at this round's volume, through the alarm
+                // stream — so what is heard here is what will be heard at 06:30, device
+                // alarm volume included. Judging a choice any other way is guesswork.
+                FilledTonalIconButton(
+                    onClick = {
+                        if (previewing == i) {
+                            preview.stop(); previewing = null
+                        } else {
+                            previewFailed = !preview.play(context, i, ring.ringtoneUri, ring.volumePercent)
+                            previewing = if (previewFailed) null else i
+                        }
+                    },
+                    modifier = Modifier.size(48.dp),
+                ) {
+                    Icon(
+                        if (previewing == i) Icons.Rounded.Stop else Icons.Rounded.PlayArrow,
+                        if (previewing == i) "עצור השמעה" else "השמע את הצליל של סבב ${i + 1}",
+                    )
+                }
+            }
+            if (previewFailed && previewing == null) {
+                Spacer(Modifier.height(4.dp))
+                Text("לא ניתן להשמיע את הצליל הזה. בחר צליל אחר.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.error)
             }
             Spacer(Modifier.height(8.dp))
-            LabeledSlider("משך", ring.durationSeconds, "שנ׳", 5f, 300f, 58, MaterialTheme.colorScheme.primary,
+            LabeledSlider("משך הסבב", ring.durationSeconds, "שנ׳", 5f, 300f, 58, MaterialTheme.colorScheme.primary,
                 info = "כמה זמן הסבב הזה מנגן לפני שעובר לסבב הבא.",
                 formatter = ::formatDurationSeconds, durationInput = true) {
                 onUpdate(i, ring.copy(durationSeconds = it))

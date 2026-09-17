@@ -194,6 +194,12 @@ abstract class SmartRingBaseWidget : GlanceAppWidget() {
      *  The selection and ordering rules themselves live in the pure
      *  [buildUpcomingAlarms], which is unit-tested; this only supplies the two
      *  lookups it needs. */
+    /**
+     * "אין שעמור פעיל", not "אין שעמור": the widgets only ever list alarms that are
+     * enabled and unfrozen, so a user whose alarms have all rung and retired saw an
+     * empty widget that appeared to have lost them. Naming the distinction is the whole
+     * difference between "the widget is broken" and "nothing is armed".
+     */
     protected suspend fun upcomingAlarms(ctx: Context): List<UpcomingAlarm> {
         val ep = EntryPointAccessors.fromApplication(ctx, WidgetEntryPoint::class.java)
         val scheduler = ep.alarmScheduler()
@@ -219,7 +225,7 @@ class SmartRingWidgetSmall : SmartRingBaseWidget() {
                     Text(next?.timeText ?: "--:--",
                         style = TextStyle(fontSize = 24.sp, fontWeight = FontWeight.Bold, color = ColorProvider(p.textPrimary)))
                     if (next != null) Countdown(ctx, next.fireAt, 9f, p.accentBlue)
-                    else Text("אין שעמור",
+                    else Text("אין שעמור פעיל",
                         style = TextStyle(fontSize = 9.sp, color = ColorProvider(p.accentBlue)), maxLines = 1)
                 }
             }
@@ -245,7 +251,7 @@ class SmartRingWidgetMedium : SmartRingBaseWidget() {
                     Text(next?.timeText ?: "--:--",
                         style = TextStyle(fontSize = 30.sp, fontWeight = FontWeight.Bold, color = ColorProvider(p.textPrimary)))
                     Row(GlanceModifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Text(next?.alarm?.name ?: "אין שעמור",
+                        Text(next?.alarm?.name ?: "אין שעמור פעיל",
                             style = TextStyle(fontSize = 11.sp, color = ColorProvider(p.textSecondary)),
                             modifier = GlanceModifier.defaultWeight(), maxLines = 1)
                         next?.let { Countdown(ctx, it.fireAt, 10f, p.accentBlue) }
