@@ -131,6 +131,14 @@
 | 102 | `@Update` על שורה שנמחקה משנה 0 שורות ולא זורק — לכן `updateAlarm` מחזיר `Int` ויש נפילה ל-`insertAlarm` | `AlarmDao.saveAlarmTransaction()` + `AlarmDaoTest` (v1.8.1) |
 | 103 | יצירה מהירה: "עוד שעה" / "עוד 8 שעות" / "מחר" — שעמור מזדמן מברירות המחדל בלחיצה אחת | `quickAlarmInHours`/`quickAlarmTomorrowAt` ב-`util/OccasionalAlarm.kt` (v1.8.1) |
 | 104 | לחיצה ארוכה בוחרת במקום למחוק; בחירה מרובה עם הפעלה/כיבוי/מחיקה קבוצתית | `AlarmListViewModel.selectedIds` + `AlarmListScreen` (v1.8.1) |
+| 105 | קיבוץ הרשימה לפי מועד הצלצול האמיתי; "פעיל + יש מועד" הוא תנאי אחד | `util/AlarmSections.kt` + `AlarmSectionsTest` (v1.9.0) |
+| 106 | החלוקה סופרת ימי לוח ולא שעות — 23:30 + 40 דק' הוא "מחר"; צעידה על הלוח בגלל שעון קיץ | `calendarDaysBetween` ב-`util/AlarmSections.kt` (v1.9.0) |
+| 107 | `AlarmListUiState.rows` — כל שעמור עם מועד הצלצול מהמתזמן (נודניק/חזרתיות שנגמרה) | `AlarmListViewModel` (v1.9.0) |
+| 108 | חיפוש לפי שם מעל 10 שעמורים; נשאר גלוי בבחירה מרובה | `SEARCH_VISIBLE_FROM`/`filterAlarms` (v1.9.0) |
+| 109 | שמירה של שעמור ללא מועד עתידי שואלת; מחושב מהמתזמן בזמן השמירה, לא מ-`neverFires` | `AlarmEditViewModel.save(force)` (v1.9.0) |
+| 110 | אריח הגדרות מהירות דו-כיווני; `exported=true` + `BIND_QUICK_SETTINGS_TILE` | `service/AlarmsTileService.kt` + `AndroidManifest.xml` (v1.9.0) |
+| 111 | הסבר פתיחה חד-פעמי, ניתן לפתיחה חוזרת מההגדרות; תור: מה חדש ← הסבר ← אמינות | `presentation/intro/` (v1.9.0) |
+| 112 | רטט אישור על עצירה/נודניק/שמירה; לחיצה ארוכה כבר מקבלת אותו מ-`combinedClickable` | `AlarmRingScreen`/`AlarmEditScreen` (v1.9.0) |
 
 ---
 
@@ -188,6 +196,8 @@ smartring-kotlin/
 /settings   → SettingsScreen
 /logs       → LogsScreen  (v1.2.0)
 /diagnosis  → DiagnosisScreen  ("למה השעמור לא צלצל?", v1.8.1)
+
+אין route ל-IntroDialog — הוא דיאלוג מעל /list (פעם אחת בהתקנה) ומעל /settings (בלחיצה), v1.9.0.
 ```
 
 ---
@@ -338,12 +348,16 @@ if (!alarm.acceptsInteraction) return
 ### עדיפות גבוהה
 - [x] ~~"טען שוב" מהיסטוריה~~ – **בוצע v1.1.0**: `HistoryScreen` מעביר name/hour/minute (מ-`log.scheduledFor`) דרך `NavGraph` route args אל `AlarmEditViewModel.prefill()`.
 - [ ] **גופן Heebo** – `Typography.kt` מוכן; צריך קבצי TTF ב-`res/font/`
+- [ ] **תרגום לאנגלית** – נבחן ב-v1.9.0 ונדחה במפורש, לא נשכח: כל מסך מחזיק מחרוזות עבריות קבועות בקוד, ולכן זה באצ' ייעודי ולא שיפור UI. ההגדרה מושבתת בכוונה עם "בקרוב" ולא מעמידה פנים.
+- [ ] **הגדלת כל יעדי המגע ל-48dp** – נבחן ב-v1.9.0 ונדחה במפורש: היה מנפח את גובה השורה של האפליקציה כולה. 32–40dp היא הפשרה שהפריסה סופגת, וזה כתוב במפורש ולא מוצג כעמידה בתקן.
 - [x] ~~בחירת קובץ שמע~~ – **בוצע v1.1.0**: `RingsSection` ב-`AlarmEditScreen` פותח RingtoneManager system picker לכל סבב צלצול.
 
 ### עדיפות בינונית
 - [x] ~~SwipeToDismiss על כרטיסיות~~ – **בוצע v1.1.0**: `SwipeToDismissBox` נוסף לצד long-press, שניהם פותחים את אותו דיאלוג אישור.
 - [x] ~~Alarm preview – "נסה עכשיו" בעריכה~~ – **בוצע v1.8.1**: "בדוק צלצול עכשיו" במסך העריכה של שעמור שמור. עובר במסלול האמיתי (AlarmManager → AlarmReceiver → שירות → מסך צלצול) על מרחב קודי בקשה נפרד, ולכן לא נוגע בתזמון האמיתי ולא מבצע שום רישום.
 - [x] ~~Widget deep link → AlarmListScreen~~ – **בוצע v1.1.0**: כל 4 הווידג'טים פותחים את האפליקציה בלחיצה.
+- [x] ~~קיבוץ הרשימה~~ – **בוצע v1.9.0**: "היום"/"מחר"/"השבוע"/"בהמשך"/"כבויים", ב-`util/AlarmSections.kt`.
+- [x] ~~קיצורי דרך במסך הראשי~~ – **בוצע v1.8.1**: שבבי "עוד שעה"/"עוד 8 שעות"/"מחר".
 - [ ] Accessibility labels על Switch/IconButtons – רק המתג ברשימת השעמורים קיבל תווית (v1.1.0); ה-Switch/IconButtons במסך העריכה עדיין ללא.
 - [x] ~~Unit tests ל-AlarmScheduler.nextFireTime()~~ – **בוצע v1.4.1**: ראה סעיף 13 (בדיקות אוטומטיות). כלל גם את הרפקטור שהוזכר כאן (`now` כפרמטר ניתן להזרקה).
 - [x] ~~הזנת מספר מדויקת לצד סליידרים~~ – **בוצע v1.2.0**: `EditableValueBadge` (לחיצה על התג פותחת דיאלוג הזנת מספר) בכל הסליידרים.
@@ -353,6 +367,10 @@ if (!alarm.acceptsInteraction) return
 - [x] ~~עדכון APK ללא הסרה מחדש~~ – **בוצע v1.2.0**: keystore קבוע משותף ל-debug/release.
 
 ### עדיפות נמוכה
+- [x] ~~חיפוש/סינון~~ – **בוצע v1.9.0**: שדה חיפוש שמופיע מ-10 שעמורים ומעלה.
+- [x] ~~הסבר בפעם הראשונה~~ – **בוצע v1.9.0**: `presentation/intro/`, ניתן לפתיחה חוזרת מההגדרות.
+- [x] ~~קיצורי Quick Settings~~ – **בוצע v1.9.0**: `AlarmsTileService`, דו-כיווני.
+- [x] ~~Haptics על פעולות מרכזיות~~ – **בוצע v1.9.0**: עצירה, נודניק, שמירה.
 - [ ] Export/Import JSON של שעמורים
 - [ ] Custom accent color
 

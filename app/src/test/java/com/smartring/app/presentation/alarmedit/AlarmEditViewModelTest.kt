@@ -55,6 +55,11 @@ class AlarmEditViewModelTest {
         appLogger = mockk(relaxed = true)
         defaultsRepository = mockk(relaxed = true)
         every { defaultsRepository.defaults } returns flowOf(AlarmDefaults.BUILT_IN)
+        // A relaxed mock answers null here, which means "this alarm has no future ring" —
+        // and save() now stops on that to ask. Every save test would otherwise be testing
+        // the confirmation dialog by accident. The default says what is true of a real
+        // default alarm: it fires.
+        every { scheduler.effectiveNextFireTime(any()) } returns System.currentTimeMillis() + 3_600_000L
         vm = AlarmEditViewModel(repository, defaultsRepository, scheduler, appLogger)
     }
 
@@ -596,5 +601,98 @@ class AlarmEditViewModelTest {
         vm.setUnnamed(false)
 
         assertEquals("שלי", vm.state.value.name)
+    }
+
+    // ── Saving an alarm that will never ring ───────────────────────────────
+
+    @Test
+    fun `saving an alarm with no future ring asks before storing it`() = runTest(testDispatcher) {
+        every { scheduler.effectiveNextFireTime(any()) } returns null
+        vm.setName("לעולם לא")
+
+        vm.save()
+        advanceUntilIdle()
+
+        assertTrue(vm.state.value.confirmNeverFires)
+        coVerify(exactly = 0) { repository.saveAlarm(any()) }
+    }
+
+    @Test
+    fun `save anyway stores it despite having no future ring`() = runTest(testDispatcher) {
+        every { scheduler.effectiveNextFireTime(any()) } returns null
+        vm.setName("לעולם לא")
+        vm.save()
+        advanceUntilIdle()
+
+        vm.save(force = true)
+        advanceUntilIdle()
+
+        coVerify { repository.saveAlarm(any()) }
+        assertFalse(vm.state.value.confirmNeverFires)
+        assertTrue(vm.state.value.isSaved)
+    }
+
+    @Test
+    fun `dismissing the dialog saves nothing and leaves the screen editable`() = runTest(testDispatcher) {
+        every { scheduler.effectiveNextFireTime(any()) } returns null
+        vm.setName("לעולם לא")
+        vm.save()
+        advanceUntilIdle()
+
+        vm.dismissNeverFiresConfirm()
+
+        assertFalse(vm.state.value.confirmNeverFires)
+        assertFalse(vm.state.value.isSaving)
+        coVerify(exactly = 0) { repository.saveAlarm(any()) }
+    }
+
+    /**
+     * An alarm the user has just switched off will obviously not ring. Warning them about
+     * it would be the app reading their own input back to them as a problem.
+     */
+    @Test
+    fun `a deliberately disabled alarm saves without asking`() = runTest(testDispatcher) {
+        every { scheduler.effectiveNextFireTime(any()) } returns null
+        vm.setName("כבוי בכוונה")
+        vm.setEnabled(false)
+
+        vm.save()
+        advanceUntilIdle()
+
+        assertFalse(vm.state.value.confirmNeverFires)
+        coVerify { repository.saveAlarm(any()) }
+    }
+
+    /**
+     * The dialog exists because the inline warning can be one edit stale — so the check
+     * must read the scheduler at save time, not the `neverFires` flag in state.
+     */
+    @Test
+    fun `the check reads the scheduler at save time, not the stale warning flag`() = runTest(testDispatcher) {
+        vm.setName("בסדר")
+        advanceUntilIdle()
+        assertFalse("precondition: the inline warning is not showing", vm.state.value.neverFires)
+
+        every { scheduler.effectiveNextFireTime(any()) } returns null
+        vm.save()
+        advanceUntilIdle()
+
+        assertTrue(vm.state.value.confirmNeverFires)
+        coVerify(exactly = 0) { repository.saveAlarm(any()) }
+    }
+
+    /** A past specific date is still refused outright — it is never a deliberate choice. */
+    @Test
+    fun `a past specific date is refused, not offered as a save-anyway`() = runTest(testDispatcher) {
+        every { scheduler.effectiveNextFireTime(any()) } returns null
+        vm.setName("עבר")
+        vm.setSpecificDateTime(System.currentTimeMillis() - 60_000L)
+
+        vm.save()
+        advanceUntilIdle()
+
+        assertTrue(vm.state.value.pastDateError)
+        assertFalse(vm.state.value.confirmNeverFires)
+        coVerify(exactly = 0) { repository.saveAlarm(any()) }
     }
 }

@@ -41,6 +41,7 @@ import com.smartring.app.util.formatDayAndTime
 import com.smartring.app.util.formatDurationSeconds
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.KeyboardType
+import com.smartring.app.presentation.intro.IntroDialog
 import com.smartring.app.util.openSystemScreen
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -53,6 +54,8 @@ fun SettingsScreen(
 ) {
     val s by vm.state.collectAsStateWithLifecycle()
     val d by vm.defaults.collectAsStateWithLifecycle()
+    var showIntro by remember { mutableStateOf(false) }
+    if (showIntro) IntroDialog(onDismiss = { showIntro = false })
 
     Scaffold(
         topBar = {
@@ -264,6 +267,17 @@ fun SettingsScreen(
                 // First in this group, and phrased as the question rather than the
                 // feature: someone whose alarm just failed is looking for an answer, not
                 // for "diagnostics".
+                // Reopening the first-run explanation. The moment someone needs it is
+                // rarely the moment they installed the app — that is exactly when they
+                // have no alarms yet and nothing the text describes to try it on.
+                ListItem(
+                    headlineContent   = { Text("הסבר קצר על האפליקציה", fontWeight = FontWeight.Medium) },
+                    supportingContent = { Text("שעמור מזדמן, סבבי צלצול ומצב שבת — שלושת הדברים שלא מתגלים לבד") },
+                    leadingContent    = { Icon(Icons.Rounded.MenuBook, null) },
+                    trailingContent   = { Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, null) },
+                    modifier          = Modifier.clickable { showIntro = true },
+                )
+                HorizontalDivider(Modifier.padding(horizontal = 16.dp))
                 ListItem(
                     headlineContent   = { Text("למה השעמור לא צלצל?", fontWeight = FontWeight.Medium) },
                     supportingContent = { Text("בדיקה מלאה של כל מה שיכול למנוע מהשעמור לצלצל, עם תיקון לכל ממצא") },

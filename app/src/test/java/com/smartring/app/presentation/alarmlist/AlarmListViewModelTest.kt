@@ -85,6 +85,28 @@ class AlarmListViewModelTest {
         assertFalse(seen.last().isLoading)
     }
 
+    /**
+     * The grouping on the list is built from these pairs, and only the scheduler can
+     * supply the second half: a pending snooze, a spent recurrence and an ad-hoc date
+     * already gone are all invisible in the Alarm itself.
+     */
+    @Test
+    fun `uiState pairs each alarm with the moment it will actually next ring`() = runTest(testDispatcher) {
+        val alarms = listOf(Alarm(id = 1, name = "a"), Alarm(id = 2, name = "b"))
+        stubAlarms(alarms)
+        every { scheduler.effectiveNextFireTime(match { it.id == 1L }) } returns 5_000L
+        every { scheduler.effectiveNextFireTime(match { it.id == 2L }) } returns null
+        val vm = viewModel()
+
+        val seen = mutableListOf<AlarmListUiState>()
+        val job = launch { vm.uiState.collect { seen += it } }
+        runCurrent()
+        job.cancel()
+
+        assertEquals(listOf(1L, 2L), seen.last().rows.map { it.alarm.id })
+        assertEquals(listOf(5_000L, null), seen.last().rows.map { it.nextFireAt })
+    }
+
     @Test
     fun `toggling an alarm on persists the change and arms it`() = runTest(testDispatcher) {
         val alarm = Alarm(id = 3, name = "a", isEnabled = false)

@@ -25,7 +25,9 @@ import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.*
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.core.content.ContextCompat
@@ -94,6 +96,10 @@ fun AlarmEditScreen(
         }
     }
     val s by vm.state.collectAsStateWithLifecycle()
+    // Save is the one action on this long form with a real consequence, and it sits at
+    // both ends of it. A tap that lands and does nothing visible for a moment reads as a
+    // tap that missed; the tick says it landed.
+    val haptics = LocalHapticFeedback.current
     LaunchedEffect(s.isSaved) { if (s.isSaved) onBack() }
 
     // Dirty-state check: confirm before discarding unsaved changes. Shared by the
@@ -114,6 +120,28 @@ fun AlarmEditScreen(
         )
     }
 
+    // The inline "לא נקבע מועד צלצול עתידי" warning has existed since v1.6.0 and is
+    // evidently missable: it is one row among a dozen on a long form, and by the time
+    // someone reaches Save they are past it. Saving is the last moment anything can be
+    // said, so it is said here. It asks rather than refuses — keeping such an alarm as a
+    // template to duplicate later is a real thing to want — unlike a specific date that
+    // has already passed, which is refused outright because it is never anything else.
+    if (s.confirmNeverFires) {
+        AlertDialog(
+            onDismissRequest = { vm.dismissNeverFiresConfirm() },
+            icon             = { Icon(Icons.Rounded.ErrorOutline, null,
+                                    tint = MaterialTheme.colorScheme.error) },
+            title            = { Text("השעמור הזה לא יצלצל") },
+            text             = { Text(
+                "לפי ההגדרות הנוכחיות אין מועד צלצול עתידי — לא נבחרו ימי חזרה, או " +
+                "שהחזרתיות הסתיימה. אפשר לשמור אותו ככה (למשל כדי לשכפל אותו בהמשך), " +
+                "אבל הוא לא יעיר אותך.") },
+            confirmButton    = { TextButton({ vm.save(force = true) }) {
+                Text("שמור בכל זאת", color = MaterialTheme.colorScheme.error) } },
+            dismissButton    = { TextButton({ vm.dismissNeverFiresConfirm() }) { Text("חזור לעריכה") } },
+        )
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -129,7 +157,8 @@ fun AlarmEditScreen(
                     )
                 },
                 actions = {
-                    TextButton(onClick = vm::save, enabled = !s.isSaving) {
+                    TextButton(onClick = { haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove); vm.save() },
+                        enabled = !s.isSaving) {
                         if (s.isSaving) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
                         else Text("שמור", fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.primary, fontSize = 16.sp)
@@ -794,7 +823,7 @@ fun AlarmEditScreen(
             item {
                 Spacer(Modifier.height(4.dp))
                 Button(
-                    onClick = vm::save,
+                    onClick = { haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove); vm.save() },
                     enabled = !s.isSaving,
                     modifier = Modifier.fillMaxWidth().height(52.dp),
                     shape = RoundedCornerShape(14.dp),

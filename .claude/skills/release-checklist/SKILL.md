@@ -881,6 +881,32 @@ If the user asks for a PR-based workflow going forward, follow that instead and 
   armed on the alarm's own code would have silently cancelled the real 06:30 — the user
   tests their alarm and, in doing so, destroys it. Any future "fire this alarm now/soon"
   feature needs a fourth space, not a reuse of an existing one.
+- **Adding a production gate on a method a relaxed mockk answers with `null`/`0`/`false`
+  silently rewrites every existing test of that path.** v1.9.0's "this alarm will never
+  ring, save anyway?" dialog keys off `scheduler.effectiveNextFireTime(...) == null` inside
+  `save()`. `AlarmEditViewModel`'s tests mock the scheduler with `mockk(relaxed = true)`,
+  which answers `null` for a nullable return — so every save test in the file would have
+  stopped at the new dialog and silently become a test of the dialog rather than of saving.
+  Nothing fails loudly here: the assertions still run, they just assert about a path that
+  is no longer reached. When a change makes an existing mocked call *load-bearing*, set its
+  default in the shared `setUp()` to whatever is true of the normal case (here: a real
+  default alarm does fire) and let individual tests override it. Grep the test file for the
+  method before pushing, not after.
+- **Bucketing by day means counting calendar days, not dividing elapsed milliseconds.**
+  `(to - from) / 86_400_000` gets both ends of the day backwards, which is exactly when
+  someone is looking at an alarm list: at 23:30 a ring forty minutes away is *tomorrow*,
+  and at 00:30 one twenty-two hours away is still *today*. Compare `startOfDay()` values
+  instead. And walk the calendar with `Calendar.add(DAY_OF_YEAR, 1)` rather than dividing,
+  because days are not all 24 hours long — Israel's DST transitions make one 23 and one 25,
+  so a fixed divisor drifts a whole bucket around each changeover. `util/AlarmSections.kt`
+  is the worked example; bound the loop so a far-future date is "later" rather than a hang.
+- **A Quick Settings `TileService` must be `android:exported="true"`.** The platform's own
+  Quick Settings UI binds it from outside the app, so an unexported tile never appears in
+  the tile picker at all — and it fails silently, with no crash and no log. What makes that
+  safe is `android:permission="android.permission.BIND_QUICK_SETTINGS_TILE"`, which only
+  the platform holds. It also needs the `android.service.quicksettings.action.QS_TILE`
+  intent filter, plus `android:icon` and `android:label`, or it has nothing to render with.
+  `tile.subtitle` is API 29+, so guard it (minSdk here is 26).
 - **A feature that reuses the real firing path needs an explicit "this is not real" flag
   threaded all the way through.** The test ring goes through AlarmManager → receiver →
   service on purpose (a test that skips part of the chain proves nothing about the part
@@ -901,6 +927,12 @@ If the user asks for a PR-based workflow going forward, follow that instead and 
   move on. As of v1.6.1 the English option is disabled and labelled "בקרוב" rather than
   silently accepting a choice that does nothing — re-enable it in the same batch that
   externalizes the strings, not before.
+- **Touch targets are 32–40dp in places, not the 48dp Material asks for.** Considered
+  explicitly in the v1.9.0 UI/UX plan and rejected there: raising them wholesale would
+  inflate the row height of the entire app, and the layout is tuned around the current
+  figure. It is documented as a compromise rather than presented as compliance. Don't
+  re-report it; if a batch is specifically about accessibility, that is the moment to
+  revisit it as a deliberate redesign, not as a side effect.
 - **No Heebo font files** — `Typography.kt` is ready for a custom font but `res/font/` has no TTF
   files checked in (a licensing/asset question, not a code one).
 - **No local Android SDK in this environment** — see step 6.

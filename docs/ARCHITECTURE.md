@@ -20,6 +20,9 @@ Glance Widgets (SmartRingWidget.kt) → AlarmScheduler.effectiveNextFireTime() �
 | LogsScreen      | /logs ← חדש (v1.2.0) |
 | DiagnosisScreen | /diagnosis ← חדש (v1.8.1) — "למה השעמור לא צלצל?" |
 
+מחוץ לגרף הניווט: `IntroDialog` (דיאלוג מעל /list ו-/settings, v1.9.0), ו-`AlarmsTileService`
+— אריח Quick Settings שהמערכת קושרת אליו ישירות, ללא Activity (v1.9.0).
+
 ## DB v3 – עמודות/טבלאות חדשות
 - `alarms`: `snoozeEnabled`, `isShabbatMode`
 - `app_logs` (טבלה חדשה): לוג טכני נפרד מ-`alarm_logs` (שהוא היסטוריית צלצולים למשתמש)

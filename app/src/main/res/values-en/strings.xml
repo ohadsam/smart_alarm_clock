@@ -16,6 +16,7 @@
     <string name="channel_name">SmartRing Alarms</string>
     <string name="action_stop">Stop</string>
     <string name="action_snooze">Snooze</string>
+    <string name="qs_tile_label">SmartRing alarms</string>
     <string name="widget_small">SmartRing Small</string>
     <string name="widget_medium">SmartRing Medium</string>
     <string name="widget_wide">SmartRing Wide</string>

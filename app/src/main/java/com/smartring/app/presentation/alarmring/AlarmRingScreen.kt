@@ -15,6 +15,8 @@ import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -34,6 +36,11 @@ fun AlarmRingScreen(alarmId: Long, onDismiss: () -> Unit,
     vm: AlarmRingViewModel = hiltViewModel()) {
     LaunchedEffect(alarmId) { vm.loadAlarm(alarmId) }
     val s by vm.state.collectAsStateWithLifecycle()
+    // A confirmation you feel rather than read. These two buttons are pressed in the dark,
+    // half asleep, over a ringtone loud enough to drown out any other feedback — the one
+    // channel still free is touch. Stop gets the heavier pattern because it is the
+    // irreversible one: snooze comes back, stop does not.
+    val haptics = LocalHapticFeedback.current
     LaunchedEffect(Unit) { while (true) { delay(1_000); vm.tick() } }
     LaunchedEffect(s.isDismissed) { if (s.isDismissed) onDismiss() }
 
@@ -182,7 +189,8 @@ fun AlarmRingScreen(alarmId: Long, onDismiss: () -> Unit,
             Box(Modifier.size(160.dp).scale(if (shabbat) 1f else scale), contentAlignment = Alignment.Center) {
                 Box(Modifier.fillMaxSize().background(stopColor.copy(.18f), CircleShape)
                     .border(2.dp, stopColor.copy(.4f), CircleShape))
-                IconButton(vm::stop, Modifier.size(130.dp).clip(CircleShape).background(stopColor),
+                IconButton({ haptics.performHapticFeedback(HapticFeedbackType.LongPress); vm.stop() },
+                    Modifier.size(130.dp).clip(CircleShape).background(stopColor),
                     enabled = !shabbat) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Icon(Icons.Rounded.Stop, null, Modifier.size(52.dp), tint = stopContentColor)
@@ -214,7 +222,7 @@ fun AlarmRingScreen(alarmId: Long, onDismiss: () -> Unit,
                     // text on Light mode's white background Gold is effectively
                     // invisible, which hid the only snooze control the screen has.
                     val snoozeColor = MaterialTheme.colorScheme.secondary
-                    TextButton(vm::snooze) {
+                    TextButton({ haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove); vm.snooze() }) {
                         Icon(Icons.Rounded.Bedtime, null, Modifier.size(18.dp), tint = snoozeColor)
                         Spacer(Modifier.width(6.dp))
                         Text("נודניק – ${alarm.snoozeMinutes} דק' (${alarm.snoozeMaxCount - s.snoozeCount} נותרו)",

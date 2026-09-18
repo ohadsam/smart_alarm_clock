@@ -70,6 +70,15 @@ data class AlarmEditUiState(
     // vanished, which reads as a rendering quirk rather than "this will not go off".
     val neverFires: Boolean                = false,
     /**
+     * Set when [save] was asked to store an alarm whose schedule yields no future ring.
+     *
+     * The warning text for this has existed since v1.6.0 and is evidently missable — it
+     * sits inline among a dozen other rows on a long form, and the user is on their way
+     * to the save button. Saving is the last moment anything can be said, so this is the
+     * moment to say it.
+     */
+    val confirmNeverFires: Boolean         = false,
+    /**
      * Editable on this screen, which it was not until v1.6.13 — and that was the single
      * worst bug in the app.
      *
@@ -442,7 +451,17 @@ class AlarmEditViewModel @Inject constructor(
         next?.let { formatNextFireAt(it) }
 
     // ── Save ──────────────────────────────────────────────────────
-    fun save() {
+
+    /**
+     * [force] is the user answering the "this will never ring" dialog with "save anyway".
+     *
+     * There are legitimate reasons to keep such an alarm — a recurrence whose end date
+     * has passed but whose settings are worth keeping, a template to duplicate later — so
+     * this asks rather than refuses. That is the opposite of the past-date check below,
+     * which refuses outright: a specific date already gone is never anything but a
+     * mistake, while "no future occurrence" can be a deliberate parking place.
+     */
+    fun save(force: Boolean = false) {
         val s = _state.value
         if (s.name.isBlank()) {
             _state.update { it.copy(nameError = true) }
@@ -458,7 +477,19 @@ class AlarmEditViewModel @Inject constructor(
             _state.update { it.copy(pastDateError = true) }
             return
         }
-        _state.update { it.copy(isSaving = true, saveError = false, pastDateError = false) }
+        // Recomputed here rather than read off `s.neverFires`: that field is refreshed by
+        // a coroutine on every edit, so the value in state can still be one edit behind
+        // at the moment save is pressed — and being one edit behind is exactly the case
+        // this dialog exists to catch.
+        //
+        // Only for an alarm the user means to be on. Saving one they have just switched
+        // off and being told it will not ring would be the app repeating their own input
+        // back at them as a warning.
+        if (!force && s.isEnabled && scheduler.effectiveNextFireTime(buildAlarm(s)) == null) {
+            _state.update { it.copy(confirmNeverFires = true) }
+            return
+        }
+        _state.update { it.copy(isSaving = true, saveError = false, pastDateError = false, confirmNeverFires = false) }
         viewModelScope.launch {
             // Without this, a failing write (a database error, an AlarmManager refusing
             // one more exact alarm) left isSaving stuck at true forever: the save button
@@ -484,6 +515,9 @@ class AlarmEditViewModel @Inject constructor(
             }
         }
     }
+
+    /** The user chose to go back and fix the schedule instead of saving it as-is. */
+    fun dismissNeverFiresConfirm() = _state.update { it.copy(confirmNeverFires = false) }
 
     /**
      * Turning a disabled alarm back on resets [Alarm.occurrencesFired].

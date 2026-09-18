@@ -5,6 +5,7 @@ import com.smartring.app.data.repository.AlarmDefaultsRepository
 import com.smartring.app.data.repository.AlarmRepository
 import com.smartring.app.domain.model.Alarm
 import com.smartring.app.domain.model.AlarmRing
+import com.smartring.app.util.AlarmRow
 import com.smartring.app.util.AlarmScheduler
 import com.smartring.app.util.AppLogger
 import com.smartring.app.util.GENERIC_ALARM_NAME
@@ -16,7 +17,20 @@ import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
-data class AlarmListUiState(val alarms: List<Alarm> = emptyList(), val isLoading: Boolean = true)
+data class AlarmListUiState(
+    val alarms: List<Alarm> = emptyList(),
+    val isLoading: Boolean = true,
+    /**
+     * The same alarms, each paired with the moment it will actually next ring.
+     *
+     * Carried alongside rather than derived in the UI because only the scheduler can
+     * answer it — it accounts for a pending snooze, a spent recurrence and an ad-hoc date
+     * already gone, none of which are readable off the Alarm itself. The grouping is
+     * meaningless without it: it is what separates "rings today" from "says 07:00 and will
+     * never ring again".
+     */
+    val rows: List<AlarmRow> = emptyList(),
+)
 
 @HiltViewModel
 class AlarmListViewModel @Inject constructor(
@@ -26,7 +40,13 @@ class AlarmListViewModel @Inject constructor(
     private val appLogger: AppLogger,
 ) : ViewModel() {
     val uiState = repository.observeAlarms()
-        .map { AlarmListUiState(it, false) }
+        .map { alarms ->
+            AlarmListUiState(
+                alarms = alarms,
+                isLoading = false,
+                rows = alarms.map { AlarmRow(it, scheduler.effectiveNextFireTime(it)) },
+            )
+        }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), AlarmListUiState())
 
     fun toggle(alarm: Alarm, enabled: Boolean) = viewModelScope.launch {

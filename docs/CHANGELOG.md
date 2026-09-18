@@ -1,5 +1,128 @@
 # SmartRing – Changelog
 
+## v1.9.0 (2026-09-18)
+
+The rest of the v1.8.0 UI/UX plan, minus the two items that plan explicitly advised
+against: English localization (every screen hardcodes Hebrew literals, so this is a
+dedicated batch, not a UI improvement — and the setting is honestly disabled as "בקרוב"
+today) and raising every touch target to 48dp (it would inflate the row height of the
+whole app; 32–40dp is the compromise the layout absorbs, stated plainly rather than
+dressed up as compliance).
+
+### The list is grouped by when things actually ring
+
+A flat list answers "what alarms exist". The question people arrive with is "what is going
+to wake me, and when" — a question about time, which a flat list makes the reader
+reconstruct row by row. Rows now sit under "היום" / "מחר" / "השבוע" / "בהמשך", with
+"כבויים" last.
+
+`isActive` and a non-null next ring are treated as **one** condition, not two: an alarm
+that is switched on but has run out of occurrences is, to the user, exactly as silent as
+one they switched off, and filing it under "היום" because its hour field still reads 07:00
+would be the list asserting something untrue.
+
+The bucketing counts **calendar days, not elapsed hours**, and that is the whole reason it
+is not `(to - from) / 86_400_000`. At 23:30 an alarm forty minutes out is *tomorrow*; at
+00:30 one twenty-two hours out is still *today*. Elapsed-hours arithmetic gets both
+backwards, which is precisely when someone is most likely to be looking. It also walks the
+calendar rather than dividing, because Israel's DST transitions make one day 23 hours and
+one 25, and a fixed divisor drifts a whole bucket around each changeover.
+
+`AlarmListUiState` now carries `rows` — each alarm paired with the moment it will actually
+next ring — because only the scheduler can answer that: a pending snooze, a spent
+recurrence and an ad-hoc date already gone are all invisible in the `Alarm` itself.
+
+"היום" is a claim about the current date, so the grouping is recomputed on ON_RESUME. A
+phone left on this screen overnight would otherwise still be filing tomorrow's alarms under
+"היום" — the one heading someone reads before going to sleep.
+
+### Search, past ten alarms
+
+A name filter appears once the list reaches ten. Below that it does not, because a field
+costing a tap and a keyboard to filter eight rows visible on one screen is a control that
+makes the screen worse. It matches anywhere in the name, not just the start — people
+remember a word from the middle of "תרופה של אבא בערב" far more reliably than its first
+letter — and a blank query restores the list rather than emptying it.
+
+It stays visible during multi-select, unlike the quick-create row above it: narrowing to
+"all the gym ones" is exactly how somebody picks a set to switch off, and hiding the field
+while its filter stayed applied would leave the list mysteriously short with nothing on
+screen explaining why.
+
+### Saving an alarm that will never ring now asks
+
+The inline "לא נקבע מועד צלצול עתידי" warning has existed since v1.6.0 and is evidently
+missable — one row among a dozen on a long form, and by the time someone reaches Save they
+are past it. Saving is the last moment anything can be said.
+
+It asks rather than refuses: keeping such an alarm as a template to duplicate later is a
+real thing to want. That is deliberately the opposite of the past-date check beside it,
+which refuses outright, because a specific date already gone is never anything but a
+mistake.
+
+Two details matter. The check **recomputes from the scheduler at save time** rather than
+reading `state.neverFires`, which is refreshed by a coroutine on every edit and can be one
+edit behind — being one edit behind is exactly the case this dialog exists to catch. And it
+is skipped for an alarm the user has just switched off, where "this will not ring" would be
+the app reading their own input back to them as a warning.
+
+### A Quick Settings tile
+
+The case is the one "שליטה כללית" already serves — a night away, a sick day, a flight —
+and what the tile adds is reach: that sheet is three taps deep inside an app you have to
+find first, and the moment somebody wants it is usually the moment they are already lying
+down with the phone in one hand.
+
+**It toggles rather than only turning off.** An off-only tile would strand whoever used it,
+holding a control that silenced every alarm and offered no way back — the same trap the
+widget's on/off button was added to close in v1.8.0. `onClick` reads the live count rather
+than trusting the tile's displayed state: the shade can have been open while the alarms
+changed from the app or a widget, and acting on a stale reading would switch everything
+*on* for someone who pressed a tile that said "on".
+
+`exported="true"` is required (the platform's own Quick Settings UI binds it from outside
+the app, so an unexported tile simply never appears in the picker); the
+`BIND_QUICK_SETTINGS_TILE` permission is what keeps that safe, since only the platform
+holds it.
+
+### A first-run explanation, re-openable
+
+Three things here are not discoverable by poking at the app: an ad-hoc alarm looks like an
+ordinary one until you notice the date, ring rounds are behind a section most people never
+open, and Shabbat mode deliberately removes the buttons you would press to find out what it
+does. Everything else the UI explains in place; these three were being found by accident or
+not at all.
+
+One dismissible dialog, not a multi-page flow standing between the user and their first
+alarm — and Settings → "הסבר קצר על האפליקציה" reopens it, because the moment someone needs
+the explanation is rarely the moment they installed the app, when they have no alarms yet
+to try it on. It queues behind What's New and ahead of the reliability prompt: three things
+want the screen on launch, and a system permission dialog on top of a Compose AlertDialog
+is jarring enough that one can eat the other's input.
+
+### Haptics on the three decisive actions
+
+Stop, snooze, save. Stop and snooze are pressed in the dark, half asleep, over a ringtone
+loud enough to drown out any other feedback — the one channel still free is touch. Stop
+gets the heavier pattern because it is the irreversible one: snooze comes back, stop does
+not. Long-press-to-select needed nothing added; `combinedClickable` already performs it.
+
+### Tests
+
+- `AlarmSectionsTest` (21) — the late-night and early-morning boundaries in both
+  directions, the seven/eight-day edge, a far-future date that must be "later" rather than
+  a hang, all three ways an alarm counts as off, group ordering and per-group sorting, that
+  every alarm lands in exactly one group, and the search rules.
+- `AlarmEditViewModelTest` (+6) — the confirmation asks, "save anyway" stores, dismissing
+  stores nothing, a deliberately disabled alarm is not nagged, the check reads the
+  scheduler rather than the stale flag, and a past date is still refused outright.
+- `AlarmListViewModelTest` (+1) — `uiState` pairs each alarm with its real next ring.
+
+One fixture change worth naming: the relaxed `AlarmScheduler` mock answers `null` for
+`effectiveNextFireTime`, which now means "this alarm has no future ring". Every existing
+save test would otherwise have been testing the new dialog by accident, so the shared
+fixture states what is true of a real default alarm: it fires.
+
 ## v1.8.1 (2026-09-18)
 
 ### A test ring that proves the chain, not a simulation of it

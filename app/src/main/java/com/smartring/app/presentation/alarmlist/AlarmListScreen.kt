@@ -27,11 +27,17 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.smartring.app.domain.model.Alarm
 import com.smartring.app.presentation.theme.*
+import com.smartring.app.presentation.intro.IntroDialog
+import com.smartring.app.presentation.intro.IntroViewModel
 import com.smartring.app.presentation.whatsnew.WhatsNewDialog
 import com.smartring.app.presentation.whatsnew.WhatsNewViewModel
 import com.smartring.app.presentation.settings.SettingsViewModel
 import androidx.activity.compose.BackHandler
+import com.smartring.app.util.AlarmSection
 import com.smartring.app.util.ForeignAlarm
+import com.smartring.app.util.SEARCH_VISIBLE_FROM
+import com.smartring.app.util.buildAlarmGroups
+import com.smartring.app.util.filterAlarms
 import com.smartring.app.util.quickAlarmInHours
 import com.smartring.app.util.quickAlarmTomorrowAt
 import com.smartring.app.util.ForeignAlarms
@@ -52,6 +58,25 @@ fun AlarmListScreen(onAddAlarm: ()->Unit, onEditAlarm: (Long)->Unit,
     var showControls by remember { mutableStateOf(false) }
     val snackbarHost = remember { SnackbarHostState() }
     val defaults by hiltViewModel<SettingsViewModel>().defaults.collectAsStateWithLifecycle()
+    var query by rememberSaveable { mutableStateOf("") }
+
+    // "היום" is a claim about the current date, so it has to be re-evaluated when the
+    // screen comes back rather than fixed at whatever moment it was first composed. A
+    // phone left on this screen overnight would otherwise still be filing tomorrow's
+    // alarms under "היום" — the one heading someone reads before going to sleep.
+    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) now = System.currentTimeMillis()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    val groups = remember(state.rows, query, now) {
+        buildAlarmGroups(filterAlarms(state.rows, query), now)
+    }
 
     // Undo, rather than a confirmation dialog before every delete. A dialog interrupts the
     // hundreds of deletes that were intended and still cannot rescue the one mis-tap,
@@ -75,11 +100,19 @@ fun AlarmListScreen(onAddAlarm: ()->Unit, onEditAlarm: (Long)->Unit,
     val whatsNewVm: WhatsNewViewModel = hiltViewModel()
     val whatsNewState by whatsNewVm.state.collectAsStateWithLifecycle()
     WhatsNewDialog(whatsNewVm)
-    // Don't compete with the What's New dialog (a system permission prompt popping up
-    // at the same time as a Compose AlertDialog is jarring and one can eat the other's
-    // input) — wait until it has genuinely resolved to "nothing to show" (`checked`,
-    // not just the default-empty initial state) before this one gets a turn.
-    if (whatsNewState.checked && whatsNewState.entriesToShow.isEmpty()) {
+    // Three things want the screen on launch, so they queue rather than race. What's New
+    // goes first (an upgrade has something to report), the intro second (only ever on a
+    // fresh install, where What's New is silent by design), and the reliability prompt
+    // last — a system permission dialog on top of a Compose AlertDialog is jarring and one
+    // can eat the other's input. Each waits for the one before it to resolve to "nothing
+    // to show" (`checked`, not just a default-empty initial state).
+    val introVm: IntroViewModel = hiltViewModel()
+    val introState by introVm.state.collectAsStateWithLifecycle()
+    val whatsNewSettled = whatsNewState.checked && whatsNewState.entriesToShow.isEmpty()
+    if (whatsNewSettled && introState.show) {
+        IntroDialog(onDismiss = introVm::dismiss)
+    }
+    if (whatsNewSettled && introState.checked && !introState.show) {
         ReliabilityGate(onOpenSettings)
     }
 
@@ -156,22 +189,72 @@ fun AlarmListScreen(onAddAlarm: ()->Unit, onEditAlarm: (Long)->Unit,
                 // Hidden during selection: a shortcut that creates a new alarm while the
                 // user is picking existing ones to delete is noise at best.
                 if (!inSelection) item { QuickCreateRow(defaults.hour, defaults.minute, vm::createQuickAlarm) }
-                items(state.alarms,key={it.id}) { alarm ->
-                    AlarmCardItem(
-                        alarm = alarm,
-                        onToggle = {vm.toggle(alarm,it)},
-                        onEdit = {
-                            // In selection mode a tap selects instead of navigating —
-                            // otherwise selecting a third alarm means opening the second.
-                            if (inSelection) vm.toggleSelection(alarm.id) else onEditAlarm(alarm.id)
-                        },
-                        onDuplicate = {onDuplicateAlarm(alarm.id)},
-                        onScheduleNextDay = {vm.scheduleForNextDay(alarm)},
-                        onDelete = {vm.delete(alarm)},
-                        onLongPress = { vm.toggleSelection(alarm.id) },
-                        selected = alarm.id in selectedIds,
-                        inSelectionMode = inSelection,
-                    )
+                // Only past the point where scrolling costs more than typing. Below it a
+                // field that costs a tap and a keyboard to filter rows already visible on
+                // one screen is a control that makes the screen worse.
+                //
+                // Kept during selection, unlike the quick-create row above it: narrowing
+                // to "all the gym ones" is exactly how somebody picks a set to switch off,
+                // and hiding the field while its filter stayed applied would leave the
+                // list mysteriously short with nothing on screen explaining why.
+                if (state.alarms.size >= SEARCH_VISIBLE_FROM) {
+                    item {
+                        OutlinedTextField(
+                            value = query,
+                            onValueChange = { query = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            shape = RoundedCornerShape(14.dp),
+                            placeholder = { Text("חפש לפי שם") },
+                            leadingIcon = { Icon(Icons.Rounded.Search, null) },
+                            trailingIcon = if (query.isNotEmpty()) {
+                                { IconButton({ query = "" }) { Icon(Icons.Rounded.Close, "נקה חיפוש") } }
+                            } else null,
+                        )
+                    }
+                }
+                // Only reachable through search — with no query every alarm lands in some
+                // group — but gated on the query anyway rather than on that reasoning
+                // holding forever, since the alternative renders `אין שעמור בשם ""`.
+                if (groups.isEmpty() && query.isNotBlank()) {
+                    item {
+                        Text("אין שעמור בשם \"${query.trim()}\"",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+                groups.forEach { group ->
+                    // Headings only earn their space once there is more than one group:
+                    // a lone "היום" above the whole list labels nothing the list does not
+                    // already say.
+                    if (groups.size > 1) {
+                        item(key = "header-${group.section}") {
+                            Text(group.title,
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = if (group.section == AlarmSection.OFF)
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                else MaterialTheme.colorScheme.primary)
+                        }
+                    }
+                    items(group.rows, key = { it.alarm.id }) { row ->
+                        val alarm = row.alarm
+                        AlarmCardItem(
+                            alarm = alarm,
+                            onToggle = {vm.toggle(alarm,it)},
+                            onEdit = {
+                                // In selection mode a tap selects instead of navigating —
+                                // otherwise selecting a third alarm means opening the second.
+                                if (inSelection) vm.toggleSelection(alarm.id) else onEditAlarm(alarm.id)
+                            },
+                            onDuplicate = {onDuplicateAlarm(alarm.id)},
+                            onScheduleNextDay = {vm.scheduleForNextDay(alarm)},
+                            onDelete = {vm.delete(alarm)},
+                            onLongPress = { vm.toggleSelection(alarm.id) },
+                            selected = alarm.id in selectedIds,
+                            inSelectionMode = inSelection,
+                        )
+                    }
                 }
             }
         }
