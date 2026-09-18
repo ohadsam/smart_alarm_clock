@@ -10,6 +10,7 @@ import com.smartring.app.util.GENERIC_ALARM_NAME
 import com.smartring.app.util.AppLogger
 import com.smartring.app.util.endOfPickedDay
 import com.smartring.app.util.formatNextFireAt
+import com.smartring.app.util.occasionalTodayAt
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.*
@@ -308,6 +309,31 @@ class AlarmEditViewModel @Inject constructor(
             ).also { updateNextFireHintLater() }
         }
     }
+    /**
+     * "מזדמן — היום": pins the alarm to today at the time already chosen above.
+     *
+     * Refuses rather than rolls forward when that time has passed. The user asked for
+     * today; quietly substituting tomorrow is how somebody gets woken on the wrong day.
+     */
+    fun setOccasionalToday() = _state.update { s ->
+        val today = occasionalTodayAt(s.hour, s.minute)
+        if (today == null) s.copy(pastDateError = true)
+        else s.copy(specificDateTime = today, pastDateError = false)
+            .also { updateNextFireHintLater() }
+    }
+
+    /** Pins the alarm to a day [daysFromToday] out, keeping the chosen time of day. */
+    fun setSpecificDaysFromToday(daysFromToday: Int) = _state.update { s ->
+        val cal = Calendar.getInstance().apply {
+            add(Calendar.DAY_OF_YEAR, daysFromToday)
+            set(Calendar.HOUR_OF_DAY, s.hour)
+            set(Calendar.MINUTE, s.minute)
+            set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
+        }
+        s.copy(specificDateTime = cal.timeInMillis, pastDateError = false)
+            .also { updateNextFireHintLater() }
+    }
+
     fun setReminderText(v: String)                = _state.update { it.copy(reminderText = v) }
     fun setSnoozeEnabled(v: Boolean)               = _state.update { it.copy(snoozeEnabled = v) }
     fun setSnoozeMinutes(v: Int)                  = _state.update { it.copy(snoozeMinutes = v) }

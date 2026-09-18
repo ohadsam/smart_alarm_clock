@@ -1,5 +1,70 @@
 # SmartRing – Changelog
 
+## v1.7.1 (2026-09-18)
+
+### "משך צלצול כולל" — answered with arithmetic instead of prose
+
+Asked twice, explained twice in words, still unclear. The words were the problem. From
+`AlarmFiringService`, precisely:
+
+- `ringDurationSeconds` starts **one stopwatch** when the alarm begins. When it expires
+  the service calls `stopSelf()`. That is the total lifetime of the alarm and nothing
+  else.
+- The rounds are a **playlist**: each plays for its own duration, then its own gap of
+  silence, then the next. When the list runs out it starts again from the top, and keeps
+  going until that stopwatch fires.
+
+And the part the UI had been hiding, which is why the question kept coming back: **with
+exactly one round and no gap after it, the round's duration makes no audible difference at
+all.** The sound simply continues until the total runs out. It only starts to matter with
+a second round, or with a gap between repeats.
+
+So the screen now computes the answer from the user's own numbers rather than describing
+the mechanism — "מחזור של 30 שנ׳ · יחזור 4 פעמים בדיוק, ואז השעמור ייפסק" — and states
+the single-round case outright. `describeRingPlan` is pure and covered by `RingPlanTest`,
+including the vibrate-first mode, where the silent lead shortens the sound window so the
+total overstates it.
+
+### Ad-hoc ("מזדמן") alarms
+
+A one-off for today, re-armable for a later day with one tap.
+
+It needed no new schema. "Rings once, at this exact datetime" was already fully
+expressible, and `Alarm.isOneOffDated` recognises it — so an ad-hoc alarm edits, rings,
+snoozes and duplicates like any other alarm, rather than being a second kind of thing
+with its own half-supported behaviour.
+
+- The editor gets "היום" / "מחר" quick picks. "היום" is **refused** when that time has
+  already passed rather than rolled forward — the user asked for today, and quietly
+  substituting tomorrow is how somebody gets woken on the wrong day.
+- The card gets "תזמן ליום הבא". It steps from the alarm's own date, so pressing twice
+  reaches the day after tomorrow, which is what "or the days after that, with one tap"
+  asked for. A long-abandoned alarm jumps straight to the next future occurrence instead
+  of needing one tap per elapsed day.
+- It re-enables and clears the occurrence counter as well as re-dating, because an ad-hoc
+  alarm has switched itself off after ringing — re-dating alone would store a correct date
+  on an alarm that still could not ring, which is the exact failure v1.7.0 was about.
+
+`OccasionalAlarmTest` pins the property that matters: no input produces a time in the
+past. It fixes the timezone to Asia/Jerusalem, because wall-clock arithmetic that passes
+in UTC and fails at a real offset is a bug the runner's default would hide.
+
+### "צור חדש מזה" on a finished alarm
+
+Both actions a finished alarm is for already existed — re-enable via its switch, copy via
+the duplicate icon — but neither said what it was *for* once the alarm had run its course.
+A finished card now carries them as labelled buttons. Duplicating still routes through the
+editor, so a copy of a finished alarm hits the past-date refusal and cannot be saved until
+a future date is chosen.
+
+### One thing checked rather than assumed
+
+`scheduleForNextDay` re-reads the alarm by id instead of saving the list's copy.
+`saveAlarm` replaces an alarm's rings and extra dates wholesale, so saving a
+partially-populated `Alarm` would silently delete them. The list flow happens to be
+complete (`observeAllAlarms` is `@Transaction` and returns `AlarmWithDetails`), but a save
+path should not depend on a projection elsewhere staying that way.
+
 ## v1.7.0 (2026-09-17)
 
 Twelve reported problems from real use. Three of them turned out to be one bug.

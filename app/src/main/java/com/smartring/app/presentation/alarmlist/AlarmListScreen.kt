@@ -101,7 +101,7 @@ fun AlarmListScreen(onAddAlarm: ()->Unit, onEditAlarm: (Long)->Unit,
                 if (foreignAlarm != null) item { ForeignAlarmBanner(foreignAlarm) }
                 items(state.alarms,key={it.id}) { alarm ->
                     AlarmCardItem(alarm,{vm.toggle(alarm,it)},{onEditAlarm(alarm.id)},
-                        {onDuplicateAlarm(alarm.id)},{vm.delete(alarm)})
+                        {onDuplicateAlarm(alarm.id)},{vm.scheduleForNextDay(alarm)},{vm.delete(alarm)})
                 }
             }
         }
@@ -147,7 +147,7 @@ fun AlarmListScreen(onAddAlarm: ()->Unit, onEditAlarm: (Long)->Unit,
 @OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
 private fun AlarmCardItem(alarm: Alarm, onToggle:(Boolean)->Unit, onEdit:()->Unit,
-    onDuplicate:()->Unit, onDelete:()->Unit) {
+    onDuplicate:()->Unit, onScheduleNextDay:()->Unit, onDelete:()->Unit) {
     var showDel by remember { mutableStateOf(false) }
     // Theme color roles rather than the raw Blue/Green constants: those are tuned for
     // the dark scheme's near-black card, and Green (a pale mint) as a 8dp dot and a
@@ -210,13 +210,40 @@ private fun AlarmCardItem(alarm: Alarm, onToggle:(Boolean)->Unit, onEdit:()->Uni
                     Spacer(Modifier.height(2.dp))
                     Text("📝 $it",style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.tertiary,maxLines=1)
                 }
+                // Labelled buttons, on the card, for the two things a finished alarm is
+                // actually for. Both already existed — re-enable via the switch, copy via
+                // the duplicate icon — but neither said what it was *for* on an alarm that
+                // has run its course, which is when the user needs them.
+                if (alarm.hasFinished) {
+                    Spacer(Modifier.height(4.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        if (alarm.isOneOffDated) {
+                            FilledTonalButton(
+                                onClick = onScheduleNextDay,
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                            ) {
+                                Icon(Icons.Rounded.Event, null, Modifier.size(15.dp))
+                                Spacer(Modifier.width(5.dp))
+                                Text("תזמן ליום הבא", style = MaterialTheme.typography.labelMedium)
+                            }
+                        }
+                        TextButton(
+                            onClick = onDuplicate,
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                        ) {
+                            Text("צור חדש מזה", style = MaterialTheme.typography.labelMedium)
+                        }
+                    }
+                }
                 if (alarm.hasFinished || alarm.isFrozen || alarm.isShabbatMode || !alarm.snoozeEnabled) {
                     Spacer(Modifier.height(3.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         // Says what to do about it, not just what happened: the fix is one
                         // toggle away and nothing previously pointed at it.
                         if (alarm.hasFinished)
-                            MiniBadge("✔ צלצל והסתיים — הפעל כדי לתזמן מחדש", MaterialTheme.colorScheme.secondary)
+                            MiniBadge("✔ צלצל והסתיים", MaterialTheme.colorScheme.secondary)
+                        if (alarm.isOneOffDated && !alarm.hasFinished)
+                            MiniBadge("מזדמן — פעם אחת", MaterialTheme.colorScheme.secondary)
                         // A frozen alarm keeps isEnabled = true, so its switch stays
                         // visibly ON while the alarm will not ring at all — the only
                         // hint was the color of an 8dp dot. Say it in words.

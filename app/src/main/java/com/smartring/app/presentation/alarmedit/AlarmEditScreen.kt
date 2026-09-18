@@ -40,6 +40,7 @@ import com.smartring.app.domain.model.*
 import com.smartring.app.presentation.theme.*
 import com.smartring.app.util.GENERIC_ALARM_NAME
 import com.smartring.app.util.RingtonePreviewPlayer
+import com.smartring.app.util.describeRingPlan
 import com.smartring.app.util.formatDurationSeconds
 import com.smartring.app.util.durationPartsOf
 import com.smartring.app.util.durationPreview
@@ -326,7 +327,8 @@ fun AlarmEditScreen(
                         Column(Modifier.weight(1f).padding(end = 12.dp)) {
                             FieldLabel("תאריך ושעה ספציפיים",
                                 info = "השעמור יצלצל פעם אחת בלבד, בתאריך ובשעה שתבחר, במקום לפי ימים קבועים.")
-                            Text("הצלצול יהיה פעם אחת בלבד בתאריך שתבחר",
+                            Text("הצלצול יהיה פעם אחת בלבד בתאריך שתבחר — כך נוצר שעמור מזדמן. " +
+                                "כשהמתג כבוי, השעמור חוזר לפי ימי השבוע שתבחר למטה.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
@@ -348,6 +350,36 @@ fun AlarmEditScreen(
                     if (s.specificDateTime != null) {
                         Spacer(Modifier.height(10.dp))
                         HorizontalDivider()
+                        Spacer(Modifier.height(10.dp))
+                        // "מזדמן" in one tap. An ad-hoc alarm is just a one-off pinned to
+                        // today, so it needs no separate mode — only a way to say "today"
+                        // without going through a date picker to choose the date you are
+                        // already standing on. The day stepper on the alarm card is what
+                        // moves it to tomorrow afterwards, without reopening this screen.
+                        Text("מזדמן — בחירה מהירה",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary)
+                        Spacer(Modifier.height(6.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            AssistChip(
+                                onClick = vm::setOccasionalToday,
+                                label = { Text("היום") },
+                                leadingIcon = { Icon(Icons.Rounded.Today, null, Modifier.size(16.dp)) },
+                            )
+                            AssistChip(
+                                onClick = { vm.setSpecificDaysFromToday(1) },
+                                label = { Text("מחר") },
+                                leadingIcon = { Icon(Icons.Rounded.Event, null, Modifier.size(16.dp)) },
+                            )
+                        }
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            "\"היום\" זמין רק לשעה שעוד לא עברה. אחרי שהשעמור מצלצל אפשר " +
+                            "להחזיר אותו ליום הבא בלחיצה אחת מהמסך הראשי, בלי להיכנס לכאן.",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                         Spacer(Modifier.height(10.dp))
                         DateTimePickerInline(
                             epochMillis = s.specificDateTime!!,
@@ -461,18 +493,44 @@ fun AlarmEditScreen(
                         formatter = ::formatDurationSeconds, durationInput = true,
                         badgeTestTag = AlarmEditTags.RING_DURATION_BADGE,
                         onChange = vm::setRingDuration)
+                    Spacer(Modifier.height(10.dp))
+                    // The computed answer, not another paragraph of explanation. Prose
+                    // about "the total is an envelope and the rounds play inside it"
+                    // failed to land twice; the user's own numbers turned into a sentence
+                    // ("cycle of 30s, repeats 4 times exactly") is what makes the
+                    // relationship obvious. It also states the honest special case: with
+                    // one round and no gap the round length changes nothing audible.
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = .08f),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Row(Modifier.padding(12.dp)) {
+                            Icon(Icons.Rounded.Info, null, Modifier.size(16.dp),
+                                tint = MaterialTheme.colorScheme.primary)
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                describeRingPlan(
+                                    s.ringDurationSeconds, s.rings,
+                                    s.vibrationMode, s.vibrationOnlySeconds,
+                                ),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurface,
+                            )
+                        }
+                    }
                 }
             }
 
             // ── Ring rounds (up to 10, each with its own sound/volume/duration) ────
             item { SectionLabel("סבבי צלצול") }
-            // Spelling out the relationship between the two durations, in the place where
-            // the confusion actually happens. "משך צלצול כולל" above is the envelope; a
-            // round's own length is how long its sound plays inside that envelope.
+            // Short, and pointing at the computed sentence above rather than repeating
+            // the explanation. Sabbim are the advanced control here; most alarms have one.
             item {
                 Text(
-                    "כל סבב מנגן את הצליל שלו למשך הזמן שנקבע לו, אחריו ההשהיה שלו, ואז הסבב הבא. " +
-                    "כשהרשימה נגמרת היא חוזרת מהתחלה — עד שנגמר \"משך צלצול כולל\" שהגדרת למעלה.",
+                    "סבבים נותנים רצף של צלילים שונים, בעוצמות שונות, עם השהיות ביניהם — " +
+                    "לרוב השעמורים די בסבב אחד. החישוב המדויק של מה יישמע מופיע למעלה, " +
+                    "מתחת ל\"משך צלצול כולל\".",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

@@ -115,6 +115,10 @@
 | 86 | 15 ברירות מחדל לשעמור חדש, עם שחזור פרטני לכל אחת | `AlarmDefaultsRepository` (v1.7.0) |
 | 87 | השמעת הצליל של סבב בעוצמה שנבחרה, דרך ערוץ ההתראה האמיתי | `util/RingtonePreview.kt` (v1.7.0) |
 | 88 | אבחון בהגדרות: מה רשום במערכת (שלנו / של אפליקציה אחרת / כלום) | `ForeignAlarms.nextRegistered` (v1.7.0) |
+| 89 | הסבר מחושב למה שיישמע (אורך מחזור, מספר חזרות) במקום פרוזה | `util/RingPlan.kt` + `RingPlanTest` (v1.7.1) |
+| 90 | שעמור מזדמן = one-off עם `specificDateTime`; ללא מיגרציה | `Alarm.isOneOffDated` (v1.7.1) |
+| 91 | "היום" נדחה אם השעה עברה; "תזמן ליום הבא" לא מייצר אף פעם זמן בעבר | `util/OccasionalAlarm.kt` + `OccasionalAlarmTest` (v1.7.1) |
+| 92 | `scheduleForNextDay` קורא מחדש לפי id — `saveAlarm` מחליף סבבים ותאריכים במלואם | `AlarmListViewModel` (v1.7.1) |
 
 ---
 

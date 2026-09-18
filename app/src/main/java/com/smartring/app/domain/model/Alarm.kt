@@ -143,6 +143,18 @@ data class Alarm(
         get() = repeatDaysBitmask != 0 && repeatFrequency != RepeatFrequency.NONE
 
     /**
+     * A one-off alarm pinned to a single date and time, with no weekday schedule.
+     *
+     * This is what an ad-hoc ("מזדמן") alarm is: the feature needed no new column,
+     * because "rings once, at this exact datetime" was already fully expressible. It is
+     * also the set of alarms for which "schedule it for the next day" is a meaningful
+     * one-tap action — a weekly alarm already has a next day, and an alarm with a list of
+     * extra dates has several.
+     */
+    val isOneOffDated: Boolean
+        get() = specificDateTime != null && repeatDaysBitmask == 0 && specificDates.isEmpty()
+
+    /**
      * A one-time alarm that has already rung and been switched off automatically.
      *
      * This is the state AlarmFiringService leaves behind once a non-recurring alarm
