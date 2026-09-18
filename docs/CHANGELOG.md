@@ -1,5 +1,63 @@
 # SmartRing – Changelog
 
+## v1.8.0 (2026-09-18)
+
+### Widget controls
+
+Every alarm row in the wide and large widgets now has its own on/off button. One toggle
+covers pause, cancel and re-arm: an alarm that is off has no ring coming, one that is on
+has its next occurrence armed.
+
+Making that work needed the widgets' data source widened. They loaded `getActiveAlarms()`
+— enabled and unfrozen — which is the right model for "what is next" and the wrong one for
+a surface with controls: **a widget that hides switched-off alarms can switch one off and
+then offers no way to switch it back on.** They now load every alarm, armed ones first,
+with idle rows dimmed and labelled "כבוי — לחץ להפעלה".
+
+Two decisions worth stating:
+
+- **The toggle is an explicit icon, not the whole row.** The row already opens the app, and
+  a row that navigates or toggles depending on where it was pressed is the kind of
+  home-screen surprise that costs somebody an alarm.
+- **Switching an ad-hoc alarm back on when its date has passed re-dates it to the next
+  day** rather than only setting `isEnabled = true`. Enabling it as-is would store a
+  correct "on" flag on an alarm whose only occurrence is in the past, so `schedule()`
+  cancels it and nothing rings — the exact state v1.7.0 and v1.7.1 were about, and a widget
+  button is the last place it should be reachable from, because there is no screen there to
+  explain it.
+
+### The empty widget says so with an icon
+
+A widget with nothing coming up showed `--:--`. A dash where a time belongs reads as a
+value that failed to load. It now shows a greyed-out crossed alarm clock, tinted from the
+widget's own palette so it is right in both themes, and distinguishes two different
+situations with two different sentences: "אין שעמור פעיל" when alarms exist but are all
+off, "אין שעמורים" when there are none at all. The first is fixable and the second is not,
+so they should not share wording.
+
+### One selection rule instead of two
+
+`buildWidgetRows` is a strict superset of the old `buildUpcomingAlarms` — the same
+filtering plus the idle alarms. Rather than leave both, the narrower one is deleted and its
+nine tests ported. Two parallel selection rules is how they drift apart, and this codebase
+has already been bitten by exactly that (see the comment on
+`AlarmFiringService.startAudioSequence`, where a second copy of the round-walking rule
+meant a multi-round alarm never advanced past round 1).
+
+The ported tests change shape honestly: an alarm with no next ring is no longer *dropped*,
+it is listed and not armed, so the assertions say that. Four new cases cover disabled,
+frozen, armed-above-idle ordering and the idle row's fallback time.
+
+### A keep rule that would otherwise have been found by a user
+
+`actionRunCallback<T>()` stores T's fully-qualified class name in the RemoteViews it
+builds, and Glance reflects on it when the button is tapped. R8 renaming the class leaves
+every widget button silently doing nothing — in release only, and only when actually
+tapped. Invisible to everything here: the instrumented suite installs the unminified debug
+APK, and `release-smoke-test.sh` launches `MainActivity` rather than tapping a widget.
+Added to `proguard-rules.pro` with a `ProguardRulesTest` tripwire, alongside the rules from
+v1.6.9 that were found the hard way.
+
 ## v1.7.1 (2026-09-18)
 
 ### "משך צלצול כולל" — answered with arithmetic instead of prose

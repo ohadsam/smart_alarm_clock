@@ -69,3 +69,12 @@
 -keep class androidx.lifecycle.compose.** { *; }
 -keep class androidx.lifecycle.** { *; }
 -keepclassmembers class * implements androidx.lifecycle.LifecycleOwner { *; }
+
+# Glance ActionCallbacks are instantiated by class *name*.
+# actionRunCallback<T>() stores T's fully-qualified name in the RemoteViews it builds,
+# and Glance reflects on it when the user taps — so R8 renaming the class makes every
+# widget button silently do nothing in the release build, while working perfectly in
+# debug. That is the same failure mode as the LocalLifecycleOwner bridge in v1.6.9, and
+# it is invisible to every test here: the instrumented suite installs the unminified
+# debug APK, and release-smoke-test.sh launches MainActivity rather than tapping a widget.
+-keep class * implements androidx.glance.appwidget.action.ActionCallback { *; }

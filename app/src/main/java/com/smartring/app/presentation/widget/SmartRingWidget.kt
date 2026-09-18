@@ -11,7 +11,12 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.glance.*
+import androidx.glance.ColorFilter
+import androidx.glance.action.ActionParameters
+import androidx.glance.action.actionParametersOf
 import androidx.glance.action.clickable
+import androidx.glance.appwidget.action.ActionCallback
+import androidx.glance.appwidget.action.actionRunCallback
 import androidx.glance.appwidget.*
 import androidx.glance.appwidget.action.actionStartActivity
 import androidx.glance.layout.*
@@ -21,9 +26,11 @@ import com.smartring.app.MainActivity
 import com.smartring.app.R
 import com.smartring.app.data.repository.AlarmRepository
 import com.smartring.app.util.AlarmScheduler
-import com.smartring.app.util.UpcomingAlarm
-import com.smartring.app.util.buildUpcomingAlarms
+import com.smartring.app.util.WidgetAlarmEntry
+import com.smartring.app.util.buildWidgetRows
 import com.smartring.app.util.formatCountdownUntil
+import com.smartring.app.util.nextOccasionalDate
+import java.util.Calendar
 import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
 import dagger.hilt.android.EntryPointAccessors
@@ -185,26 +192,19 @@ interface WidgetEntryPoint {
 }
 
 abstract class SmartRingBaseWidget : GlanceAppWidget() {
-    /** Active alarms paired with their true next-fire epoch millis, soonest first.
-     *  Uses AlarmScheduler.nextFireTime — the same recurrence/specific-date-aware
-     *  calculation actually used to schedule alarms — rather than the DB's plain
-     *  hour/minute ordering, so "the next alarm" (and its countdown) is always the
-     *  real next one to ring, not just the earliest time-of-day in the list.
-     *
-     *  The selection and ordering rules themselves live in the pure
-     *  [buildUpcomingAlarms], which is unit-tested; this only supplies the two
-     *  lookups it needs. */
+
     /**
-     * "אין שעמור פעיל", not "אין שעמור": the widgets only ever list alarms that are
-     * enabled and unfrozen, so a user whose alarms have all rung and retired saw an
-     * empty widget that appeared to have lost them. Naming the distinction is the whole
-     * difference between "the widget is broken" and "nothing is armed".
+     * Every alarm, armed first — the list the controllable widgets render.
+     *
+     * Reads all alarms rather than only the active ones, which is what makes a per-row
+     * toggle possible at all: a widget that hides disabled alarms can switch one off and
+     * then offers no way to switch it back on.
      */
-    protected suspend fun upcomingAlarms(ctx: Context): List<UpcomingAlarm> {
+    protected suspend fun allAlarmRows(ctx: Context): List<WidgetAlarmEntry> {
         val ep = EntryPointAccessors.fromApplication(ctx, WidgetEntryPoint::class.java)
         val scheduler = ep.alarmScheduler()
-        return buildUpcomingAlarms(
-            alarms     = ep.alarmRepository().getActiveAlarms(),
+        return buildWidgetRows(
+            alarms     = ep.alarmRepository().getAllAlarms(),
             snoozeAt   = scheduler::pendingSnoozeUntil,
             nextFireAt = { scheduler.nextFireTime(it) },
         )
@@ -213,7 +213,9 @@ abstract class SmartRingBaseWidget : GlanceAppWidget() {
 
 class SmartRingWidgetSmall : SmartRingBaseWidget() {
     override suspend fun provideGlance(ctx: Context, id: GlanceId) {
-        val next = upcomingAlarms(ctx).firstOrNull()
+        val rows = allAlarmRows(ctx)
+        val next = rows.firstOrNull()?.takeIf { it.isArmed }
+        val anyAlarms = rows.isNotEmpty()
         val p = paletteFor(ctx)
         provideContent {
             WidgetFrame(ctx) {
@@ -222,11 +224,15 @@ class SmartRingWidgetSmall : SmartRingBaseWidget() {
                     horizontalAlignment = Alignment.CenterHorizontally) {
                     LiveClock(ctx, 11f, p.textSecondary.toArgb())
                     Spacer(GlanceModifier.height(2.dp))
-                    Text(next?.timeText ?: "--:--",
-                        style = TextStyle(fontSize = 24.sp, fontWeight = FontWeight.Bold, color = ColorProvider(p.textPrimary)))
-                    if (next != null) Countdown(ctx, next.fireAt, 9f, p.accentBlue)
-                    else Text("אין שעמור פעיל",
-                        style = TextStyle(fontSize = 9.sp, color = ColorProvider(p.accentBlue)), maxLines = 1)
+                    if (next != null) {
+                        Text(next.timeText,
+                            style = TextStyle(fontSize = 24.sp, fontWeight = FontWeight.Bold, color = ColorProvider(p.textPrimary)))
+                        Countdown(ctx, next.fireAt!!, 9f, p.accentBlue)
+                    } else {
+                        // No "--:--" placeholder: a dash where a time belongs looks like a
+                        // value that failed to load. The icon says "nothing coming up".
+                        WidgetEmptyState(p, hasAnyAlarms = anyAlarms, compact = true)
+                    }
                 }
             }
         }
@@ -235,7 +241,9 @@ class SmartRingWidgetSmall : SmartRingBaseWidget() {
 
 class SmartRingWidgetMedium : SmartRingBaseWidget() {
     override suspend fun provideGlance(ctx: Context, id: GlanceId) {
-        val alarms = upcomingAlarms(ctx); val next = alarms.firstOrNull()
+        val rows = allAlarmRows(ctx)
+        val next = rows.firstOrNull()?.takeIf { it.isArmed }
+        val armedCount = rows.count { it.isArmed }
         val p = paletteFor(ctx)
         provideContent {
             WidgetFrame(ctx) {
@@ -245,16 +253,20 @@ class SmartRingWidgetMedium : SmartRingBaseWidget() {
                             modifier = GlanceModifier.defaultWeight())
                         LiveClock(ctx, 11f, p.textSecondary.toArgb())
                         Spacer(GlanceModifier.width(8.dp))
-                        Text("${alarms.size} פעילים", style = TextStyle(fontSize = 9.sp, color = ColorProvider(p.accentGreen)))
+                        Text("$armedCount פעילים", style = TextStyle(fontSize = 9.sp, color = ColorProvider(p.accentGreen)))
                     }
                     Spacer(GlanceModifier.height(4.dp))
-                    Text(next?.timeText ?: "--:--",
-                        style = TextStyle(fontSize = 30.sp, fontWeight = FontWeight.Bold, color = ColorProvider(p.textPrimary)))
-                    Row(GlanceModifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Text(next?.alarm?.name ?: "אין שעמור פעיל",
-                            style = TextStyle(fontSize = 11.sp, color = ColorProvider(p.textSecondary)),
-                            modifier = GlanceModifier.defaultWeight(), maxLines = 1)
-                        next?.let { Countdown(ctx, it.fireAt, 10f, p.accentBlue) }
+                    if (next != null) {
+                        Text(next.timeText,
+                            style = TextStyle(fontSize = 30.sp, fontWeight = FontWeight.Bold, color = ColorProvider(p.textPrimary)))
+                        Row(GlanceModifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            Text(next.alarm.name,
+                                style = TextStyle(fontSize = 11.sp, color = ColorProvider(p.textSecondary)),
+                                modifier = GlanceModifier.defaultWeight(), maxLines = 1)
+                            Countdown(ctx, next.fireAt!!, 10f, p.accentBlue)
+                        }
+                    } else {
+                        WidgetEmptyState(p, hasAnyAlarms = rows.isNotEmpty())
                     }
                 }
             }
@@ -264,24 +276,27 @@ class SmartRingWidgetMedium : SmartRingBaseWidget() {
 
 class SmartRingWidgetWide : SmartRingBaseWidget() {
     override suspend fun provideGlance(ctx: Context, id: GlanceId) {
-        val alarms = upcomingAlarms(ctx); val next = alarms.firstOrNull()
+        val rows = allAlarmRows(ctx)
+        val next = rows.firstOrNull()?.takeIf { it.isArmed }
+        val armedCount = rows.count { it.isArmed }
         val p = paletteFor(ctx)
         provideContent {
             WidgetFrame(ctx) {
                 Column(GlanceModifier.fillMaxSize().padding(14.dp)) {
                     Row(GlanceModifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Text("⏰ ${alarms.size} פעילים", style = TextStyle(fontSize = 9.sp, color = ColorProvider(p.accentBlue)),
+                        Text("⏰ $armedCount פעילים", style = TextStyle(fontSize = 9.sp, color = ColorProvider(p.accentBlue)),
                             modifier = GlanceModifier.defaultWeight())
                         LiveClock(ctx, 10f, p.textSecondary.toArgb())
                     }
                     next?.let {
                         Row(GlanceModifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                             Text("הבא ", style = TextStyle(fontSize = 9.sp, color = ColorProvider(p.accentGreen)))
-                            Countdown(ctx, it.fireAt, 9f, p.accentGreen)
+                            Countdown(ctx, it.fireAt!!, 9f, p.accentGreen)
                         }
                     }
                     Spacer(GlanceModifier.height(8.dp))
-                    alarms.take(3).forEach { WidgetAlarmRow(it, p) }
+                    if (rows.isEmpty()) WidgetEmptyState(p, hasAnyAlarms = false)
+                    else rows.take(3).forEach { WidgetAlarmRow(it, p) }
                 }
             }
         }
@@ -290,27 +305,126 @@ class SmartRingWidgetWide : SmartRingBaseWidget() {
 
 class SmartRingWidgetLarge : SmartRingBaseWidget() {
     override suspend fun provideGlance(ctx: Context, id: GlanceId) {
-        val alarms = upcomingAlarms(ctx); val next = alarms.firstOrNull()
+        val rows = allAlarmRows(ctx)
+        val next = rows.firstOrNull()?.takeIf { it.isArmed }
+        val armedCount = rows.count { it.isArmed }
         val p = paletteFor(ctx)
         provideContent {
             WidgetFrame(ctx) {
                 Column(GlanceModifier.fillMaxSize().padding(14.dp)) {
                     Row(GlanceModifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Text("⏰ SMARTRING · ${alarms.size} פעילים", style = TextStyle(fontSize = 9.sp, color = ColorProvider(p.accentBlue)),
+                        Text("⏰ SMARTRING · $armedCount פעילים", style = TextStyle(fontSize = 9.sp, color = ColorProvider(p.accentBlue)),
                             modifier = GlanceModifier.defaultWeight())
                         LiveClock(ctx, 10f, p.textSecondary.toArgb())
                     }
                     next?.let {
                         Row(GlanceModifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                             Text("הבא ", style = TextStyle(fontSize = 9.sp, color = ColorProvider(p.accentGreen)))
-                            Countdown(ctx, it.fireAt, 9f, p.accentGreen)
+                            Countdown(ctx, it.fireAt!!, 9f, p.accentGreen)
                         }
                     }
                     Spacer(GlanceModifier.height(8.dp))
-                    alarms.take(4).forEach { WidgetAlarmRow(it, p) }
+                    if (rows.isEmpty()) WidgetEmptyState(p, hasAnyAlarms = false)
+                    else rows.take(4).forEach { WidgetAlarmRow(it, p) }
                 }
             }
         }
+    }
+}
+
+
+/**
+ * Switches one alarm on or off straight from a widget.
+ *
+ * The widget is where people look at their alarms without opening anything, so "turn
+ * tonight's alarm off" should not require launching the app, finding the row and coming
+ * back. One toggle covers all three of pause, cancel and re-arm: an alarm that is off has
+ * no ring coming, and one that is on has its next occurrence armed.
+ *
+ * ## The one non-obvious behaviour, and why
+ *
+ * Switching an *ad-hoc* alarm back on when its date has already passed re-dates it to the
+ * next day rather than merely setting `isEnabled = true`. Enabling it as-is would store a
+ * perfectly correct "on" flag on an alarm whose only occurrence is in the past — so
+ * `schedule()` cancels it and nothing rings. That exact state is what v1.7.0 and v1.7.1
+ * were mostly about, and a widget button is the last place it should be reachable from,
+ * because there is no screen there to explain it. The row re-renders with the new date
+ * immediately, so the change is visible rather than silent.
+ */
+class ToggleWidgetAlarmAction : ActionCallback {
+    override suspend fun onAction(context: Context, glanceId: GlanceId, parameters: ActionParameters) {
+        val id = parameters[alarmIdKey] ?: return
+        val ep = EntryPointAccessors.fromApplication(context, WidgetEntryPoint::class.java)
+        val repository = ep.alarmRepository()
+        val scheduler = ep.alarmScheduler()
+        val alarm = repository.getAlarm(id) ?: return
+
+        if (alarm.isEnabled) {
+            repository.setEnabled(id, false)
+            scheduler.cancel(id)
+        } else if (alarm.isOneOffDated &&
+            (alarm.specificDateTime ?: 0L) <= System.currentTimeMillis()
+        ) {
+            val next = nextOccasionalDate(alarm.specificDateTime, alarm.hour, alarm.minute)
+            val cal = Calendar.getInstance().apply { timeInMillis = next }
+            val revived = alarm.copy(
+                specificDateTime = next,
+                hour = cal.get(Calendar.HOUR_OF_DAY),
+                minute = cal.get(Calendar.MINUTE),
+                isEnabled = true,
+                occurrencesFired = 0,
+            )
+            repository.saveAlarm(revived)
+            scheduler.schedule(revived)
+        } else {
+            // Clearing the counter matters here too: an alarm switched off by the firing
+            // service has one occurrence recorded, and a COUNT-limited recurrence would
+            // otherwise be re-enabled straight into isRecurrenceExpired().
+            val revived = alarm.copy(isEnabled = true, occurrencesFired = 0)
+            repository.saveAlarm(revived)
+            scheduler.schedule(revived)
+        }
+        refreshAllWidgets(context)
+    }
+
+    companion object {
+        val alarmIdKey = ActionParameters.Key<Long>("smartring_widget_alarm_id")
+    }
+}
+
+/**
+ * The "nothing is coming up" state.
+ *
+ * A greyed-out crossed alarm icon plus a line of text, rather than text alone: an empty
+ * widget showing only words reads as easily as one that failed to load as one that is
+ * correctly reporting an empty schedule. Tinted from the widget's own muted colour so it
+ * is right in both themes.
+ */
+@Composable
+private fun WidgetEmptyState(palette: WidgetPalette, hasAnyAlarms: Boolean, compact: Boolean = false) {
+    Column(
+        GlanceModifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Image(
+            provider = ImageProvider(R.drawable.ic_widget_alarm_off),
+            contentDescription = null,
+            modifier = GlanceModifier.size(if (compact) 20.dp else 26.dp),
+            colorFilter = ColorFilter.tint(ColorProvider(palette.textSecondary)),
+        )
+        Spacer(GlanceModifier.height(3.dp))
+        Text(
+            // Two different situations, two different sentences. "Nothing armed" when
+            // alarms exist but are all off is a fixable state; "nothing set up" is not
+            // the same message and should not borrow its wording.
+            if (hasAnyAlarms) "אין שעמור פעיל" else "אין שעמורים",
+            style = TextStyle(
+                fontSize = if (compact) 9.sp else 11.sp,
+                color = ColorProvider(palette.textSecondary),
+            ),
+            maxLines = 1,
+        )
     }
 }
 
@@ -318,17 +432,54 @@ class SmartRingWidgetLarge : SmartRingBaseWidget() {
  *  alarm list card shows) beside the name: without it two 07:00 rows — one every
  *  weekday, one a single next-Tuesday reminder — were indistinguishable. */
 @Composable
-private fun WidgetAlarmRow(upcoming: UpcomingAlarm, palette: WidgetPalette) {
-    val alarm = upcoming.alarm
+private fun WidgetAlarmRow(entry: WidgetAlarmEntry, palette: WidgetPalette) {
+    val alarm = entry.alarm
     Row(GlanceModifier.fillMaxWidth().padding(horizontal=8.dp,vertical=5.dp)
         .background(ImageProvider(R.drawable.widget_row_bg)),
         verticalAlignment = Alignment.CenterVertically) {
-        Text(upcoming.timeText, style = TextStyle(fontSize=16.sp, fontWeight=FontWeight.Bold, color=ColorProvider(palette.textPrimary)),
+        Text(entry.timeText,
+            style = TextStyle(fontSize=16.sp, fontWeight=FontWeight.Bold,
+                color=ColorProvider(if (entry.isArmed) palette.textPrimary else palette.textSecondary)),
             modifier = GlanceModifier.padding(end=10.dp))
-        Text(alarm.name, style = TextStyle(fontSize=11.sp, color=ColorProvider(palette.textSecondary)),
-            modifier = GlanceModifier.defaultWeight(), maxLines=1)
-        Text(if (upcoming.isSnoozed) "נודניק" else alarm.scheduleSummary(),
-            style = TextStyle(fontSize=9.sp, color=ColorProvider(palette.accentBlue)), maxLines=1)
+        Column(GlanceModifier.defaultWeight()) {
+            Text(alarm.name,
+                style = TextStyle(fontSize=11.sp, color=ColorProvider(palette.textSecondary)), maxLines=1)
+            Text(
+                // An idle row says so in words. Dimming alone is not enough to tell
+                // "switched off" apart from "nothing scheduled" on a home screen.
+                when {
+                    entry.isSnoozed -> "נודניק"
+                    !entry.isArmed  -> "כבוי — לחץ להפעלה"
+                    else            -> alarm.scheduleSummary()
+                },
+                style = TextStyle(
+                    fontSize = 9.sp,
+                    color = ColorProvider(if (entry.isArmed) palette.accentBlue else palette.textSecondary),
+                ),
+                maxLines = 1,
+            )
+        }
+        // The control. Runs ToggleWidgetAlarmAction for this alarm id and re-renders
+        // every widget, so the row shows the new state immediately.
+        //
+        // An explicit icon target rather than the whole row: the row's parent already
+        // opens the app on tap, and a row that both navigates and toggles depending on
+        // where it was pressed is the kind of home-screen surprise that costs someone an
+        // alarm. Glance has no Switch, so the icon carries the state.
+        Image(
+            provider = ImageProvider(
+                if (entry.isArmed) R.drawable.ic_widget_alarm_on else R.drawable.ic_widget_alarm_off,
+            ),
+            contentDescription = if (entry.isArmed) "כבה את ${alarm.name}" else "הפעל את ${alarm.name}",
+            modifier = GlanceModifier.size(30.dp).padding(start = 6.dp).clickable(
+                actionRunCallback<ToggleWidgetAlarmAction>(
+                    actionParametersOf(ToggleWidgetAlarmAction.alarmIdKey to alarm.id),
+                ),
+            ),
+            colorFilter = ColorFilter.tint(
+                ColorProvider(if (entry.isArmed) palette.accentGreen else palette.textSecondary),
+            ),
+        )
     }
     Spacer(GlanceModifier.height(4.dp))
 }

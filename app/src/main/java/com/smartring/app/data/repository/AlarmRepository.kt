@@ -16,6 +16,11 @@ class AlarmRepository @Inject constructor(private val dao: AlarmDao) {
     suspend fun getAlarm(id: Long): Alarm? =
         dao.getAlarmWithDetails(id)?.toDomain()
 
+    /** Every alarm, enabled or not. Used by the widgets, which must be able to offer
+     *  switching a disabled alarm back on. */
+    suspend fun getAllAlarms(): List<Alarm> =
+        dao.getAllAlarmsWithDetails().map { it.toDomain() }
+
     suspend fun getActiveAlarms(): List<Alarm> =
         dao.getActiveAlarms().map { it.toDomain() }
 

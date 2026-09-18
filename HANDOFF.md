@@ -119,6 +119,11 @@
 | 90 | שעמור מזדמן = one-off עם `specificDateTime`; ללא מיגרציה | `Alarm.isOneOffDated` (v1.7.1) |
 | 91 | "היום" נדחה אם השעה עברה; "תזמן ליום הבא" לא מייצר אף פעם זמן בעבר | `util/OccasionalAlarm.kt` + `OccasionalAlarmTest` (v1.7.1) |
 | 92 | `scheduleForNextDay` קורא מחדש לפי id — `saveAlarm` מחליף סבבים ותאריכים במלואם | `AlarmListViewModel` (v1.7.1) |
+| 93 | כפתור הפעלה/כיבוי לכל שעמור בווידג'ט; הווידג'טים מציגים גם שעמורים כבויים | `ToggleWidgetAlarmAction` + `util/WidgetRows.kt` (v1.8.0) |
+| 94 | הפעלה מהווידג'ט של שעמור מזדמן שעבר — מתזמנת ליום הבא במקום להדליק ללא צלצול | `ToggleWidgetAlarmAction` (v1.8.0) |
+| 95 | אייקון אפור לווידג'ט ריק, עם הבחנה בין "אין פעיל" ל"אין בכלל" | `ic_widget_alarm_off.xml` + `WidgetEmptyState` (v1.8.0) |
+| 96 | כלל keep ל-Glance ActionCallback — נטען לפי שם, אחרת כל כפתור ווידג'ט מושתק ב-release | `app/proguard-rules.pro` + `ProguardRulesTest` (v1.8.0) |
+| 97 | כלל בחירה אחד לווידג'טים; `buildUpcomingAlarms` נמחק לטובת `buildWidgetRows` | `util/WidgetRows.kt` + `WidgetRowsTest` (v1.8.0) |
 
 ---
 

@@ -69,6 +69,16 @@ class ProguardRulesTest {
     }
 
     @Test
+    fun `glance action callbacks stay unobfuscated`() {
+        // Widget buttons are wired by class name, so renaming the callback leaves a
+        // button that does nothing — only in release, and only when actually tapped.
+        requireRule(
+            "-keep class * implements androidx.glance.appwidget.action.ActionCallback { *; }",
+            "every widget button stops working in the release build without it",
+        )
+    }
+
+    @Test
     fun `the room entities and domain models stay unobfuscated`() {
         requireRule(
             "-keep class com.smartring.app.data.db.** { *; }",

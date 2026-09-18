@@ -12,6 +12,16 @@ interface AlarmDao {
     @Transaction @Query("SELECT * FROM alarms WHERE id = :id")
     suspend fun getAlarmWithDetails(id: Long): AlarmWithDetails?
 
+    /**
+     * Every alarm, enabled or not — a one-shot read rather than the Flow.
+     *
+     * The widgets need it: they used to load `getActiveAlarms()` only, which meant a
+     * widget could switch an alarm *off* and then had no way to offer switching it back
+     * on, because a disabled alarm was no longer in the list it renders from.
+     */
+    @Transaction @Query("SELECT * FROM alarms ORDER BY hour, minute")
+    suspend fun getAllAlarmsWithDetails(): List<AlarmWithDetails>
+
     @Transaction @Query("SELECT * FROM alarms WHERE isEnabled = 1 AND isFrozen = 0 ORDER BY hour, minute")
     suspend fun getActiveAlarms(): List<AlarmWithDetails>
 

@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The "nothing coming up" mark for the widgets.
+
+  A crossed-out alarm clock, drawn as a vector so it can be tinted at render time to the
+  widget's own muted text colour — the widgets resolve their palette from the night-mode
+  configuration, so a baked-in grey would be wrong in one of the two themes.
+
+  Deliberately an icon rather than more text: an empty widget previously showed only the
+  words "אין שעמור", which reads as easily as a widget that has failed to load as one
+  that is correctly telling you there is nothing set.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24"
+    android:tint="#FFFFFFFF">
+    <path
+        android:fillColor="@android:color/white"
+        android:pathData="M12,6c3.31,0 6,2.69 6,6c0,0.79 -0.15,1.54 -0.43,2.24l1.49,1.49C19.66,14.68 20,13.38 20,12c0,-1.91 -0.67,-3.66 -1.78,-5.05l1.42,-1.42l-1.41,-1.41l-1.42,1.42C15.42,4.44 13.77,3.83 12,3.83c-1.38,0 -2.68,0.34 -3.82,0.95l1.49,1.49C10.37,6.04 11.17,6 12,6zM3.41,2.86L2,4.27l2.09,2.09C3.4,7.94 3,9.42 3,11c0,4.97 4.03,9 9,9c1.58,0 3.06,-0.4 4.36,-1.09L19.73,22l1.41,-1.41L3.41,2.86zM12,18c-3.86,0 -7,-3.14 -7,-7c0,-1.02 0.22,-1.99 0.61,-2.87l9.26,9.26C13.99,17.78 13.02,18 12,18z" />
+</vector>
