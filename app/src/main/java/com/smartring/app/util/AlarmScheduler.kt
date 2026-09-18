@@ -13,6 +13,15 @@ import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
 
+/**
+ * How long a test ring waits before firing.
+ *
+ * Long enough to put the phone down and watch it happen, short enough that nobody
+ * wanders off. Deliberately not zero: firing instantly would skip the part people
+ * actually doubt — that the OS wakes the device and delivers the alarm.
+ */
+const val TEST_RING_DELAY_SECONDS = 5
+
 @Singleton
 class AlarmScheduler @Inject constructor(
     @ApplicationContext private val context: Context,
@@ -115,6 +124,32 @@ class AlarmScheduler @Inject constructor(
         snoozePrefs.edit().putLong(alarm.id.toString(), at).apply()
         appLogger.log("Scheduler", "נודניק תוזמן: \"${alarm.name}\" (#${alarm.id})")
         widgetRefresher.refresh()
+    }
+
+    /**
+     * Arms a rehearsal of [alarm] a few seconds from now, through the real path.
+     *
+     * The point is that nothing here is simulated: the OS delivers it, AlarmReceiver
+     * takes the hand-off wake lock, AlarmFiringService plays the configured rounds at the
+     * configured volume with the configured vibration, and the ring screen appears. That
+     * is the chain that fails at 06:30, and it is the only way to show someone it works
+     * *before* they rely on it.
+     *
+     * Uses [buildTestPendingIntent] so the alarm's real trigger is untouched, and sets
+     * EXTRA_IS_TEST so the service performs no bookkeeping. Returns the moment it will
+     * fire so the caller can say when.
+     */
+    fun scheduleTestRing(alarm: Alarm, delaySeconds: Int = TEST_RING_DELAY_SECONDS): Long {
+        val at = System.currentTimeMillis() + delaySeconds * 1_000L
+        armExact(at, buildTestPendingIntent(alarm.id), "בדיקת צלצול \"${alarm.name}\" (#${alarm.id})")
+        appLogger.log("Scheduler",
+            "בדיקת צלצול תוזמנה ל-\"${alarm.name}\" (#${alarm.id}) בעוד $delaySeconds שניות")
+        return at
+    }
+
+    /** Cancels a pending rehearsal without touching the alarm's real trigger. */
+    fun cancelTestRing(id: Long) {
+        alarmManager.cancel(buildTestPendingIntent(id))
     }
 
     fun cancel(id: Long) {
@@ -328,5 +363,24 @@ class AlarmScheduler @Inject constructor(
         Intent(context, AlarmReceiver::class.java)
             .putExtra(AlarmReceiver.EXTRA_ALARM_ID, id)
             .putExtra(AlarmReceiver.EXTRA_IS_SNOOZE, true),
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+
+    /**
+     * A third request-code space, alongside the alarm's own (`id`) and its snooze
+     * (`id + 100_000`).
+     *
+     * This is the whole reason a test ring is safe to offer: AlarmManager keys a
+     * registration by its PendingIntent, and two PendingIntents with the same request
+     * code and matching Intent are the *same* registration. Arming a rehearsal on the
+     * alarm's own code would therefore silently overwrite the real trigger — the user
+     * would test their alarm and, in doing so, cancel it. Its own code keeps the two
+     * independent, so the real 06:30 stays armed while the rehearsal fires in ten
+     * seconds.
+     */
+    private fun buildTestPendingIntent(id: Long) = PendingIntent.getBroadcast(
+        context, (id + 200_000).toInt(),
+        Intent(context, AlarmReceiver::class.java)
+            .putExtra(AlarmReceiver.EXTRA_ALARM_ID, id)
+            .putExtra(AlarmReceiver.EXTRA_IS_TEST, true),
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
 }

@@ -28,8 +28,9 @@ interface AlarmDao {
     @Insert
     suspend fun insertAlarm(a: AlarmEntity): Long
 
+    /** Returns the number of rows changed, which is 0 when the id no longer exists. */
     @Update
-    suspend fun updateAlarm(a: AlarmEntity)
+    suspend fun updateAlarm(a: AlarmEntity): Int
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertRings(r: List<AlarmRingEntity>)
@@ -123,9 +124,18 @@ interface AlarmDao {
         // insertAlarm()/updateAlarm() rather than a REPLACE upsert: REPLACE is a SQLite
         // DELETE+INSERT under the hood, which cascades alarm_logs' ON DELETE SET NULL
         // FK and silently orphans every prior history row each time an alarm is edited.
+        // Falling back to an insert when the update matches nothing is what makes "undo
+        // delete" possible: the row is gone, so @Update changes zero rows and would
+        // silently do nothing at all — the alarm would appear to come back in the UI and
+        // be absent from the database. Inserting with the original id restores it under
+        // that same id, which matters beyond tidiness: the scheduler keys its
+        // PendingIntent request codes off the id, so a restore under a fresh id would
+        // re-arm a *different* registration and leave the old one to be cancelled by
+        // nobody. What it does not bring back is the alarm's history: deleteAlarm has
+        // already run alarm_logs' ON DELETE SET NULL, so rows fired before the delete
+        // stay orphaned. Undo restores the alarm, not the past.
         val id = if (alarm.id == 0L) insertAlarm(alarm) else {
-            updateAlarm(alarm)
-            alarm.id
+            if (updateAlarm(alarm) == 0) insertAlarm(alarm) else alarm.id
         }
         deleteRingsForAlarm(id)
         deleteDatesForAlarm(id)

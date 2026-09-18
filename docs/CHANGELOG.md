@@ -1,5 +1,116 @@
 # SmartRing – Changelog
 
+## v1.8.1 (2026-09-18)
+
+### A test ring that proves the chain, not a simulation of it
+
+"בדוק צלצול עכשיו" on the edit screen of an already-saved alarm arms a rehearsal five
+seconds out and lets it run the whole real path: AlarmManager wakes the device,
+`AlarmReceiver` takes the hand-off wake lock, `AlarmFiringService` plays the configured
+rounds at the configured volume with the configured vibration, and the ring screen opens.
+A "test" that short-circuits any of that proves nothing about the part that actually fails
+at 06:30.
+
+Two things make it safe to offer:
+
+- **A third request-code space** (`id + 200_000`, alongside the alarm's own `id` and its
+  snooze's `id + 100_000`). AlarmManager keys a registration by its PendingIntent, so
+  arming a rehearsal on the alarm's own code would silently *overwrite the real trigger* —
+  the user would test their alarm and, in doing so, cancel it.
+- **`EXTRA_IS_TEST`**, threaded receiver → service, which suppresses every piece of
+  bookkeeping: no FIRED row, no occurrence increment, no switching a one-time alarm off,
+  no re-arming the next occurrence, no widget refresh on the snooze branch.
+
+The confirm dialog says outright that it will be loud, and — when `isDirty` — that the
+rehearsal plays what is *saved*, not what is on screen. A test that quietly used the old
+volume would teach the user the wrong thing about the change they just made.
+
+While the rehearsal is pending there is a "בטל את הבדיקה" button. Five seconds is long
+enough to think better of a full-volume alarm — in a meeting, next to someone asleep — and
+without it the only way to stop it is to let it ring and then stop it, which is exactly
+what the user just decided against. It cancels only the test PendingIntent.
+
+### "למה השעמור לא צלצל?" — one screen that answers the question
+
+Every reading this screen shows already existed somewhere: the permission checks in
+Settings, the next-registered-alarm row, the ring history, the technical log. What did not
+exist was one place that puts them in the order these things break. Settings → אבחון now
+has it, first in the group and phrased as the question rather than as "diagnostics" —
+someone whose alarm just failed is looking for an answer.
+
+Seven rows, each OK / WARNING / BLOCKER, each with a "תקן" button routed through
+`openSystemScreen` (which falls back to the app's own details page rather than throwing —
+several of these system screens simply do not exist on some OEM builds, and a diagnosis
+screen whose fix button crashes the app would be a particularly poor joke). Below them,
+the last five ring-history rows in words: "צלצל עד הסוף ולא נעצר", not `MISSED`.
+
+The verdicts live in `util/RingDiagnosis.kt` as a pure function taking every reading as a
+parameter, so the wording, the severities and the ordering are covered by plain JVM tests.
+The severities are the substance and were chosen deliberately: a muted alarm stream is a
+**blocker**, not a warning — the alarm runs and nothing is heard, which from the user's
+side is indistinguishable from not ringing. Missing notification or full-screen-intent
+permission is a warning: the alarm still rings, it is just harder to notice and stop.
+
+### Delete now happens, with undo
+
+Deleting an alarm sat behind a "בטוח?" dialog. That interrupts every delete the user meant
+and still cannot rescue the one mis-tap, because by the time it reaches the dialog it has
+already been confirmed. Delete is now immediate with an undo snackbar; dismissing it (or
+letting it time out) is what makes the delete final. Swipe-to-dismiss deletes directly for
+the same reason.
+
+This needed a database change, and it is the load-bearing part of the batch.
+**`@Update` on a row that no longer exists changes zero rows and reports no error** — so
+undo would have looked like it worked and left nothing behind. `updateAlarm` now returns
+the affected-row count and `saveAlarmTransaction` falls back to `insertAlarm` when it is
+zero, restoring the alarm under its original id. That id matters beyond tidiness: the
+scheduler derives its PendingIntent request codes from it, so a restore under a fresh id
+would arm a *second* registration and leave the old one for nobody to cancel.
+
+What undo does not restore is history: `deleteAlarm` has already run `alarm_logs`'
+`ON DELETE SET NULL`, and putting the alarm back cannot un-null those rows. Both halves
+are pinned by `AlarmDaoTest`, the limit as explicitly as the feature.
+
+`delete()` also re-reads the alarm by id before deleting rather than trusting the list's
+copy — `saveAlarm` replaces rings and extra dates wholesale, so restoring a
+partially-populated copy would hand the user back something quietly different from what
+they deleted.
+
+Bulk delete *does* ask. Undo holds one alarm because one alarm fits in a held value and in
+a sentence; promising to restore an arbitrary set and getting it half-right would be worse
+than asking.
+
+### Quick create, and long-press that selects instead of deleting
+
+Three chips at the top of the list: "עוד שעה", "עוד 8 שעות", "מחר" at the user's default
+hour. Each creates a ready ad-hoc alarm with everything but the time taken from their
+configured defaults, so a quick alarm rings the way their alarms ring. The row scrolls
+horizontally — three chips with icons overflow a 320dp screen, and a chip clipped off the
+edge is a control nobody can reach.
+
+"מחר" is always tomorrow, even when that time has not yet passed today. A shortcut that
+sometimes means today is one nobody can trust at a glance, which defeats a one-tap control.
+
+Long-press on a card now selects it. Deleting was an odd thing for a long-press to do, it
+already has its own button on every card, and it was occupying the gesture multi-select
+needed. Selection mode gets its own top bar rather than extra icons on the normal one — a
+bar that changes what its buttons mean without looking different is how people delete the
+wrong thing — with enable / disable / delete for the whole selection, and system back to
+leave the mode.
+
+### Tests
+
+- `RingDiagnosisTest` (17) — every severity, the ordering, and the headline's
+  singular/plural agreement in both directions.
+- `AlarmSchedulerTest` (+3) — the rehearsal is a *second* AlarmManager registration
+  rather than a replacement, cancelling it leaves the real alarm armed, and it is armed
+  the configured number of seconds out.
+- `AlarmDaoTest` (+2) — re-insert under the original id, and the orphaned-history limit.
+- `AlarmListViewModelTest` (+12) — undo (including that `delete()` re-reads so rings
+  survive a restore), multi-select, and quick-create's ad-hoc shape and defaults.
+- `OccasionalAlarmTest` (+6) — both shortcuts across midnight and month boundaries, and
+  that neither ever produces a past time.
+
 ## v1.8.0 (2026-09-18)
 
 ### Widget controls

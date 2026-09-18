@@ -124,6 +124,13 @@
 | 95 | אייקון אפור לווידג'ט ריק, עם הבחנה בין "אין פעיל" ל"אין בכלל" | `ic_widget_alarm_off.xml` + `WidgetEmptyState` (v1.8.0) |
 | 96 | כלל keep ל-Glance ActionCallback — נטען לפי שם, אחרת כל כפתור ווידג'ט מושתק ב-release | `app/proguard-rules.pro` + `ProguardRulesTest` (v1.8.0) |
 | 97 | כלל בחירה אחד לווידג'טים; `buildUpcomingAlarms` נמחק לטובת `buildWidgetRows` | `util/WidgetRows.kt` + `WidgetRowsTest` (v1.8.0) |
+| 98 | בדיקת צלצול במסך מרחב-קודי-בקשה שלישי (`id + 200_000`) — רֵהרסל לא דורס את התזמון האמיתי | `AlarmScheduler.scheduleTestRing()` (v1.8.1) |
+| 99 | `EXTRA_IS_TEST` — בדיקה לא כותבת היסטוריה, לא מקדמת מונה חזרות ולא מתזמנת מחדש | `AlarmReceiver` + `AlarmFiringService` (v1.8.1) |
+| 100 | מסך "למה השעמור לא צלצל?" — 7 בדיקות מדורגות (BLOCKER/WARNING/OK) עם כפתור תיקון לכל אחת | `util/RingDiagnosis.kt` (טהור, נבדק) + `presentation/diagnosis/` (v1.8.1) |
+| 101 | מחיקה מיידית עם "בטל" בסנאקבר במקום דיאלוג אישור; שחזור תחת ה-id המקורי | `AlarmListViewModel.undoDelete()` + נפילה ל-insert ב-`saveAlarmTransaction` (v1.8.1) |
+| 102 | `@Update` על שורה שנמחקה משנה 0 שורות ולא זורק — לכן `updateAlarm` מחזיר `Int` ויש נפילה ל-`insertAlarm` | `AlarmDao.saveAlarmTransaction()` + `AlarmDaoTest` (v1.8.1) |
+| 103 | יצירה מהירה: "עוד שעה" / "עוד 8 שעות" / "מחר" — שעמור מזדמן מברירות המחדל בלחיצה אחת | `quickAlarmInHours`/`quickAlarmTomorrowAt` ב-`util/OccasionalAlarm.kt` (v1.8.1) |
+| 104 | לחיצה ארוכה בוחרת במקום למחוק; בחירה מרובה עם הפעלה/כיבוי/מחיקה קבוצתית | `AlarmListViewModel.selectedIds` + `AlarmListScreen` (v1.8.1) |
 
 ---
 
@@ -180,6 +187,7 @@ smartring-kotlin/
 /history    → HistoryScreen
 /settings   → SettingsScreen
 /logs       → LogsScreen  (v1.2.0)
+/diagnosis  → DiagnosisScreen  ("למה השעמור לא צלצל?", v1.8.1)
 ```
 
 ---
@@ -334,7 +342,7 @@ if (!alarm.acceptsInteraction) return
 
 ### עדיפות בינונית
 - [x] ~~SwipeToDismiss על כרטיסיות~~ – **בוצע v1.1.0**: `SwipeToDismissBox` נוסף לצד long-press, שניהם פותחים את אותו דיאלוג אישור.
-- [ ] Alarm preview – "נסה עכשיו" בעריכה
+- [x] ~~Alarm preview – "נסה עכשיו" בעריכה~~ – **בוצע v1.8.1**: "בדוק צלצול עכשיו" במסך העריכה של שעמור שמור. עובר במסלול האמיתי (AlarmManager → AlarmReceiver → שירות → מסך צלצול) על מרחב קודי בקשה נפרד, ולכן לא נוגע בתזמון האמיתי ולא מבצע שום רישום.
 - [x] ~~Widget deep link → AlarmListScreen~~ – **בוצע v1.1.0**: כל 4 הווידג'טים פותחים את האפליקציה בלחיצה.
 - [ ] Accessibility labels על Switch/IconButtons – רק המתג ברשימת השעמורים קיבל תווית (v1.1.0); ה-Switch/IconButtons במסך העריכה עדיין ללא.
 - [x] ~~Unit tests ל-AlarmScheduler.nextFireTime()~~ – **בוצע v1.4.1**: ראה סעיף 13 (בדיקות אוטומטיות). כלל גם את הרפקטור שהוזכר כאן (`now` כפרמטר ניתן להזרקה).

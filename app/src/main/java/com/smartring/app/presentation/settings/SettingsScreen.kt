@@ -45,7 +45,12 @@ import com.smartring.app.util.openSystemScreen
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsScreen(onBack: () -> Unit, onOpenLogs: () -> Unit = {}, vm: SettingsViewModel = hiltViewModel()) {
+fun SettingsScreen(
+    onBack: () -> Unit,
+    onOpenLogs: () -> Unit = {},
+    onOpenDiagnosis: () -> Unit = {},
+    vm: SettingsViewModel = hiltViewModel(),
+) {
     val s by vm.state.collectAsStateWithLifecycle()
     val d by vm.defaults.collectAsStateWithLifecycle()
 
@@ -256,6 +261,17 @@ fun SettingsScreen(onBack: () -> Unit, onOpenLogs: () -> Unit = {}, vm: Settings
                 SystemIndicatorStatusRow()
             }
             SettingsGroup("אבחון") {
+                // First in this group, and phrased as the question rather than the
+                // feature: someone whose alarm just failed is looking for an answer, not
+                // for "diagnostics".
+                ListItem(
+                    headlineContent   = { Text("למה השעמור לא צלצל?", fontWeight = FontWeight.Medium) },
+                    supportingContent = { Text("בדיקה מלאה של כל מה שיכול למנוע מהשעמור לצלצל, עם תיקון לכל ממצא") },
+                    leadingContent    = { Icon(Icons.Rounded.HelpOutline, null) },
+                    trailingContent   = { Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, null) },
+                    modifier          = Modifier.clickable(onClick = onOpenDiagnosis),
+                )
+                HorizontalDivider(Modifier.padding(horizontal = 16.dp))
                 ListItem(
                     headlineContent   = { Text("לוגים", fontWeight = FontWeight.Medium) },
                     supportingContent = { Text("רישום פעולות רקע לצורכי בדיקה") },

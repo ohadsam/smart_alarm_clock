@@ -1,7 +1,10 @@
 package com.smartring.app.presentation.alarmlist
 
+import com.smartring.app.data.repository.AlarmDefaults
+import com.smartring.app.data.repository.AlarmDefaultsRepository
 import com.smartring.app.data.repository.AlarmRepository
 import com.smartring.app.domain.model.Alarm
+import com.smartring.app.domain.model.AlarmRing
 import com.smartring.app.util.AlarmScheduler
 import com.smartring.app.util.AppLogger
 import io.mockk.coEvery
@@ -38,8 +41,10 @@ class AlarmListViewModelTest {
     private lateinit var repository: AlarmRepository
     private lateinit var scheduler: AlarmScheduler
     private lateinit var appLogger: AppLogger
+    private lateinit var defaultsRepository: AlarmDefaultsRepository
 
-    private fun viewModel() = AlarmListViewModel(repository, scheduler, appLogger)
+    private fun viewModel() =
+        AlarmListViewModel(repository, defaultsRepository, scheduler, appLogger)
 
     @Before
     fun setUp() {
@@ -47,6 +52,8 @@ class AlarmListViewModelTest {
         repository = mockk(relaxed = true)
         scheduler = mockk(relaxed = true)
         appLogger = mockk(relaxed = true)
+        defaultsRepository = mockk(relaxed = true)
+        every { defaultsRepository.defaults } returns flowOf(AlarmDefaults.BUILT_IN)
         stubAlarms(emptyList())
     }
 
@@ -167,5 +174,179 @@ class AlarmListViewModelTest {
 
         coVerify { repository.enableAll() }
         verify { scheduler.rescheduleAll(listOf(Alarm(id = 7)), refreshWidgets = false) }
+    }
+
+    // ── Undo delete ────────────────────────────────────────────────────────
+    //
+    // Deleting is immediate now, with an undo offer, rather than gated behind a
+    // confirmation. That is faster for the deletes that were intended and is the only
+    // thing that can actually rescue the one that was a mis-tap.
+
+    @Test
+    fun `deleting keeps the full alarm so it can be restored`() = runTest(testDispatcher) {
+        val alarm = Alarm(id = 7, name = "למחוק")
+        coEvery { repository.getAlarm(7) } returns alarm
+        val vm = viewModel()
+
+        vm.delete(alarm)
+        advanceUntilIdle()
+
+        assertEquals(alarm, vm.undoableDelete.value)
+    }
+
+    /**
+     * Re-reading before deleting is not tidiness: saveAlarm replaces an alarm's rings and
+     * extra dates wholesale, so restoring a partially-populated copy would hand the user
+     * back something quietly different from what they deleted.
+     */
+    @Test
+    fun `deleting re-reads the alarm rather than trusting the list's copy`() = runTest(testDispatcher) {
+        val listCopy = Alarm(id = 7, name = "למחוק")
+        val full = listCopy.copy(rings = listOf(AlarmRing(durationSeconds = 45, volumePercent = 80)))
+        coEvery { repository.getAlarm(7) } returns full
+        val vm = viewModel()
+
+        vm.delete(listCopy)
+        advanceUntilIdle()
+
+        assertEquals(full.rings, vm.undoableDelete.value?.rings)
+    }
+
+    @Test
+    fun `undo re-saves the alarm and re-arms it`() = runTest(testDispatcher) {
+        val alarm = Alarm(id = 7, name = "למחוק")
+        coEvery { repository.getAlarm(7) } returns alarm
+        val vm = viewModel()
+        vm.delete(alarm)
+        advanceUntilIdle()
+
+        vm.undoDelete()
+        advanceUntilIdle()
+
+        coVerify { repository.saveAlarm(match { it.id == 7L }) }
+        verify { scheduler.schedule(match { it.id == 7L }) }
+    }
+
+    @Test
+    fun `undo clears the offer so it cannot be applied twice`() = runTest(testDispatcher) {
+        val alarm = Alarm(id = 7, name = "למחוק")
+        coEvery { repository.getAlarm(7) } returns alarm
+        val vm = viewModel()
+        vm.delete(alarm)
+        advanceUntilIdle()
+
+        vm.undoDelete()
+        advanceUntilIdle()
+
+        assertEquals(null, vm.undoableDelete.value)
+    }
+
+    @Test
+    fun `undo does nothing when there is nothing to undo`() = runTest(testDispatcher) {
+        val vm = viewModel()
+
+        vm.undoDelete()
+        advanceUntilIdle()
+
+        coVerify(exactly = 0) { repository.saveAlarm(any()) }
+    }
+
+    // ── Multi-select ───────────────────────────────────────────────────────
+
+    @Test
+    fun `selection toggles on and off`() = runTest(testDispatcher) {
+        val vm = viewModel()
+        vm.toggleSelection(1)
+        assertEquals(setOf(1L), vm.selectedIds.value)
+        vm.toggleSelection(1)
+        assertEquals(emptySet<Long>(), vm.selectedIds.value)
+    }
+
+    @Test
+    fun `enabling a selection schedules each one and clears the selection`() = runTest(testDispatcher) {
+        coEvery { repository.getAlarm(any()) } answers { Alarm(id = firstArg(), name = "a") }
+        val vm = viewModel()
+        vm.toggleSelection(1); vm.toggleSelection(2)
+
+        vm.setSelectedEnabled(true)
+        advanceUntilIdle()
+
+        coVerify { repository.setEnabled(1, true) }
+        coVerify { repository.setEnabled(2, true) }
+        verify(exactly = 2) { scheduler.schedule(any()) }
+        assertEquals(emptySet<Long>(), vm.selectedIds.value)
+    }
+
+    @Test
+    fun `disabling a selection cancels each one instead of scheduling`() = runTest(testDispatcher) {
+        coEvery { repository.getAlarm(any()) } answers { Alarm(id = firstArg(), name = "a") }
+        val vm = viewModel()
+        vm.toggleSelection(3)
+
+        vm.setSelectedEnabled(false)
+        advanceUntilIdle()
+
+        verify { scheduler.cancel(3) }
+        verify(exactly = 0) { scheduler.schedule(any()) }
+    }
+
+    @Test
+    fun `deleting a selection removes and cancels every one`() = runTest(testDispatcher) {
+        val vm = viewModel()
+        vm.toggleSelection(1); vm.toggleSelection(2)
+
+        vm.deleteSelected()
+        advanceUntilIdle()
+
+        coVerify { repository.deleteAlarm(1) }
+        coVerify { repository.deleteAlarm(2) }
+        verify { scheduler.cancel(1) }
+        verify { scheduler.cancel(2) }
+        assertEquals(emptySet<Long>(), vm.selectedIds.value)
+    }
+
+    // ── Quick create ───────────────────────────────────────────────────────
+
+    @Test
+    fun `a quick alarm is an ad-hoc one at the requested moment`() = runTest(testDispatcher) {
+        coEvery { repository.saveAlarm(any()) } returns 9L
+        val vm = viewModel()
+        val at = System.currentTimeMillis() + 8 * 3_600_000L
+
+        vm.createQuickAlarm(at)
+        advanceUntilIdle()
+
+        coVerify {
+            repository.saveAlarm(
+                match {
+                    // A specific datetime and no repeat days is exactly what makes it
+                    // ad-hoc: it rings once and the card then offers the day stepper.
+                    it.id == 0L && it.specificDateTime == at && it.repeatDaysBitmask == 0
+                },
+            )
+        }
+        verify { scheduler.schedule(any()) }
+    }
+
+    @Test
+    fun `a quick alarm takes its ring settings from the configured defaults`() = runTest(testDispatcher) {
+        every { defaultsRepository.defaults } returns flowOf(
+            AlarmDefaults.BUILT_IN.copy(ringDurationSeconds = 240, snoozeEnabled = true, ringVolumePercent = 60),
+        )
+        coEvery { repository.saveAlarm(any()) } returns 9L
+        val vm = viewModel()
+
+        vm.createQuickAlarm(System.currentTimeMillis() + 3_600_000L)
+        advanceUntilIdle()
+
+        coVerify {
+            repository.saveAlarm(
+                match {
+                    it.ringDurationSeconds == 240 &&
+                        it.snoozeEnabled &&
+                        it.rings.single().volumePercent == 60
+                },
+            )
+        }
     }
 }

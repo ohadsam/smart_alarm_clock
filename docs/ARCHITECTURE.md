@@ -18,6 +18,7 @@ Glance Widgets (SmartRingWidget.kt) → AlarmScheduler.effectiveNextFireTime() �
 | HistoryScreen   | /history |
 | SettingsScreen  | /settings |
 | LogsScreen      | /logs ← חדש (v1.2.0) |
+| DiagnosisScreen | /diagnosis ← חדש (v1.8.1) — "למה השעמור לא צלצל?" |
 
 ## DB v3 – עמודות/טבלאות חדשות
 - `alarms`: `snoozeEnabled`, `isShabbatMode`

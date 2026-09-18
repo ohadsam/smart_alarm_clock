@@ -585,6 +585,55 @@ class AlarmSchedulerTest {
         assertNull(scheduler.pendingSnoozeUntil(alarm))
     }
 
+    // ── Test ring: the whole point is that it cannot disturb the real one ──
+    //
+    // AlarmManager identifies a registration by its PendingIntent, and two PendingIntents
+    // with the same request code and a matching Intent are the *same* registration. A
+    // rehearsal armed on the alarm's own request code would therefore silently overwrite
+    // the real trigger — the user would test their alarm and, in doing so, cancel it.
+
+    @Test
+    fun `a test ring is a second registration, not a replacement of the real one`() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val shadow = shadowOf(context.getSystemService(AlarmManager::class.java))
+        val alarm = Alarm(id = 31, hour = 8, minute = 0, repeatDaysBitmask = 0b1111111)
+
+        scheduler.schedule(alarm)
+        assertEquals(1, shadow.scheduledAlarms.size)
+
+        scheduler.scheduleTestRing(alarm)
+
+        assertEquals("the rehearsal must not overwrite the alarm's own registration",
+            2, shadow.scheduledAlarms.size)
+    }
+
+    @Test
+    fun `cancelling a test ring leaves the real alarm armed`() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val shadow = shadowOf(context.getSystemService(AlarmManager::class.java))
+        val alarm = Alarm(id = 32, hour = 8, minute = 0, repeatDaysBitmask = 0b1111111)
+        scheduler.schedule(alarm)
+        scheduler.scheduleTestRing(alarm)
+
+        scheduler.cancelTestRing(alarm.id)
+
+        assertEquals(1, shadow.scheduledAlarms.size)
+        assertNotNull("cancelling the rehearsal must not disarm the alarm itself",
+            shadow.peekNextScheduledAlarm())
+    }
+
+    /** Not zero: firing instantly would skip the part people actually doubt. */
+    @Test
+    fun `a test ring is armed the configured number of seconds out`() {
+        val alarm = Alarm(id = 33, hour = 8, minute = 0, repeatDaysBitmask = 0b1111111)
+        val before = System.currentTimeMillis()
+
+        val at = scheduler.scheduleTestRing(alarm)
+
+        assertTrue(at >= before + TEST_RING_DELAY_SECONDS * 1_000L)
+        assertTrue(at <= System.currentTimeMillis() + TEST_RING_DELAY_SECONDS * 1_000L)
+    }
+
     private fun dayOfWeek(millis: Long): Int =
         Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply { timeInMillis = millis }.get(Calendar.DAY_OF_WEEK)
 }

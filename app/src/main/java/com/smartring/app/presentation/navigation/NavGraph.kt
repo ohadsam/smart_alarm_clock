@@ -6,6 +6,7 @@ import androidx.navigation.compose.*
 import com.smartring.app.presentation.alarmedit.AlarmEditScreen
 import com.smartring.app.presentation.alarmlist.AlarmListScreen
 import com.smartring.app.presentation.alarmring.AlarmRingScreen
+import com.smartring.app.presentation.diagnosis.DiagnosisScreen
 import com.smartring.app.presentation.history.HistoryScreen
 import com.smartring.app.presentation.logs.LogsScreen
 import com.smartring.app.presentation.settings.SettingsScreen
@@ -40,6 +41,7 @@ sealed class Screen(val route: String) {
     object History  : Screen("history")
     object Settings : Screen("settings")
     object Logs     : Screen("logs")
+    object Diagnosis: Screen("diagnosis")
 }
 
 @Composable
@@ -128,10 +130,14 @@ fun SmartRingNavGraph(alarmTrigger: Pair<Long, Long> = 0L to -1L) {
             SettingsScreen(
                 onBack = { nav.popBackStack() },
                 onOpenLogs = { nav.navigate(Screen.Logs.route) },
+                onOpenDiagnosis = { nav.navigate(Screen.Diagnosis.route) },
             )
         }
         composable(Screen.Logs.route) {
             LogsScreen(onBack = { nav.popBackStack() })
+        }
+        composable(Screen.Diagnosis.route) {
+            DiagnosisScreen(onBack = { nav.popBackStack() })
         }
     }
 }

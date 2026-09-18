@@ -37,8 +37,10 @@ import androidx.compose.ui.unit.*
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.smartring.app.domain.model.*
+import kotlinx.coroutines.delay
 import com.smartring.app.presentation.theme.*
 import com.smartring.app.util.GENERIC_ALARM_NAME
+import com.smartring.app.util.TEST_RING_DELAY_SECONDS
 import com.smartring.app.util.RingtonePreviewPlayer
 import com.smartring.app.util.describeRingPlan
 import com.smartring.app.util.formatDurationSeconds
@@ -682,6 +684,105 @@ fun AlarmEditScreen(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         Switch(s.isShabbatMode, vm::setShabbatMode)
+                    }
+                }
+            }
+
+            // ── Test ring ─────────────────────────────────────────
+            // Only for an alarm that already exists: the firing service loads the alarm by
+            // id, so there is nothing to rehearse from until it has been saved once.
+            if (alarmId > 0L) {
+                item { SectionLabel("בדיקה") }
+                item {
+                    var confirmTest by remember { mutableStateOf(false) }
+                    var testArmed by remember { mutableStateOf(false) }
+                    // Back to the button once the rehearsal has gone off, so a second one
+                    // can be run. Without this the section stays stuck on "about to ring"
+                    // for the rest of the screen's life, having already rung.
+                    LaunchedEffect(testArmed) {
+                        if (testArmed) {
+                            delay((TEST_RING_DELAY_SECONDS + 2) * 1_000L)
+                            testArmed = false
+                        }
+                    }
+                    EditCard {
+                        Text("בדיקת צלצול",
+                            style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            "מצלצל עכשיו בדיוק כמו שהשעמור יצלצל — אותו צליל, אותה עוצמה, " +
+                            "אותו רטט ואותו מסך. זו הדרך היחידה לראות שהשרשרת עובדת לפני שסומכים עליה.\n\n" +
+                            "הבדיקה לא משנה כלום: השעמור האמיתי נשאר מתוזמן, ההיסטוריה לא מושפעת, " +
+                            "ומונה החזרות לא זז.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Spacer(Modifier.height(10.dp))
+                        if (testArmed) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Rounded.Schedule, null, Modifier.size(16.dp),
+                                    tint = MaterialTheme.colorScheme.tertiary)
+                                Spacer(Modifier.width(6.dp))
+                                Text("הבדיקה תצלצל בעוד $TEST_RING_DELAY_SECONDS שניות — הנח את המכשיר",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.tertiary,
+                                    fontWeight = FontWeight.Bold)
+                            }
+                            Spacer(Modifier.height(8.dp))
+                            // A way out during those five seconds. Without it the only
+                            // way to stop a full-volume alarm somebody just thought
+                            // better of is to let it ring first.
+                            TextButton(
+                                onClick = { vm.cancelTestRing(); testArmed = false },
+                                modifier = Modifier.fillMaxWidth(),
+                            ) { Text("בטל את הבדיקה") }
+                        } else {
+                            OutlinedButton(
+                                onClick = { confirmTest = true },
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(10.dp),
+                            ) {
+                                Icon(Icons.Rounded.PlayArrow, null, Modifier.size(18.dp))
+                                Spacer(Modifier.width(8.dp))
+                                Text("בדוק צלצול עכשיו")
+                            }
+                        }
+                    }
+                    if (confirmTest) {
+                        AlertDialog(
+                            onDismissRequest = { confirmTest = false },
+                            title = { Text("להפעיל בדיקת צלצול?") },
+                            // Said plainly, because it really will be loud: this is the
+                            // alarm, at alarm volume, not a preview.
+                            text = {
+                                Column {
+                                    Text("השעמור יצלצל בעוצמה מלאה בעוד $TEST_RING_DELAY_SECONDS שניות, " +
+                                        "בדיוק כמו צלצול אמיתי. אפשר לעצור אותו במסך שייפתח.")
+                                    // The rehearsal loads the alarm from the database, so
+                                    // it plays what was saved — not what is on screen. Said
+                                    // here rather than left to surprise: a test that quietly
+                                    // used the old volume would teach the user the wrong
+                                    // thing about the change they just made.
+                                    if (vm.isDirty) {
+                                        Spacer(Modifier.height(10.dp))
+                                        Text(
+                                            "יש שינויים שטרם נשמרו. הבדיקה מצלצלת לפי מה ששמור, " +
+                                                "לכן כדאי לשמור קודם כדי לבדוק את השינויים עצמם.",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.error,
+                                            fontWeight = FontWeight.Bold,
+                                        )
+                                    }
+                                }
+                            },
+                            confirmButton = {
+                                TextButton({
+                                    testArmed = vm.testRing()
+                                    confirmTest = false
+                                }) { Text("הפעל בדיקה") }
+                            },
+                            dismissButton = { TextButton({ confirmTest = false }) { Text("ביטול") } },
+                        )
                     }
                 }
             }

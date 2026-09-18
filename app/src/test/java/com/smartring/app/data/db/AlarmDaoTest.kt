@@ -81,6 +81,51 @@ class AlarmDaoTest {
         assertEquals(2, dao.getAlarmWithDetails(id)?.rings?.size)
     }
 
+    /**
+     * The undo-delete path. @Update on a row that no longer exists changes zero rows and
+     * reports no error, so without the insert fallback "undo" would look like it worked
+     * and leave nothing behind at all.
+     */
+    @Test
+    fun `saveAlarmTransaction re-inserts a deleted alarm under its original id`() = runTest {
+        val id = dao.saveAlarmTransaction(
+            AlarmEntity(name = "Restored"),
+            rings = listOf(AlarmRingEntity(alarmId = 0, orderIndex = 0, durationSeconds = 45)),
+            dates = emptyList(),
+        )
+        dao.deleteAlarm(id)
+        assertNull(dao.getAlarmWithDetails(id))
+
+        val restoredId = dao.saveAlarmTransaction(
+            AlarmEntity(id = id, name = "Restored"),
+            rings = listOf(AlarmRingEntity(alarmId = id, orderIndex = 0, durationSeconds = 45)),
+            dates = emptyList(),
+        )
+
+        // The same id, not a fresh one: the scheduler keys its PendingIntent request
+        // codes off it, so a restore under a new id would arm a second registration.
+        assertEquals(id, restoredId)
+        val restored = dao.getAlarmWithDetails(restoredId)
+        assertEquals("Restored", restored?.alarm?.name)
+        assertEquals(45, restored?.rings?.single()?.durationSeconds)
+    }
+
+    /**
+     * The honest limit of undo, pinned so nobody later claims more for it: the delete has
+     * already run alarm_logs' ON DELETE SET NULL, and putting the alarm back cannot
+     * un-null those rows. Undo restores the alarm, not its past.
+     */
+    @Test
+    fun `restoring a deleted alarm does not re-attach its orphaned history`() = runTest {
+        val id = dao.saveAlarmTransaction(AlarmEntity(name = "A"), emptyList(), emptyList())
+        dao.insertLog(AlarmLogEntity(alarmId = id, alarmName = "A", firedAt = 1_000L, action = "FIRED"))
+        dao.deleteAlarm(id)
+
+        dao.saveAlarmTransaction(AlarmEntity(id = id, name = "A"), emptyList(), emptyList())
+
+        assertNull(dao.getAllLogs().single().alarmId)
+    }
+
     @Test
     fun `getActiveAlarms only returns enabled, unfrozen alarms`() = runTest {
         val activeId = dao.saveAlarmTransaction(AlarmEntity(name = "Active", isEnabled = true, isFrozen = false), emptyList(), emptyList())

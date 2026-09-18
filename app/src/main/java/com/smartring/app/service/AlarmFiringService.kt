@@ -51,6 +51,7 @@ class AlarmFiringService : Service() {
         val id = intent?.getLongExtra(AlarmReceiver.EXTRA_ALARM_ID, -1L) ?: -1L
         if (id < 0) { stopSelf(); return START_NOT_STICKY }
         val isSnooze = intent?.getBooleanExtra(AlarmReceiver.EXTRA_IS_SNOOZE, false) ?: false
+        val isTest = intent?.getBooleanExtra(AlarmReceiver.EXTRA_IS_TEST, false) ?: false
 
         // Start foreground immediately (within 5-second ANR window)
         startForeground(NOTIF_ID, buildPlaceholderNotification())
@@ -103,8 +104,12 @@ class AlarmFiringService : Service() {
             // was already cancelled (e.g. onDestroy() mid-suspension), the coroutine
             // must stop here too, not fall through to post a real alarm notification
             // for a service already being torn down.
+            // A rehearsal writes no history. Its whole purpose is to show the user what a
+            // real ring looks like; leaving a FIRED row behind would put a ring that never
+            // happened into the history the diagnostics screen reads, which is precisely
+            // the record someone consults when asking why a real alarm did not go off.
             try {
-                repository.log(id, alarm.name, scheduledFor, "FIRED")
+                if (!isTest) repository.log(id, alarm.name, scheduledFor, "FIRED")
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -120,7 +125,11 @@ class AlarmFiringService : Service() {
             // those seconds, or the process being killed mid-ring) — which silently
             // left a recurring alarm with no next occurrence armed at all. Nothing
             // below needs the ring to have started.
-            if (!isSnooze) {
+            // isTest excluded alongside isSnooze: a rehearsal must not advance a
+            // COUNT-limited recurrence, must not switch a one-time alarm off, and must not
+            // re-arm the next occurrence — the real trigger is still armed under its own
+            // PendingIntent and re-arming from here would move it.
+            if (!isSnooze && !isTest) {
                 repository.incrementOccurrences(id)
                 val advanced = alarm.copy(occurrencesFired = alarm.occurrencesFired + 1)
                 // Only re-arm an alarm that genuinely has another occurrence coming.
@@ -142,7 +151,7 @@ class AlarmFiringService : Service() {
                 // all, so it still needs its own explicit refresh — otherwise the
                 // widget keeps showing the now-elapsed snooze countdown until the next
                 // periodic WidgetRefreshWorker run, up to 15 minutes later.
-            } else widgetRefresher.refresh()
+            } else if (!isTest) widgetRefresher.refresh()
 
             // Superseded while the bookkeeping above was running: that work is done and
             // committed, but the alarm that arrived after this one owns the ring.

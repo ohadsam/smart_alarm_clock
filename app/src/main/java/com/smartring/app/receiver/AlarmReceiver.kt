@@ -15,6 +15,7 @@ class AlarmReceiver : BroadcastReceiver() {
     override fun onReceive(ctx: Context, intent: Intent) {
         val id = intent.getLongExtra(EXTRA_ALARM_ID, -1L); if (id < 0) return
         val isSnooze = intent.getBooleanExtra(EXTRA_IS_SNOOZE, false)
+        val isTest = intent.getBooleanExtra(EXTRA_IS_TEST, false)
         // Start the service first and log second: onReceive has a short, hard budget
         // to get the foreground service going, and AppLogger's write is fire-and-forget
         // anyway, so it has no business sitting in front of the one time-critical call
@@ -28,8 +29,10 @@ class AlarmReceiver : BroadcastReceiver() {
         try {
             ctx.startForegroundService(Intent(ctx, AlarmFiringService::class.java)
                 .putExtra(EXTRA_ALARM_ID, id)
-                .putExtra(EXTRA_IS_SNOOZE, isSnooze))
-            appLogger.log("AlarmReceiver", "אזעקה התקבלה עבור שעמור #$id" + if (isSnooze) " (נודניק)" else "")
+                .putExtra(EXTRA_IS_SNOOZE, isSnooze)
+                .putExtra(EXTRA_IS_TEST, isTest))
+            appLogger.log("AlarmReceiver", "אזעקה התקבלה עבור שעמור #$id" +
+                when { isTest -> " (בדיקה)"; isSnooze -> " (נודניק)"; else -> "" })
         } catch (e: Exception) {
             // Nothing is coming to hand the lock off to.
             AlarmHandoffWakeLock.release()
@@ -45,5 +48,17 @@ class AlarmReceiver : BroadcastReceiver() {
     companion object {
         const val EXTRA_ALARM_ID = "extra_alarm_id"
         const val EXTRA_IS_SNOOZE = "extra_is_snooze"
+
+        /**
+         * Marks a rehearsal rather than a real alarm.
+         *
+         * A test ring goes through the identical path — AlarmManager, this receiver, the
+         * wake-lock hand-off, the foreground service, the real volume and vibration, the
+         * ring screen — because a "test" that skips any of it proves nothing about the
+         * part that actually fails at 06:30. What it must *not* do is the bookkeeping:
+         * counting an occurrence, switching a one-time alarm off, writing a FIRED row, or
+         * arming the next occurrence. Those belong to real rings only.
+         */
+        const val EXTRA_IS_TEST = "extra_is_test"
     }
 }

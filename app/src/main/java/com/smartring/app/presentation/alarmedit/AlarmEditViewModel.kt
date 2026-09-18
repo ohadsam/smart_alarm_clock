@@ -272,6 +272,38 @@ class AlarmEditViewModel @Inject constructor(
     fun setEnabled(v: Boolean)                   = _state.update { it.copy(isEnabled = v) }
 
     /**
+     * Rehearses this alarm through the real firing path in a few seconds.
+     *
+     * Only offered for an alarm that already exists, because the service loads the alarm
+     * by id — there is nothing for it to ring from otherwise. Saves nothing and changes
+     * nothing: the alarm's real trigger keeps its own PendingIntent, and the service does
+     * no bookkeeping for a test.
+     *
+     * Returns false when there is no saved alarm to rehearse, so the screen can say
+     * "save first" instead of offering a button that quietly does nothing.
+     */
+    fun testRing(): Boolean {
+        if (editingId <= 0L) return false
+        viewModelScope.launch {
+            val alarm = repository.getAlarm(editingId) ?: return@launch
+            scheduler.scheduleTestRing(alarm)
+        }
+        return true
+    }
+
+    /**
+     * Calls off a rehearsal that has not fired yet.
+     *
+     * Five seconds is long enough to think better of a full-volume alarm — in a meeting,
+     * next to someone asleep — and without this the only way to stop it is to let it ring
+     * and then stop it, which is the thing the user just decided they did not want.
+     * Cancels only the test PendingIntent, so the alarm's real trigger is untouched.
+     */
+    fun cancelTestRing() {
+        if (editingId > 0L) scheduler.cancelTestRing(editingId)
+    }
+
+    /**
      * Fills in (or clears) the generic name.
      *
      * Turning it off only clears the field when it still holds the generic name: someone

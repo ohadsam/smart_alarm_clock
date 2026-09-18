@@ -30,7 +30,10 @@ import com.smartring.app.presentation.theme.*
 import com.smartring.app.presentation.whatsnew.WhatsNewDialog
 import com.smartring.app.presentation.whatsnew.WhatsNewViewModel
 import com.smartring.app.presentation.settings.SettingsViewModel
+import androidx.activity.compose.BackHandler
 import com.smartring.app.util.ForeignAlarm
+import com.smartring.app.util.quickAlarmInHours
+import com.smartring.app.util.quickAlarmTomorrowAt
 import com.smartring.app.util.ForeignAlarms
 import com.smartring.app.util.ReliabilityChecks
 import com.smartring.app.util.foreignAlarmWarning
@@ -44,7 +47,25 @@ fun AlarmListScreen(onAddAlarm: ()->Unit, onEditAlarm: (Long)->Unit,
     onDuplicateAlarm: (Long)->Unit, onOpenHistory: ()->Unit, onOpenSettings: ()->Unit,
     vm: AlarmListViewModel = hiltViewModel()) {
     val state by vm.uiState.collectAsStateWithLifecycle()
+    val selectedIds by vm.selectedIds.collectAsStateWithLifecycle()
+    val undoable by vm.undoableDelete.collectAsStateWithLifecycle()
     var showControls by remember { mutableStateOf(false) }
+    val snackbarHost = remember { SnackbarHostState() }
+    val defaults by hiltViewModel<SettingsViewModel>().defaults.collectAsStateWithLifecycle()
+
+    // Undo, rather than a confirmation dialog before every delete. A dialog interrupts the
+    // hundreds of deletes that were intended and still cannot rescue the one mis-tap,
+    // because by then it has been confirmed. Dismissing the snackbar (or letting it time
+    // out) is what makes the delete final.
+    LaunchedEffect(undoable) {
+        val deleted = undoable ?: return@LaunchedEffect
+        val result = snackbarHost.showSnackbar(
+            message = "\"${deleted.name}\" נמחק",
+            actionLabel = "בטל",
+            duration = SnackbarDuration.Long,
+        )
+        if (result == SnackbarResult.ActionPerformed) vm.undoDelete() else vm.clearUndo()
+    }
 
     // Only meaningful while this app actually has something armed: the warning says the
     // other alarm rings *before ours*, and with every alarm here disabled there is no
@@ -62,15 +83,48 @@ fun AlarmListScreen(onAddAlarm: ()->Unit, onEditAlarm: (Long)->Unit,
         ReliabilityGate(onOpenSettings)
     }
 
+    val inSelection = selectedIds.isNotEmpty()
+    var confirmBulkDelete by remember { mutableStateOf(false) }
+    // Leaving selection mode with the system back gesture, which is what anyone will try
+    // first — otherwise the only way out is deselecting every row one at a time.
+    BackHandler(enabled = inSelection) { vm.clearSelection() }
+
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHost) },
         topBar = {
-            TopAppBar(title={Text("SmartRing",fontWeight=FontWeight.Black,fontSize=24.sp)},
-                colors=TopAppBarDefaults.topAppBarColors(containerColor=MaterialTheme.colorScheme.background),
-                actions={
-                    IconButton({showControls=true}){Icon(Icons.Rounded.Tune,"שליטה כללית")}
-                    IconButton(onOpenHistory){Icon(Icons.Rounded.History,"היסטוריה")}
-                    IconButton(onOpenSettings){Icon(Icons.Rounded.Settings,"הגדרות")}
-                })
+            if (inSelection) {
+                // A separate bar rather than extra icons on the normal one: selection is a
+                // mode, and a bar that changes what its buttons mean without looking
+                // different is how people delete the wrong thing.
+                TopAppBar(
+                    navigationIcon = {
+                        IconButton({ vm.clearSelection() }) { Icon(Icons.Rounded.Close, "בטל בחירה") }
+                    },
+                    title = { Text("${selectedIds.size} נבחרו", fontWeight = FontWeight.Bold) },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                    actions = {
+                        IconButton({ vm.setSelectedEnabled(true) }) {
+                            Icon(Icons.Rounded.AlarmOn, "הפעל את הנבחרים")
+                        }
+                        IconButton({ vm.setSelectedEnabled(false) }) {
+                            Icon(Icons.Rounded.AlarmOff, "כבה את הנבחרים")
+                        }
+                        IconButton({ confirmBulkDelete = true }) {
+                            Icon(Icons.Rounded.DeleteOutline, "מחק את הנבחרים",
+                                tint = MaterialTheme.colorScheme.error)
+                        }
+                    },
+                )
+            } else {
+                TopAppBar(title={Text("SmartRing",fontWeight=FontWeight.Black,fontSize=24.sp)},
+                    colors=TopAppBarDefaults.topAppBarColors(containerColor=MaterialTheme.colorScheme.background),
+                    actions={
+                        IconButton({showControls=true}){Icon(Icons.Rounded.Tune,"שליטה כללית")}
+                        IconButton(onOpenHistory){Icon(Icons.Rounded.History,"היסטוריה")}
+                        IconButton(onOpenSettings){Icon(Icons.Rounded.Settings,"הגדרות")}
+                    })
+            }
         },
         floatingActionButton={
             // onPrimary, not a hard-coded White: primary is a light blue in the dark
@@ -99,13 +153,46 @@ fun AlarmListScreen(onAddAlarm: ()->Unit, onEditAlarm: (Long)->Unit,
                 // empty item still takes a slot, and this list is spacedBy(10.dp), so an
                 // invisible banner would leave a visible gap at the top.
                 if (foreignAlarm != null) item { ForeignAlarmBanner(foreignAlarm) }
+                // Hidden during selection: a shortcut that creates a new alarm while the
+                // user is picking existing ones to delete is noise at best.
+                if (!inSelection) item { QuickCreateRow(defaults.hour, defaults.minute, vm::createQuickAlarm) }
                 items(state.alarms,key={it.id}) { alarm ->
-                    AlarmCardItem(alarm,{vm.toggle(alarm,it)},{onEditAlarm(alarm.id)},
-                        {onDuplicateAlarm(alarm.id)},{vm.scheduleForNextDay(alarm)},{vm.delete(alarm)})
+                    AlarmCardItem(
+                        alarm = alarm,
+                        onToggle = {vm.toggle(alarm,it)},
+                        onEdit = {
+                            // In selection mode a tap selects instead of navigating —
+                            // otherwise selecting a third alarm means opening the second.
+                            if (inSelection) vm.toggleSelection(alarm.id) else onEditAlarm(alarm.id)
+                        },
+                        onDuplicate = {onDuplicateAlarm(alarm.id)},
+                        onScheduleNextDay = {vm.scheduleForNextDay(alarm)},
+                        onDelete = {vm.delete(alarm)},
+                        onLongPress = { vm.toggleSelection(alarm.id) },
+                        selected = alarm.id in selectedIds,
+                        inSelectionMode = inSelection,
+                    )
                 }
             }
         }
     }
+    if (confirmBulkDelete) {
+        AlertDialog(
+            onDismissRequest = { confirmBulkDelete = false },
+            title = { Text("למחוק ${selectedIds.size} שעמורים?") },
+            // Asked, unlike a single delete. Undo holds one alarm because one alarm fits
+            // in a held value and in a sentence; promising to restore an arbitrary set and
+            // getting it half-right would be worse than asking.
+            text = { Text("הפעולה הזו אינה ניתנת לביטול.") },
+            confirmButton = {
+                TextButton({ vm.deleteSelected(); confirmBulkDelete = false }) {
+                    Text("מחק", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = { TextButton({ confirmBulkDelete = false }) { Text("ביטול") } },
+        )
+    }
+
     if (showControls) {
         val frozenCount = state.alarms.count { it.isFrozen }
         val activeCount = state.alarms.count { it.isActive }
@@ -146,9 +233,20 @@ fun AlarmListScreen(onAddAlarm: ()->Unit, onEditAlarm: (Long)->Unit,
 
 @OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
-private fun AlarmCardItem(alarm: Alarm, onToggle:(Boolean)->Unit, onEdit:()->Unit,
-    onDuplicate:()->Unit, onScheduleNextDay:()->Unit, onDelete:()->Unit) {
-    var showDel by remember { mutableStateOf(false) }
+private fun AlarmCardItem(
+    alarm: Alarm,
+    onToggle: (Boolean) -> Unit,
+    onEdit: () -> Unit,
+    onDuplicate: () -> Unit,
+    onScheduleNextDay: () -> Unit,
+    onDelete: () -> Unit,
+    onLongPress: () -> Unit,
+    selected: Boolean,
+    inSelectionMode: Boolean,
+) {
+    // No confirm-before-delete state any more: deleting is immediate and undoable from
+    // the snackbar. Keeping both would be the worst of each — an interruption that still
+    // cannot rescue a mis-tap, followed by an undo offer for something already confirmed.
     // Theme color roles rather than the raw Blue/Green constants: those are tuned for
     // the dark scheme's near-black card, and Green (a pale mint) as a 8dp dot and a
     // card border on Light mode's white surface is all but invisible.
@@ -158,13 +256,14 @@ private fun AlarmCardItem(alarm: Alarm, onToggle:(Boolean)->Unit, onEdit:()->Uni
         else           -> MaterialTheme.colorScheme.outline
     }
 
-    // Swipe (either direction) surfaces the same confirm dialog as long-press, rather
-    // than deleting outright — a quicker, more discoverable gesture without an
-    // accidental-delete risk. confirmValueChange always returns false so the card
-    // snaps back to place once the dialog is shown; the dialog owns the real delete.
+    // Swipe (either direction) deletes, with the snackbar's undo as the safety net rather
+    // than a dialog. confirmValueChange still returns false so the card snaps back rather
+    // than animating away: the row disappears when the list flow drops it, which is the
+    // one moment the delete is actually real, and animating out first would show the card
+    // gone for an instant even if the write failed.
     val dismissState = rememberSwipeToDismissBoxState(
         confirmValueChange = { value ->
-            if (value != SwipeToDismissBoxValue.Settled) showDel = true
+            if (value != SwipeToDismissBoxValue.Settled) onDelete()
             false
         },
     )
@@ -184,11 +283,29 @@ private fun AlarmCardItem(alarm: Alarm, onToggle:(Boolean)->Unit, onEdit:()->Uni
             }
         },
     ) {
-    Surface(Modifier.fillMaxWidth().combinedClickable(onClick=onEdit,onLongClick={showDel=true}),
-        RoundedCornerShape(16.dp), color=MaterialTheme.colorScheme.surface,
-        border=BorderStroke(1.5.dp,dotColor.copy(.3f))) {
+    // Long-press enters selection instead of deleting. The old gesture deleted, which is
+    // an odd thing for a long-press to do and left no room for multi-select — and delete
+    // now has its own button on every card, so nothing is lost.
+    Surface(Modifier.fillMaxWidth().combinedClickable(onClick=onEdit,onLongClick=onLongPress),
+        RoundedCornerShape(16.dp),
+        color = if (selected) MaterialTheme.colorScheme.primary.copy(alpha = .12f)
+                else MaterialTheme.colorScheme.surface,
+        border = BorderStroke(
+            if (selected) 2.dp else 1.5.dp,
+            if (selected) MaterialTheme.colorScheme.primary else dotColor.copy(.3f),
+        )) {
         Row(Modifier.padding(16.dp,14.dp),verticalAlignment=Alignment.CenterVertically){
-            Box(Modifier.size(8.dp).clip(CircleShape).background(dotColor))
+            if (inSelectionMode) {
+                Icon(
+                    if (selected) Icons.Rounded.CheckCircle else Icons.Rounded.RadioButtonUnchecked,
+                    if (selected) "נבחר" else "לא נבחר",
+                    Modifier.size(20.dp),
+                    tint = if (selected) MaterialTheme.colorScheme.primary
+                           else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                Box(Modifier.size(8.dp).clip(CircleShape).background(dotColor))
+            }
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)){
                 // Struck through once the alarm has rung and retired. A finished one-time
@@ -253,7 +370,10 @@ private fun AlarmCardItem(alarm: Alarm, onToggle:(Boolean)->Unit, onEdit:()->Uni
                     }
                 }
             }
-            Column(horizontalAlignment=Alignment.End){
+            // Per-row controls stand down during selection: a switch and a delete button
+            // inside a row whose tap now means "select" is three different meanings
+            // competing in one place.
+            if (!inSelectionMode) Column(horizontalAlignment=Alignment.End){
                 Switch(alarm.isEnabled,onToggle,
                     // "מוקפא" is called out separately from the on/off state: a frozen
                     // alarm reads as "פעיל" to the switch but never rings, and a screen
@@ -269,7 +389,7 @@ private fun AlarmCardItem(alarm: Alarm, onToggle:(Boolean)->Unit, onEdit:()->Uni
                         Icon(Icons.Rounded.ContentCopy, "שכפל את ${alarm.name}",
                             Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
                     }
-                    IconButton({ showDel = true }, Modifier.size(40.dp)) {
+                    IconButton(onDelete, Modifier.size(40.dp)) {
                         Icon(Icons.Rounded.DeleteOutline, "מחק את ${alarm.name}",
                             Modifier.size(18.dp), tint = MaterialTheme.colorScheme.error)
                     }
@@ -278,9 +398,7 @@ private fun AlarmCardItem(alarm: Alarm, onToggle:(Boolean)->Unit, onEdit:()->Uni
         }
     }
     }
-    if (showDel) AlertDialog({showDel=false},title={Text("מחק שעמור")},text={Text("מחק את \"${alarm.name}\"?")},
-        confirmButton={TextButton({showDel=false;onDelete()}){Text("מחק",color=MaterialTheme.colorScheme.error)}},
-        dismissButton={TextButton({showDel=false}){Text("ביטול")}})
+
 }
 
 /**
@@ -305,6 +423,47 @@ private fun AlarmCardItem(alarm: Alarm, onToggle:(Boolean)->Unit, onEdit:()->Uni
  * back, and a banner still naming an alarm the user has just cancelled would be worse
  * than no banner at all.
  */
+
+/**
+ * One-tap ad-hoc alarms for the two cases that need no thought.
+ *
+ * The shortest route to an alarm was: tap +, land on a form of fifteen controls, set a
+ * time, name it, save. For "wake me in eight hours" that is a great deal of screen for a
+ * decision already made. Everything except the time comes from the user's configured
+ * defaults, so a quick alarm rings the way their alarms ring.
+ *
+ * Both create an *ad-hoc* alarm — one that rings once and then offers "schedule for the
+ * next day" on its card — rather than something that quietly repeats tomorrow.
+ */
+@Composable
+private fun QuickCreateRow(defaultHour: Int, defaultMinute: Int, onCreate: (Long) -> Unit) {
+    Column(Modifier.fillMaxWidth()) {
+        Text("יצירה מהירה", style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.primary)
+        Spacer(Modifier.height(6.dp))
+        // Scrollable rather than wrapped: three chips plus their icons overflow a
+        // 320dp-wide screen, and a chip clipped off the edge is a control the user
+        // cannot reach at all. Scrolling keeps every one of them reachable at any width.
+        Row(
+            Modifier.horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            listOf(1, 8).forEach { hours ->
+                AssistChip(
+                    onClick = { onCreate(quickAlarmInHours(hours)) },
+                    label = { Text(if (hours == 1) "עוד שעה" else "עוד $hours שעות") },
+                    leadingIcon = { Icon(Icons.Rounded.Timer, null, Modifier.size(16.dp)) },
+                )
+            }
+            AssistChip(
+                onClick = { onCreate(quickAlarmTomorrowAt(defaultHour, defaultMinute)) },
+                label = { Text("מחר %02d:%02d".format(defaultHour, defaultMinute)) },
+                leadingIcon = { Icon(Icons.Rounded.Event, null, Modifier.size(16.dp)) },
+            )
+        }
+    }
+}
+
 @Composable
 private fun rememberForeignAlarm(
     enabled: Boolean,

@@ -131,4 +131,48 @@ class OccasionalAlarmTest {
         assertEquals(0, c.get(Calendar.SECOND))
         assertEquals(0, c.get(Calendar.MILLISECOND))
     }
+
+    // ── Quick-create shortcuts ─────────────────────────────────────────────
+
+    @Test
+    fun `in eight hours lands eight hours later, on a whole minute`() {
+        val now = at(2026, 9, 18, 14, 30)
+        val result = quickAlarmInHours(8, now)
+        assertEquals(Triple(18, 22, 30), fieldsOf(result))
+        val c = Calendar.getInstance().apply { timeInMillis = result }
+        assertEquals(0, c.get(Calendar.SECOND))
+        assertEquals(0, c.get(Calendar.MILLISECOND))
+    }
+
+    @Test
+    fun `in eight hours crosses midnight into the next day`() {
+        val now = at(2026, 9, 18, 20, 0)
+        assertEquals(Triple(19, 4, 0), fieldsOf(quickAlarmInHours(8, now)))
+    }
+
+    /** The chip says tomorrow, so it must mean tomorrow — never today. */
+    @Test
+    fun `tomorrow at a time still ahead today is still tomorrow`() {
+        val now = at(2026, 9, 18, 6, 0)
+        assertEquals(Triple(19, 7, 0), fieldsOf(quickAlarmTomorrowAt(7, 0, now)))
+    }
+
+    @Test
+    fun `tomorrow at a time already passed today is tomorrow`() {
+        val now = at(2026, 9, 18, 22, 0)
+        assertEquals(Triple(19, 7, 0), fieldsOf(quickAlarmTomorrowAt(7, 0, now)))
+    }
+
+    @Test
+    fun `tomorrow crosses a month boundary`() {
+        val now = at(2026, 9, 30, 22, 0)
+        assertEquals(Triple(1, 7, 0), fieldsOf(quickAlarmTomorrowAt(7, 0, now)))
+    }
+
+    @Test
+    fun `both shortcuts always produce a future time`() {
+        val now = at(2026, 9, 18, 23, 59)
+        assertTrue(quickAlarmInHours(1, now) > now)
+        assertTrue(quickAlarmTomorrowAt(0, 1, now) > now)
+    }
 }

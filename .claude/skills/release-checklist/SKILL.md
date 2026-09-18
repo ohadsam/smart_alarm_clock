@@ -863,6 +863,32 @@ If the user asks for a PR-based workflow going forward, follow that instead and 
   the `Caused by` chain are at the *top*; `tail -50` keeps the framework frames, which
   are the least useful part, and throws away the only lines that identify the bug. This
   cost a round.
+- **Room's `@Update` on a row that no longer exists changes zero rows and reports no
+  error.** Not an exception, not a null — a silent no-op. v1.8.1's undo-delete would have
+  looked like it worked and left nothing in the database: the alarm reappears in the UI
+  (the ViewModel put it back in its own state) and is absent from `alarms`. Any "restore
+  a deleted row" path needs `@Update` to return `Int` and fall back to `@Insert` when it
+  is 0 — and the restore must re-insert under the **original id**, because
+  `AlarmScheduler` derives its PendingIntent request codes from the id, so a restore under
+  a fresh id arms a second registration and orphans the first. Note also what such a
+  restore cannot recover: `alarm_logs`' `ON DELETE SET NULL` already ran, so history rows
+  stay orphaned. Test both the feature and its limit.
+- **AlarmManager keys a registration by its PendingIntent, so a second registration for
+  the same alarm must use its own request code.** Two PendingIntents with the same request
+  code and a matching Intent are the *same* registration, and arming one cancels/replaces
+  the other. This app now has three request-code spaces per alarm: `id` (the real
+  trigger), `id + 100_000` (snooze), `id + 200_000` (v1.8.1's test ring). A rehearsal
+  armed on the alarm's own code would have silently cancelled the real 06:30 — the user
+  tests their alarm and, in doing so, destroys it. Any future "fire this alarm now/soon"
+  feature needs a fourth space, not a reuse of an existing one.
+- **A feature that reuses the real firing path needs an explicit "this is not real" flag
+  threaded all the way through.** The test ring goes through AlarmManager → receiver →
+  service on purpose (a test that skips part of the chain proves nothing about the part
+  that fails), which means every piece of bookkeeping at the end of that chain would have
+  run for a rehearsal: a FIRED history row, an occurrence increment, a one-time alarm
+  switching itself off, the next occurrence re-armed. `EXTRA_IS_TEST` is read in
+  `AlarmReceiver` and forwarded to `AlarmFiringService`; when adding bookkeeping to the
+  firing path, check whether it belongs behind that flag.
 
 ## Known limitations (don't re-report these as new findings unless you're the batch fixing them)
 
