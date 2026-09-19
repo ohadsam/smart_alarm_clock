@@ -881,6 +881,28 @@ If the user asks for a PR-based workflow going forward, follow that instead and 
   armed on the alarm's own code would have silently cancelled the real 06:30 — the user
   tests their alarm and, in doing so, destroys it. Any future "fire this alarm now/soon"
   feature needs a fourth space, not a reuse of an existing one.
+- **"There are widget tests" is not "the widget is tested".** Until v1.10.0 this repo had
+  four kinds of widget coverage — descriptor XML parsing (`WidgetProviderInfoTest`),
+  "are the providers installed" (`WidgetProviderInstrumentedTest`), the pure row-ordering
+  function (`WidgetRowsTest`), and palette/contrast — and **not one of them rendered a
+  widget**. A `provideGlance` that threw on every render passed all of them, and the other
+  two gates could not see it either: the instrumented suite installs the unminified
+  *debug* APK, and `release-smoke-test.sh` launches MainActivity rather than looking at a
+  widget. That is why widget bugs kept reaching the user across v1.3.0, v1.6.0, v1.6.3,
+  v1.8.0 and v1.10.0. `runGlanceAppWidgetUnitTest` (androidx.glance:glance-testing +
+  glance-appwidget-testing) renders the real composables on the JVM and asserts on the
+  node tree; the enabling change is that the bodies take a plain state object instead of
+  reaching for the repository, so they are ordinary composables over data. **When a batch
+  touches any widget body, it needs a render assertion, not another descriptor check.**
+- **A widget value computed at `provideGlance()` time is a value that will be wrong.**
+  Nothing guarantees a re-render: `updatePeriodMillis` and periodic WorkManager are both
+  deferred in Doze, which is where a phone spends every night. v1.10.0's stale countdown
+  ("בעוד 9 שע׳" still showing at 06:55) was exactly this. Anything time-derived on a
+  widget belongs in a self-updating host view — `TextClock` for a clock, a count-down
+  `Chronometer` for a countdown, embedded via `AndroidRemoteViews` — and the "it only
+  changes slowly, a periodic refresh is enough" argument is the trap: it silently assumes
+  the refresh arrives. Reach for a static string only for something that genuinely cannot
+  change without a data mutation (a name, a recurrence summary).
 - **Adding a production gate on a method a relaxed mockk answers with `null`/`0`/`false`
   silently rewrites every existing test of that path.** v1.9.0's "this alarm will never
   ring, save anyway?" dialog keys off `scheduler.effectiveNextFireTime(...) == null` inside

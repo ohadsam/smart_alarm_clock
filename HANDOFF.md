@@ -139,6 +139,12 @@
 | 110 | אריח הגדרות מהירות דו-כיווני; `exported=true` + `BIND_QUICK_SETTINGS_TILE` | `service/AlarmsTileService.kt` + `AndroidManifest.xml` (v1.9.0) |
 | 111 | הסבר פתיחה חד-פעמי, ניתן לפתיחה חוזרת מההגדרות; תור: מה חדש ← הסבר ← אמינות | `presentation/intro/` (v1.9.0) |
 | 112 | רטט אישור על עצירה/נודניק/שמירה; לחיצה ארוכה כבר מקבלת אותו מ-`combinedClickable` | `AlarmRingScreen`/`AlarmEditScreen` (v1.9.0) |
+| 113 | **הווידג'טים נבדקים ברינדור** — `runGlanceAppWidgetUnitTest`; קודם שום טסט לא רינדר ווידג'ט | `WidgetRenderTest` + `WidgetUiState` (v1.10.0) |
+| 114 | ספירה לאחור = `Chronometer` בכל מרחק; מחרוזת קבועה לא יכולה להתעדכן ב-Doze | `Countdown` ב-`SmartRingWidget.kt` (v1.10.0) |
+| 115 | `LazyColumn` במקום `Column` + `take(3)/take(4)` — כל השעמורים, עם גלילה | `ListBody` (v1.10.0) |
+| 116 | `sizeMode = SizeMode.Exact` — בלעדיו שינוי גודל לא מרנדר מחדש | `SmartRingBaseWidget` (v1.10.0) |
+| 117 | תווית יום בכל שורה; חשבון הימים משותף עם קיבוץ הרשימה ולא עותק שני | `util/WidgetLabels.kt` + `WidgetLabelsTest` (v1.10.0) |
+| 118 | קישורי עומק מהווידג'ט (שורה→עריכה, ＋→חדש) עם `data` URI ייחודי לכל שעמור | `MainActivity`/`NavGraph.WidgetDestination` (v1.10.0) |
 
 ---
 
@@ -372,6 +378,7 @@ if (!alarm.acceptsInteraction) return
 - [x] ~~קיצורי Quick Settings~~ – **בוצע v1.9.0**: `AlarmsTileService`, דו-כיווני.
 - [x] ~~Haptics על פעולות מרכזיות~~ – **בוצע v1.9.0**: עצירה, נודניק, שמירה.
 - [ ] Export/Import JSON של שעמורים
+- [ ] פעולת "דלג על המופע הבא" בווידג'ט ובכרטיס — לא מומשה כי אין לה ייצוג במודל הנתונים כרגע (`occurrencesFired` סופר צלצולים שקרו, לא דילוגים); דורשת שדה משלה ומיגרציה
 - [ ] Custom accent color
 
 ---

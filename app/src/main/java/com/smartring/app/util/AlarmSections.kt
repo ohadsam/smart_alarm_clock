@@ -1,7 +1,6 @@
 package com.smartring.app.util
 
 import com.smartring.app.domain.model.Alarm
-import java.util.Calendar
 
 /**
  * How the main list is grouped, and how it is searched.
@@ -45,6 +44,9 @@ data class AlarmGroup(val section: AlarmSection, val rows: List<AlarmRow>) {
 fun sectionFor(row: AlarmRow, nowMillis: Long = System.currentTimeMillis()): AlarmSection {
     val at = row.nextFireAt
     if (!row.alarm.isActive || at == null) return AlarmSection.OFF
+    // Shared with the widgets' own day label (util/WidgetLabels.kt) rather than kept
+    // as a second private copy: two implementations of "which day is this" is how the
+    // list and the widget start disagreeing about what "היום" means.
     val days = calendarDaysBetween(nowMillis, at)
     return when {
         days <= 0L -> AlarmSection.TODAY
@@ -53,42 +55,6 @@ fun sectionFor(row: AlarmRow, nowMillis: Long = System.currentTimeMillis()): Ala
         else       -> AlarmSection.LATER
     }
 }
-
-/**
- * Whole calendar days from [fromMillis] to [toMillis], counting date changes rather than
- * elapsed hours.
- *
- * The difference matters at both ends of the day and is the whole reason this is not
- * `(to - from) / 86_400_000`: at 23:30, an alarm forty minutes away is *tomorrow*, and at
- * 00:30 one twenty-two hours away is still *today*. Elapsed-hours arithmetic gets both
- * backwards, which is precisely when someone is most likely to be checking.
- *
- * Also why this walks the calendar rather than dividing: days are not all 24 hours long.
- * Israel's DST transitions make one 23 and one 25, so a fixed divisor drifts a whole day
- * around each changeover.
- */
-private fun calendarDaysBetween(fromMillis: Long, toMillis: Long): Long {
-    val from = startOfDay(fromMillis)
-    val to = startOfDay(toMillis)
-    if (to <= from) return 0L
-    val cal = Calendar.getInstance().apply { timeInMillis = from }
-    var days = 0L
-    // Bounded: anything past a year is "later" regardless, and an unbounded loop here
-    // would turn a far-future date into a hang rather than a wrong heading.
-    while (cal.timeInMillis < to && days < 366L) {
-        cal.add(Calendar.DAY_OF_YEAR, 1)
-        days++
-    }
-    return days
-}
-
-private fun startOfDay(millis: Long): Long = Calendar.getInstance().apply {
-    timeInMillis = millis
-    set(Calendar.HOUR_OF_DAY, 0)
-    set(Calendar.MINUTE, 0)
-    set(Calendar.SECOND, 0)
-    set(Calendar.MILLISECOND, 0)
-}.timeInMillis
 
 /**
  * The grouped list, in reading order, with empty groups left out.

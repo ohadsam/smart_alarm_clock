@@ -1,5 +1,112 @@
 # SmartRing – Changelog
 
+## v1.10.0 (2026-09-19)
+
+Reported as "the widgets don't sync, don't show the alarms, don't show when anything is
+scheduled". Three separate defects, plus the reason none of them was caught.
+
+### Why none of this was caught
+
+**Nothing in this repo had ever rendered a widget.** `WidgetProviderInfoTest` parses the
+descriptor XML, `WidgetProviderInstrumentedTest` asks the framework whether the four
+providers are installed, `WidgetRowsTest` covers the pure ordering function — all three
+check something *next to* the widget. A `provideGlance` that threw on every render would
+have passed every one of them, and neither of the other two gates would have noticed
+either: the instrumented suite installs the unminified **debug** APK, and
+`release-smoke-test.sh` launches MainActivity rather than looking at a widget.
+
+`WidgetRenderTest` closes that. It renders the actual Glance bodies through
+`runGlanceAppWidgetUnitTest` and asserts what is on screen — a row per alarm, the toggles,
+the day labels, both empty states, the armed count. To make that possible the bodies now
+take a `WidgetUiState` value object instead of reaching for the repository themselves,
+which is the change that turns the widgets from untestable into ordinary composables over
+plain data.
+
+### The countdown could not stay current, by construction
+
+Above an hour out, the countdown was a **static string** built by a formatter at
+`provideGlance()` time. That is only correct if a re-render arrives, and nothing
+guarantees one: the descriptor's `updatePeriodMillis` and the 15-minute
+`WidgetRefreshWorker` are both deferred in Doze, which is the state a phone is in all
+night. A widget drawn at 22:00 for an alarm at 07:00 therefore went on saying
+"בעוד 9 שע׳" at 06:55.
+
+It is now a count-down `Chronometer` at every distance, not just inside the last hour. A
+Chronometer ticks in the host process against the elapsed-realtime clock and needs no
+wake-up from this app at all, so it cannot go stale. The old hour cutoff was a
+micro-optimization — "a permanently ticking view isn't worth it for a number that changes
+slowly" — bought with correctness, and the price was a widget that lied all night.
+
+`formatCountdownUntil()` had no callers left after this and is deleted, with its five
+tests.
+
+### The large widgets showed four alarms and implied that was all of them
+
+`take(3)` and `take(4)`, with nothing on screen to say more existed. Six alarms rendered
+as four. That is not a small widget showing less; it is a widget misreporting what is set
+up, and it is most of "the widgets don't show my alarms".
+
+They now use a `LazyColumn`, which is the right primitive for a variable-length list in a
+widget: it is backed by a RemoteViews collection, so it scrolls in the host and carries no
+fixed child budget the way a `Column` of N children does. The previous layout also emitted
+a `Spacer` after every row, so each alarm cost *two* children of the same `Column` that
+already held the header, the hero line and their spacer — the largest widget put eleven
+children into one container. Nothing is capped now.
+
+### A row said 07:00 and nothing about which day
+
+The line under each name was the recurrence summary ("ימי חול"), which describes the
+pattern rather than answering the question someone glances at a home screen to settle. Two
+rows both reading 07:00 — one tomorrow, one next Thursday — were indistinguishable. Rows
+now carry "היום" / "מחר" / "יום ה׳" / a date.
+
+The day arithmetic is shared with the alarm list's grouping rather than reimplemented:
+`calendarDaysBetween` moved to `util/WidgetLabels.kt` and `AlarmSections.kt` now calls it.
+Two copies of "which day is this" is how a widget starts disagreeing with the app it
+belongs to, and a widget contradicting its own app is worse than either being wrong alone.
+It counts calendar days rather than dividing elapsed milliseconds, for the reason the list
+already documented: at 23:30 a ring forty minutes out is *tomorrow*.
+
+### Resizing did nothing
+
+`sizeMode` was left at the default `SizeMode.Single`, which renders one layout sized from
+the provider's *minimum* dimensions and never renders again. All four descriptors advertise
+`resizeMode="horizontal|vertical"`, so the widget invited a resize and then ignored it —
+stretching one left the original content floating in the new area. Now `SizeMode.Exact`.
+
+### Made interactive
+
+- **Rows open their own alarm.** Every part of the widget used to open the generic list,
+  because the frame itself carried the click action and every row sat inside it. The frame
+  no longer does; each target is placed deliberately.
+- **A ＋ in the header** opens the editor on a new alarm.
+- **The empty state is a button** — "אין שעמורים · הקש להוספה", or "אין שעמור פעיל ·
+  הקש להפעלה" when alarms exist but none is armed. It previously stated the situation and
+  offered nothing to do about it.
+- **The header leads with the armed count** rather than the brand name. Someone glancing
+  at their home screen wants to know whether anything is set; they know which app it is.
+- Deep links carry a distinct `data` URI per alarm, not just an extra: extras are not part
+  of an Intent's identity for PendingIntent matching, so rows differing only by an extra
+  would have collapsed into one PendingIntent and every row would have opened the same
+  alarm. `MainActivity` nonce-gates the destination the same way it does a firing alarm,
+  so tapping the same row twice navigates twice — and a ringing alarm always outranks it.
+
+### Tests
+
+- `WidgetRenderTest` (13) — the first renders; see above.
+- `WidgetLabelsTest` (9) — both ends of the day, the week boundary, Saturday by name, the
+  far-future fallback, and that the widget's day arithmetic is literally the list's.
+- `TimeFormatTest` (−5) — removed with `formatCountdownUntil`.
+
+### Not established
+
+The eleven-children-in-one-`Column` count above is read off the previous code and is
+certainly true as arithmetic. Whether Glance actually *throws* at that count I could not
+confirm from this environment — Google's Maven and issue tracker are both unreachable
+here, and Glance is not on Maven Central — so it is stated as a count, not as the
+diagnosis. The `LazyColumn` change is justified on its own terms regardless: it is the
+documented primitive for a widget list, and it is what removes the cap.
+
 ## v1.9.0 (2026-09-18)
 
 The rest of the v1.8.0 UI/UX plan, minus the two items that plan explicitly advised

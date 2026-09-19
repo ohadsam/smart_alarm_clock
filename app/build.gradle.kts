@@ -14,8 +14,8 @@ android {
         applicationId   = "com.smartring.app"
         minSdk          = 26
         targetSdk       = 34
-        versionCode     = 26
-        versionName     = "1.9.0"
+        versionCode     = 27
+        versionName     = "1.10.0"
         // Hilt's own runner, so @HiltAndroidTest instrumented tests get a real DI
         // graph on the device instead of the app's @HiltAndroidApp Application.
         testInstrumentationRunner = "com.smartring.app.HiltTestRunner"
@@ -152,6 +152,11 @@ dependencies {
     testImplementation(libs.mockk)
     testImplementation(libs.coroutines.test)
     testImplementation(libs.androidx.test.core)
+    // Renders the widget composables and asserts on the node tree. Every other widget
+    // test checks a descriptor or a pure function; these are the first that put the
+    // actual Glance content through a render, which is where the failures have been.
+    testImplementation(libs.glance.testing)
+    testImplementation(libs.glance.appwidget.testing)
 
     // ── Instrumented tests: run on a real emulator in CI (see the "instrumented
     // tests" job in .github/workflows/build-apk.yml). These cover what Robolectric

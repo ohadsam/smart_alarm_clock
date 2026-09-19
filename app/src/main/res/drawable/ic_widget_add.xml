@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    The "add an alarm" target in the widget header. Tinted at render time from the
+    widget palette (ColorFilter.tint), like every other widget icon, so it is right in
+    both themes without a values-night copy.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24"
+    android:tint="#FFFFFFFF">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M11,13L5,13v-2h6L11,5h2v6h6v2h-6v6h-2z" />
+</vector>

@@ -6,7 +6,8 @@ Compose UI → ViewModels (StateFlow) → AlarmRepository → Room DB v3
                                    → AlarmScheduler (AlarmManager)
                                    → AppLogger (app_logs, אבחון)
                                    → WorkManager (reschedule + log cleanup + widget refresh)
-Glance Widgets (SmartRingWidget.kt) → AlarmScheduler.effectiveNextFireTime() ← WidgetRefresher
+Glance Widgets (SmartRingWidget.kt) → WidgetUiState → גופי Glance טהורים (נבדקים ברינדור) ← WidgetRefresher
+                                     → קישורי עומק ל-MainActivity (שורה→עריכה, ＋→חדש)
 ```
 
 ## מסכים

@@ -3,13 +3,15 @@
     A real android.widget.Chronometer in count-down mode, embedded into the Glance
     widgets via AndroidRemoteViews exactly like widget_clock's TextClock.
 
-    The countdown used to be a Glance Text() built from formatCountdownUntil() at
-    provideGlance() time, so it only moved when something re-rendered the widget —
-    at worst a full WidgetRefreshWorker period (15 minutes) later. An alarm 20
-    minutes out could therefore read "בעוד 20 דק׳" when it was really 5 minutes
-    away, which is precisely the range where someone acts on the number. A
-    Chronometer ticks inside the host process with no app wake-up at all, so under
-    the hour the widget is always right to the second.
+    The countdown used to be a Glance Text() built from a formatter at provideGlance()
+    time, so it only moved when something re-rendered the widget — at worst a full
+    WidgetRefreshWorker period (15 minutes) later, and in Doze not at all. A widget
+    rendered at 22:00 for an alarm at 07:00 went on saying "בעוד 9 שע׳" at 06:55.
+
+    A Chronometer ticks inside the host process with no app wake-up at all, so the
+    widget is always right to the second. As of v1.10.0 this is used at every
+    distance, not only inside the last hour: the hour cutoff assumed a re-render would
+    arrive to update the static text above it, and nothing guarantees one.
 
     Text size/color are set per placement at runtime; the values here are defaults.
 -->

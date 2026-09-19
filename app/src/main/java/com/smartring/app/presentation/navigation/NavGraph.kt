@@ -44,8 +44,24 @@ sealed class Screen(val route: String) {
     object Diagnosis: Screen("diagnosis")
 }
 
+/**
+ * Where a widget tap wants to land.
+ *
+ * The widget used to have exactly one destination for every part of it — the alarm list —
+ * which is one answer to three different questions. A row means "this alarm", the header
+ * "+" means "a new one", and the title still means "everything".
+ */
+sealed interface WidgetDestination {
+    object None : WidgetDestination
+    object Add : WidgetDestination
+    data class Edit(val alarmId: Long) : WidgetDestination
+}
+
 @Composable
-fun SmartRingNavGraph(alarmTrigger: Pair<Long, Long> = 0L to -1L) {
+fun SmartRingNavGraph(
+    alarmTrigger: Pair<Long, Long> = 0L to -1L,
+    widgetDestination: Pair<Long, WidgetDestination> = 0L to WidgetDestination.None,
+) {
     val nav = rememberNavController()
     val (initialNonce, initialAlarmId) = alarmTrigger
     // remember{}, so the graph's start destination is fixed for the life of this
@@ -74,6 +90,29 @@ fun SmartRingNavGraph(alarmTrigger: Pair<Long, Long> = 0L to -1L) {
             }
             lastHandledNonce = nonce
         }
+    }
+
+    // Widget deep links. Nonce-gated exactly like the alarm trigger above, so tapping the
+    // same row twice navigates twice; without it the second tap carries an identical
+    // value, the state never changes, and nothing happens.
+    //
+    // Never while an alarm is ringing: the widget's Intent could arrive at the same
+    // moment, and nothing the widget offers outranks a ringing alarm. Navigating away
+    // would also strand the ring screen's Stop button.
+    var lastWidgetNonce by remember { mutableStateOf(-1L) }
+    LaunchedEffect(widgetDestination, initialAlarmId) {
+        val (nonce, dest) = widgetDestination
+        if (dest == WidgetDestination.None || nonce == lastWidgetNonce) return@LaunchedEffect
+        if (initialAlarmId > 0L) return@LaunchedEffect
+        lastWidgetNonce = nonce
+        val route = when (dest) {
+            is WidgetDestination.Edit -> Screen.Edit.go(dest.alarmId)
+            WidgetDestination.Add     -> Screen.Edit.go(0L)
+            WidgetDestination.None    -> return@LaunchedEffect
+        }
+        // launchSingleTop so a repeated tap on the same row re-uses the editor already
+        // open for it rather than stacking a second copy behind it.
+        nav.navigate(route) { launchSingleTop = true }
     }
 
     NavHost(nav, start) {
