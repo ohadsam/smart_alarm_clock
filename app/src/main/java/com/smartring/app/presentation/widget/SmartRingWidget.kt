@@ -572,7 +572,6 @@ private fun PanelRow(
     Row(
         GlanceModifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 7.dp)
             .background(ImageProvider(R.drawable.widget_row_bg))
-            .semantics { testTag = tag }
             // The whole row, not just the icon: there is no competing target inside a
             // panel row, so the largest tap area is simply the right one.
             .clickable(action),
@@ -585,9 +584,13 @@ private fun PanelRow(
             colorFilter = ColorFilter.tint(ColorProvider(tint)),
         )
         Spacer(GlanceModifier.width(8.dp))
+        // The tag belongs on the Text, not on the Row that contains it: an assertion
+        // about text reads the tagged node's *own* text and does not descend into its
+        // children, so a tag one level up matches a node with no text at all.
         Text(label,
             style = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.Medium,
                 color = ColorProvider(palette.textPrimary)),
+            modifier = GlanceModifier.semantics { testTag = tag },
             maxLines = 1)
     }
 }

@@ -904,6 +904,10 @@ If the user asks for a PR-based workflow going forward, follow that instead and 
   bug; both cost a CI round. Add a tag (`Modifier.testTag` / `GlanceModifier.semantics {
   testTag = … }`) and assert `onNode(hasTestTag(…)).assertHasText(…)`. Also: never give a
   test fixture a name that collides with a label the same screen renders.
+  **And put the tag on the node that carries the property you assert**: `assertHasText`
+  reads the tagged node's *own* text and does not descend into its children, so a tag on
+  the `Row` that contains a `Text` matches a node with no text at all. v1.11.0's panel-row
+  assertions failed exactly that way — the right node was found and had nothing to say.
 - **The widgets read two sources of truth, and only one of them emits.** `SmartRingApp`'s
   `observeAlarms()` collector refreshes widgets on any write to the alarms table — but the
   widgets also render DataStore-backed config (as of v1.11.0, the quick-create shortcuts),
