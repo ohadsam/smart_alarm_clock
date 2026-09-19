@@ -24,7 +24,11 @@ class MainActivity : ComponentActivity() {
     // Same nonce trick, for the widget's deep links. Tapping the same widget row twice
     // must navigate twice — without the nonce the second tap is an identical value, the
     // state doesn't change, and nothing happens.
-    private var widgetDestination by mutableStateOf(0L to WidgetDestination.None)
+    // Explicit type: inferred, `0L to WidgetDestination.None` types the state as
+    // Pair<Long, WidgetDestination.None> — the singleton's own type, not the interface —
+    // so assigning an Edit to it later does not compile.
+    private var widgetDestination: Pair<Long, WidgetDestination> by
+        mutableStateOf(0L to WidgetDestination.None)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)

@@ -269,7 +269,10 @@ abstract class SmartRingBaseWidget : GlanceAppWidget() {
      * toggle possible at all: a widget that hides disabled alarms can switch one off and
      * then offers no way to switch it back on.
      */
-    protected suspend fun widgetState(ctx: Context): WidgetUiState {
+    // internal, not protected: WidgetUiState is internal, and a protected member may not
+    // expose an internal type. The four subclasses live in this module, so internal
+    // reaches every caller that actually exists.
+    internal suspend fun widgetState(ctx: Context): WidgetUiState {
         val ep = EntryPointAccessors.fromApplication(ctx, WidgetEntryPoint::class.java)
         val scheduler = ep.alarmScheduler()
         return WidgetUiState(
