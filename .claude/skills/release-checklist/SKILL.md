@@ -904,6 +904,22 @@ If the user asks for a PR-based workflow going forward, follow that instead and 
   bug; both cost a CI round. Add a tag (`Modifier.testTag` / `GlanceModifier.semantics {
   testTag = … }`) and assert `onNode(hasTestTag(…)).assertHasText(…)`. Also: never give a
   test fixture a name that collides with a label the same screen renders.
+- **The widgets read two sources of truth, and only one of them emits.** `SmartRingApp`'s
+  `observeAlarms()` collector refreshes widgets on any write to the alarms table — but the
+  widgets also render DataStore-backed config (as of v1.11.0, the quick-create shortcuts),
+  and a DataStore write does not touch Room. Editing the shortcuts in Settings would have
+  left every widget showing the old set until the next *alarm* mutation or the 15-minute
+  periodic refresh. Anything new that a widget renders and Settings can change needs its
+  own collector beside that one — with `drop(1)`, because DataStore replays its current
+  value to every new collector and process start would otherwise fire a no-op refresh.
+- **Two surfaces creating the same kind of object need one function that creates it.**
+  v1.11.0 let the widget panel create quick alarms, which the app's chips already did.
+  Two copies of "what a quick alarm is" is how the surfaces start disagreeing about the
+  user's defaults — one picks up a new field, the other does not, and the alarm rings
+  differently depending on which button was pressed. `util/QuickAlarmFactory.kt` is the
+  single definition both call. This codebase has been bitten by a duplicated rule before:
+  `startAudioSequence`'s second copy of the round-walking logic meant a multi-round alarm
+  never advanced past round 1.
 - **A widget value computed at `provideGlance()` time is a value that will be wrong.**
   Nothing guarantees a re-render: `updatePeriodMillis` and periodic WorkManager are both
   deferred in Doze, which is where a phone spends every night. v1.10.0's stale countdown

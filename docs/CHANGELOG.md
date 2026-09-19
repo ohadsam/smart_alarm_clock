@@ -1,5 +1,108 @@
 # SmartRing – Changelog
 
+## v1.11.0 (2026-09-19)
+
+### The shortcuts are the user's now
+
+v1.8.1 shipped three hard-coded chips — "עוד שעה", "עוד 8 שעות", "מחר at the default
+hour". Hard-coding was the wrong call, and obviously so in hindsight: a shortcut earns its
+place by matching what *this* person keeps doing, and the set that suits someone napping
+("עוד 20 דק׳") has nothing in common with the set that suits someone going to bed.
+
+Settings → "יצירה מהירה" now owns the list: add, edit, delete, reorder. Two kinds, because
+the two questions people actually ask are different — `RELATIVE` ("wake me in N minutes",
+from the moment of the tap) and `TIME_OF_DAY` ("wake me at 06:45").
+
+**A time-of-day preset means the next occurrence** — today while it is still ahead,
+tomorrow once it has passed — and the chip is labelled with the day it will actually land
+on ("היום 06:45" / "מחר 06:45"). That is not a reversal of v1.9.0's rule that a chip
+saying "מחר" must mean tomorrow; it is the same rule applied to a different label. A
+control has to do what it says, so this one says which day.
+
+Tapped at exactly the preset's own minute, it means the *next* one. "Now" is not in the
+future, `schedule()` cancels a trigger that is not, and the tap would appear to do nothing.
+
+### Which chips, and how many, per surface
+
+Each preset carries two independent visibility ticks (main screen, widget), and each
+surface has its own count. Two counts rather than one because the surfaces are not
+dimensionally comparable: the app's row scrolls horizontally, while a widget panel is a few
+cells of someone's home screen and a fourth row there pushes the first off.
+
+Order is not decoration — each surface takes the first N *marked for it*, so moving a
+preset up is how you choose it over another without unticking anything. Ticked-but-cut is a
+real state, and the settings row says so ("ווידג'ט (מעבר למכסה)"); without that the count
+looks like it is ignoring the ticks.
+
+Stored in its own DataStore file rather than as columns in `alarm_defaults`: the defaults
+describe what a *new alarm* looks like, these describe what the *shortcut row* looks like,
+and "restore this default" should not wipe someone's shortcuts. Encoded by hand — this
+project has no serialization dependency, and adding a compiler plugin to store five rows of
+seven numbers is more moving parts than the problem has. Decoding is defensive: an
+unreadable record is dropped rather than failing the list, and a store with nothing usable
+falls back to the built-ins, because an empty shortcut row is indistinguishable from the
+feature being broken.
+
+### A quick-actions panel on the widget
+
+The bolt in the header opens it; the same button closes it. It **replaces** the alarm list
+rather than sitting above it — a widget is a few cells, and a panel that pushed the list
+down would leave one row of each and be useless as both. The flag lives in the widget's own
+Glance state, so one widget's open panel does not open every other widget's.
+
+In it: the shortcut chips marked for the widget, plus the four global operations the app
+already exposes behind "שליטה כללית" — **כבה/הפעל את כל השעמורים** and **הקפא/בטל הקפאה**.
+Those two are what someone reaches for on a night away or a sick day, and that sheet is
+three taps deep inside an app you have to find first. Freeze is offered separately from off
+because they are genuinely different: a frozen alarm keeps its schedule and simply does not
+ring.
+
+**Deliberately not there: "snooze the next alarm" and "skip the next occurrence."** Both
+read as obvious quick actions and neither has an honest implementation today — a snooze
+belongs to a ring that is happening, and skipping one occurrence has no representation in
+the data model (`occurrencesFired` counts rings that happened, not ones waved off). Adding
+either would mean a button that half-works on a surface with no room to explain itself. The
+skip is recorded in HANDOFF's backlog with what it would actually cost: its own column and
+a migration.
+
+### Sync, in both directions
+
+The reason the widget and the app can now disagree is that there are two of them creating
+alarms, so this batch spent its care there:
+
+- **One `buildQuickAlarm`.** Both surfaces call the same function, so an alarm created from
+  the widget is byte-for-byte the one created from the chips. Two copies of "what a quick
+  alarm is" is exactly how they drift, and this codebase has been bitten by a duplicated
+  rule before (`startAudioSequence`'s second copy of the round-walking logic meant a
+  multi-round alarm never advanced past round 1).
+- **Widget → app** already worked and still does: every widget action writes through the
+  repository, and Room's Flow re-emits into the app's UI.
+- **App → widget for the presets did not exist.** The presets live in DataStore, a
+  completely separate store from the alarms table, so the existing `observeAlarms()`
+  collector could not see a change to them — editing the shortcuts would have left every
+  widget showing the old set until the next alarm mutation or the 15-minute periodic
+  refresh. `SmartRingApp` now collects the presets flow too. `drop(1)`, because DataStore
+  replays its current value to a new collector and every process start would otherwise fire
+  a refresh that changes nothing.
+
+### Removed
+
+`quickAlarmInHours` and `quickAlarmTomorrowAt` had no callers once the chips became
+configurable; deleted with their six tests, which `QuickPresetsTest` covers more broadly.
+
+### Tests
+
+- `QuickPresetsTest` (21) — both kinds across midnight and month boundaries, the
+  exactly-on-the-minute case, labels at every scale, clamping of a corrupt store, the
+  per-surface filters and caps, and the codec's round trip and its fallbacks. Plus the
+  property the feature rests on, asserted across every shape at six different moments:
+  **a shortcut never produces a time in the past.**
+- `WidgetRenderTest` (+9) — the panel toggle exists, an open panel renders a row per
+  preset, it replaces the list rather than stacking on it, and the bulk rows say which way
+  they go.
+- `AlarmListViewModelTest` (+2) — a preset creates an alarm at the moment it stands for,
+  and the chips expose only what is marked and capped for the app.
+
 ## v1.10.0 (2026-09-19)
 
 Reported as "the widgets don't sync, don't show the alarms, don't show when anything is

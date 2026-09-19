@@ -42,6 +42,12 @@ import com.smartring.app.util.formatDurationSeconds
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.KeyboardType
 import com.smartring.app.presentation.intro.IntroDialog
+import com.smartring.app.util.QuickPreset
+import com.smartring.app.util.QuickPresetKind
+import com.smartring.app.util.QuickPresetLimits
+import com.smartring.app.util.presetLabel
+import com.smartring.app.util.presetsForApp
+import com.smartring.app.util.presetsForWidget
 import com.smartring.app.util.openSystemScreen
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -236,6 +242,9 @@ fun SettingsScreen(
                         dismissButton = { TextButton({ confirmResetAll = false }) { Text("ביטול") } },
                     )
                 }
+            }
+            SettingsGroup("יצירה מהירה") {
+                QuickPresetsSection(vm)
             }
             SettingsGroup("שעמורים מאפליקציות אחרות") {
                 ListItem(
@@ -761,5 +770,299 @@ private fun RadioRow(
             RadioButton(selected = current == value, onClick = onClick.takeIf { enabled }, enabled = enabled)
         },
         modifier         = if (enabled) Modifier.clickable(onClick = onClick) else Modifier,
+    )
+}
+
+// ── Quick-create shortcuts ───────────────────────────────────────────────────
+
+/**
+ * Editing the one-tap shortcut chips.
+ *
+ * v1.8.1 hard-coded three of them, which was the wrong call: a shortcut earns its place by
+ * matching what *this* person keeps doing, and the set that suits a nap has nothing in
+ * common with the set that suits a night's sleep. The list is the user's now.
+ *
+ * Each row carries its own two visibility ticks rather than one shared "enabled", because
+ * the two surfaces are not interchangeable: the app's row scrolls and can afford several,
+ * while the widget panel is a few cells of a home screen. Order matters for the same
+ * reason — each surface takes the first N marked for it, so moving a preset up is how you
+ * choose it over another without unticking anything.
+ */
+@Composable
+private fun QuickPresetsSection(vm: SettingsViewModel) {
+    val config by vm.quickConfig.collectAsStateWithLifecycle()
+    var editing by remember { mutableStateOf<QuickPreset?>(null) }
+    var adding by remember { mutableStateOf(false) }
+    var confirmReset by remember { mutableStateOf(false) }
+
+    Column(Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
+        Text(
+            "הקיצורים שמופיעים במסך הראשי ובווידג'ט. כל קיצור יוצר שעמור מזדמן אחד " +
+                "בלחיצה, עם שאר ההגדרות מברירות המחדל שלמעלה.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(10.dp))
+
+        // The counts. Separate per surface, and shown above the list so the "מוצג"/"מוסתר"
+        // hint on each row below can be read against them.
+        QuickCountRow(
+            label = "כמה להציג במסך הראשי",
+            value = config.limits.maxInApp,
+            max = QuickPresetLimits.MAX_IN_APP_CEILING,
+            onChange = { n -> vm.updateQuickLimits { it.copy(maxInApp = n) } },
+        )
+        QuickCountRow(
+            label = "כמה להציג בווידג'ט",
+            value = config.limits.maxInWidget,
+            max = QuickPresetLimits.MAX_IN_WIDGET_CEILING,
+            onChange = { n -> vm.updateQuickLimits { it.copy(maxInWidget = n) } },
+        )
+        Spacer(Modifier.height(8.dp))
+        HorizontalDivider()
+        Spacer(Modifier.height(8.dp))
+
+        val shownInApp = presetsForApp(config.presets, config.limits).map { it.id }.toSet()
+        val shownInWidget = presetsForWidget(config.presets, config.limits).map { it.id }.toSet()
+
+        config.presets.forEachIndexed { index, preset ->
+            QuickPresetRow(
+                preset = preset,
+                isFirst = index == 0,
+                isLast = index == config.presets.lastIndex,
+                // "Ticked" and "actually visible" are different facts — a preset can be
+                // marked for the widget and still be cut by the count. Saying so on the
+                // row is what keeps the count from looking broken.
+                visibleInApp = preset.id in shownInApp,
+                visibleInWidget = preset.id in shownInWidget,
+                onToggleApp = { vm.updatePreset(preset.copy(showInApp = it)) },
+                onToggleWidget = { vm.updatePreset(preset.copy(showInWidget = it)) },
+                onMove = { up -> vm.movePreset(preset.id, up) },
+                onEdit = { editing = preset },
+                onDelete = { vm.deletePreset(preset.id) },
+            )
+        }
+
+        Spacer(Modifier.height(6.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton({ adding = true }) {
+                Icon(Icons.Rounded.Add, null, Modifier.size(18.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("הוסף קיצור")
+            }
+            TextButton({ confirmReset = true }) { Text("שחזר ברירת מחדל") }
+        }
+    }
+
+    if (adding) {
+        QuickPresetDialog(
+            initial = QuickPreset(id = 0, kind = QuickPresetKind.RELATIVE, minutes = 15),
+            onDismiss = { adding = false },
+            onConfirm = { vm.addPreset(it); adding = false },
+        )
+    }
+    editing?.let { current ->
+        QuickPresetDialog(
+            initial = current,
+            onDismiss = { editing = null },
+            onConfirm = { vm.updatePreset(it); editing = null },
+        )
+    }
+    if (confirmReset) {
+        AlertDialog(
+            onDismissRequest = { confirmReset = false },
+            title = { Text("לשחזר את הקיצורים?") },
+            text = { Text("הקיצורים שהגדרת יוחלפו ברשימת ברירת המחדל.") },
+            confirmButton = {
+                TextButton({ vm.resetQuickPresets(); confirmReset = false }) {
+                    Text("שחזר", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = { TextButton({ confirmReset = false }) { Text("ביטול") } },
+        )
+    }
+}
+
+@Composable
+private fun QuickCountRow(label: String, value: Int, max: Int, onChange: (Int) -> Unit) {
+    Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(label, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+        IconButton({ onChange((value - 1).coerceAtLeast(0)) }, Modifier.size(32.dp), enabled = value > 0) {
+            Icon(Icons.Rounded.Remove, "פחות", Modifier.size(18.dp))
+        }
+        Text("$value", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+        IconButton({ onChange((value + 1).coerceAtMost(max)) }, Modifier.size(32.dp), enabled = value < max) {
+            Icon(Icons.Rounded.Add, "עוד", Modifier.size(18.dp))
+        }
+    }
+}
+
+@Composable
+private fun QuickPresetRow(
+    preset: QuickPreset,
+    isFirst: Boolean,
+    isLast: Boolean,
+    visibleInApp: Boolean,
+    visibleInWidget: Boolean,
+    onToggleApp: (Boolean) -> Unit,
+    onToggleWidget: (Boolean) -> Unit,
+    onMove: (Boolean) -> Unit,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                presetLabel(preset),
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier.weight(1f).clickable(onClick = onEdit),
+            )
+            IconButton({ onMove(true) }, Modifier.size(32.dp), enabled = !isFirst) {
+                Icon(Icons.Rounded.KeyboardArrowUp, "הזז למעלה", Modifier.size(18.dp))
+            }
+            IconButton({ onMove(false) }, Modifier.size(32.dp), enabled = !isLast) {
+                Icon(Icons.Rounded.KeyboardArrowDown, "הזז למטה", Modifier.size(18.dp))
+            }
+            IconButton(onEdit, Modifier.size(32.dp)) {
+                Icon(Icons.Rounded.Edit, "ערוך", Modifier.size(18.dp))
+            }
+            IconButton(onDelete, Modifier.size(32.dp)) {
+                Icon(Icons.Rounded.DeleteOutline, "מחק", Modifier.size(18.dp),
+                    tint = MaterialTheme.colorScheme.error)
+            }
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            QuickVisibilityTick("מסך ראשי", preset.showInApp, visibleInApp, onToggleApp)
+            Spacer(Modifier.width(12.dp))
+            QuickVisibilityTick("ווידג'ט", preset.showInWidget, visibleInWidget, onToggleWidget)
+        }
+    }
+}
+
+/**
+ * One surface's tick, plus whether the preset actually makes the cut there.
+ *
+ * Ticked-but-not-shown is a real state (the count above is smaller than this preset's
+ * position), and without saying so the count looks like it is ignoring the ticks.
+ */
+@Composable
+private fun QuickVisibilityTick(
+    label: String,
+    checked: Boolean,
+    visible: Boolean,
+    onChange: (Boolean) -> Unit,
+) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Checkbox(checked, onChange, Modifier.size(28.dp))
+        Spacer(Modifier.width(4.dp))
+        Text(
+            if (checked && !visible) "$label (מעבר למכסה)" else label,
+            style = MaterialTheme.typography.labelSmall,
+            color = if (checked && !visible) MaterialTheme.colorScheme.error
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+/** Add or edit one shortcut: pick a kind, then the one value that kind needs. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun QuickPresetDialog(
+    initial: QuickPreset,
+    onDismiss: () -> Unit,
+    onConfirm: (QuickPreset) -> Unit,
+) {
+    var kind by remember { mutableStateOf(initial.kind) }
+    var minutes by remember { mutableStateOf(initial.minutes.toString()) }
+    var hour by remember { mutableStateOf(initial.hour.toString()) }
+    var minute by remember { mutableStateOf(initial.minute.toString()) }
+
+    val minutesValue = minutes.toIntOrNull()
+    val hourValue = hour.toIntOrNull()
+    val minuteValue = minute.toIntOrNull()
+    val valid = when (kind) {
+        QuickPresetKind.RELATIVE ->
+            minutesValue != null && minutesValue in QuickPreset.MIN_MINUTES..QuickPreset.MAX_MINUTES
+        QuickPresetKind.TIME_OF_DAY ->
+            hourValue != null && hourValue in 0..23 && minuteValue != null && minuteValue in 0..59
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (initial.id == 0L) "קיצור חדש" else "עריכת קיצור") },
+        text = {
+            Column {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(
+                        selected = kind == QuickPresetKind.RELATIVE,
+                        onClick = { kind = QuickPresetKind.RELATIVE },
+                        label = { Text("עוד כך וכך זמן") },
+                    )
+                    FilterChip(
+                        selected = kind == QuickPresetKind.TIME_OF_DAY,
+                        onClick = { kind = QuickPresetKind.TIME_OF_DAY },
+                        label = { Text("בשעה מסוימת") },
+                    )
+                }
+                Spacer(Modifier.height(12.dp))
+                if (kind == QuickPresetKind.RELATIVE) {
+                    OutlinedTextField(
+                        value = minutes,
+                        onValueChange = { minutes = it.filter(Char::isDigit).take(5) },
+                        label = { Text("דקות מרגע הלחיצה") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        singleLine = true,
+                        isError = minutes.isNotEmpty() && !valid,
+                        supportingText = { Text("בין ${QuickPreset.MIN_MINUTES} ל-${QuickPreset.MAX_MINUTES} דקות") },
+                    )
+                } else {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(
+                            value = hour,
+                            onValueChange = { hour = it.filter(Char::isDigit).take(2) },
+                            label = { Text("שעה") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            singleLine = true,
+                            isError = hour.isNotEmpty() && (hourValue == null || hourValue !in 0..23),
+                            modifier = Modifier.weight(1f),
+                        )
+                        OutlinedTextField(
+                            value = minute,
+                            onValueChange = { minute = it.filter(Char::isDigit).take(2) },
+                            label = { Text("דקות") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            singleLine = true,
+                            isError = minute.isNotEmpty() && (minuteValue == null || minuteValue !in 0..59),
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                    Spacer(Modifier.height(6.dp))
+                    // Said outright, because it is the one thing about this kind that is
+                    // not obvious from two number fields.
+                    Text(
+                        "הקיצור יתזמן את הפעם הבאה שהשעה הזו מגיעה — היום אם היא עוד לפנינו, אחרת מחר.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = valid,
+                onClick = {
+                    onConfirm(
+                        initial.copy(
+                            kind = kind,
+                            minutes = minutesValue ?: initial.minutes,
+                            hour = hourValue ?: initial.hour,
+                            minute = minuteValue ?: initial.minute,
+                        ).sanitized(),
+                    )
+                },
+            ) { Text("שמור") }
+        },
+        dismissButton = { TextButton(onDismiss) { Text("ביטול") } },
     )
 }

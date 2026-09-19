@@ -34,12 +34,13 @@ import com.smartring.app.presentation.whatsnew.WhatsNewViewModel
 import com.smartring.app.presentation.settings.SettingsViewModel
 import androidx.activity.compose.BackHandler
 import com.smartring.app.util.AlarmSection
+import com.smartring.app.util.QuickPreset
+import com.smartring.app.util.QuickPresetKind
+import com.smartring.app.util.presetLabel
 import com.smartring.app.util.ForeignAlarm
 import com.smartring.app.util.SEARCH_VISIBLE_FROM
 import com.smartring.app.util.buildAlarmGroups
 import com.smartring.app.util.filterAlarms
-import com.smartring.app.util.quickAlarmInHours
-import com.smartring.app.util.quickAlarmTomorrowAt
 import com.smartring.app.util.ForeignAlarms
 import com.smartring.app.util.ReliabilityChecks
 import com.smartring.app.util.foreignAlarmWarning
@@ -57,7 +58,7 @@ fun AlarmListScreen(onAddAlarm: ()->Unit, onEditAlarm: (Long)->Unit,
     val undoable by vm.undoableDelete.collectAsStateWithLifecycle()
     var showControls by remember { mutableStateOf(false) }
     val snackbarHost = remember { SnackbarHostState() }
-    val defaults by hiltViewModel<SettingsViewModel>().defaults.collectAsStateWithLifecycle()
+    val quickPresets by vm.quickPresets.collectAsStateWithLifecycle()
     var query by rememberSaveable { mutableStateOf("") }
 
     // "היום" is a claim about the current date, so it has to be re-evaluated when the
@@ -188,7 +189,9 @@ fun AlarmListScreen(onAddAlarm: ()->Unit, onEditAlarm: (Long)->Unit,
                 if (foreignAlarm != null) item { ForeignAlarmBanner(foreignAlarm) }
                 // Hidden during selection: a shortcut that creates a new alarm while the
                 // user is picking existing ones to delete is noise at best.
-                if (!inSelection) item { QuickCreateRow(defaults.hour, defaults.minute, vm::createQuickAlarm) }
+                if (!inSelection && quickPresets.isNotEmpty()) {
+                    item { QuickCreateRow(quickPresets, vm::createFromPreset, onOpenSettings) }
+                }
                 // Only past the point where scrolling costs more than typing. Below it a
                 // field that costs a tap and a keyboard to filter rows already visible on
                 // one screen is a control that makes the screen worse.
@@ -519,30 +522,44 @@ private fun AlarmCardItem(
  * next day" on its card — rather than something that quietly repeats tomorrow.
  */
 @Composable
-private fun QuickCreateRow(defaultHour: Int, defaultMinute: Int, onCreate: (Long) -> Unit) {
+private fun QuickCreateRow(
+    presets: List<QuickPreset>,
+    onCreate: (QuickPreset) -> Unit,
+    onOpenSettings: () -> Unit,
+) {
     Column(Modifier.fillMaxWidth()) {
-        Text("יצירה מהירה", style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.primary)
-        Spacer(Modifier.height(6.dp))
-        // Scrollable rather than wrapped: three chips plus their icons overflow a
-        // 320dp-wide screen, and a chip clipped off the edge is a control the user
-        // cannot reach at all. Scrolling keeps every one of them reachable at any width.
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("יצירה מהירה", style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.weight(1f))
+            // The way to the editor for these chips, from the one place someone is
+            // looking at them and thinking "not that one". Buried in Settings it would be
+            // a feature nobody finds.
+            TextButton(onOpenSettings, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)) {
+                Text("ערוך", style = MaterialTheme.typography.labelSmall)
+            }
+        }
+        Spacer(Modifier.height(2.dp))
+        // Scrollable rather than wrapped: the chips are user-configured now, so the row's
+        // width is not something this layout can predict at all, and a chip clipped off
+        // the edge is a control nobody can reach.
         Row(
             Modifier.horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            listOf(1, 8).forEach { hours ->
+            presets.forEach { preset ->
                 AssistChip(
-                    onClick = { onCreate(quickAlarmInHours(hours)) },
-                    label = { Text(if (hours == 1) "עוד שעה" else "עוד $hours שעות") },
-                    leadingIcon = { Icon(Icons.Rounded.Timer, null, Modifier.size(16.dp)) },
+                    onClick = { onCreate(preset) },
+                    label = { Text(presetLabel(preset)) },
+                    leadingIcon = {
+                        Icon(
+                            if (preset.kind == QuickPresetKind.RELATIVE) Icons.Rounded.Timer
+                            else Icons.Rounded.Event,
+                            null, Modifier.size(16.dp),
+                        )
+                    },
                 )
             }
-            AssistChip(
-                onClick = { onCreate(quickAlarmTomorrowAt(defaultHour, defaultMinute)) },
-                label = { Text("מחר %02d:%02d".format(defaultHour, defaultMinute)) },
-                leadingIcon = { Icon(Icons.Rounded.Event, null, Modifier.size(16.dp)) },
-            )
         }
     }
 }

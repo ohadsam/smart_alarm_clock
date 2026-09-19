@@ -7,6 +7,8 @@ import androidx.glance.appwidget.testing.unit.runGlanceAppWidgetUnitTest
 import androidx.test.core.app.ApplicationProvider
 import android.content.Context
 import com.smartring.app.domain.model.Alarm
+import com.smartring.app.util.QuickPreset
+import com.smartring.app.util.QuickPresetKind
 import com.smartring.app.util.WidgetAlarmEntry
 import java.util.Calendar
 import java.util.TimeZone
@@ -61,6 +63,9 @@ class WidgetRenderTest {
 
     private fun state(vararg entries: WidgetAlarmEntry) =
         WidgetUiState(rows = entries.toList(), nowMillis = now)
+
+    private fun preset(id: Long, minutes: Int) =
+        QuickPreset(id, QuickPresetKind.RELATIVE, minutes = minutes)
 
     // ── The list bodies render every alarm, not the first few ──────────────
 
@@ -212,4 +217,138 @@ class WidgetRenderTest {
         }
         onNode(hasTestTag(WidgetTags.ADD)).assertExists()
     }
+
+    // ── The quick-actions panel ────────────────────────────────────────────
+
+    @Test
+    fun `the list bodies offer a way into the quick-actions panel`() =
+        runGlanceAppWidgetUnitTest {
+            provideComposable {
+                ListBody(ctx, state(entry(1, "בדיקה", at(2026, 9, 19, 7, 0))), palette)
+            }
+            onNode(hasTestTag(WidgetTags.PANEL_TOGGLE)).assertExists()
+        }
+
+    @Test
+    fun `an open panel shows a row per configured preset`() = runGlanceAppWidgetUnitTest {
+        val presets = listOf(preset(1, 10), preset(2, 30), preset(3, 60))
+        provideComposable {
+            ListBody(
+                ctx,
+                state(entry(1, "בדיקה", at(2026, 9, 19, 7, 0)))
+                    .copy(presets = presets, panelOpen = true),
+                palette,
+            )
+        }
+
+        onNode(hasTestTag(WidgetTags.PANEL)).assertExists()
+        presets.forEach { onNode(hasTestTag(WidgetTags.preset(it.id))).assertExists() }
+    }
+
+    /**
+     * A panel is a mode. A few cells of home screen cannot show the alarm list and the
+     * panel at once without showing neither properly, so the list stands down.
+     */
+    @Test
+    fun `an open panel replaces the alarm list rather than sitting above it`() =
+        runGlanceAppWidgetUnitTest {
+            provideComposable {
+                ListBody(
+                    ctx,
+                    state(entry(1, "בדיקה", at(2026, 9, 19, 7, 0)))
+                        .copy(presets = listOf(preset(1, 10)), panelOpen = true),
+                    palette,
+                )
+            }
+
+            onNode(hasTestTag(WidgetTags.PANEL)).assertExists()
+            onNode(hasTestTag(WidgetTags.ROWS)).assertDoesNotExist()
+            onNode(hasTestTag(WidgetTags.row(1))).assertDoesNotExist()
+        }
+
+    @Test
+    fun `a closed panel shows the list and no panel`() = runGlanceAppWidgetUnitTest {
+        provideComposable {
+            ListBody(
+                ctx,
+                state(entry(1, "בדיקה", at(2026, 9, 19, 7, 0))).copy(presets = listOf(preset(1, 10))),
+                palette,
+            )
+        }
+
+        onNode(hasTestTag(WidgetTags.ROWS)).assertExists()
+        onNode(hasTestTag(WidgetTags.PANEL)).assertDoesNotExist()
+    }
+
+    @Test
+    fun `the panel carries the bulk actions alongside the presets`() =
+        runGlanceAppWidgetUnitTest {
+            provideComposable {
+                ListBody(
+                    ctx,
+                    state(entry(1, "בדיקה", at(2026, 9, 19, 7, 0)))
+                        .copy(presets = listOf(preset(1, 10)), panelOpen = true),
+                    palette,
+                )
+            }
+
+            onNode(hasTestTag(WidgetTags.BULK_ENABLE)).assertExists()
+            onNode(hasTestTag(WidgetTags.BULK_FREEZE)).assertExists()
+        }
+
+    /** The label has to say which way the button goes, or it is a coin flip. */
+    @Test
+    fun `the bulk row offers off when something is armed and on when nothing is`() =
+        runGlanceAppWidgetUnitTest {
+            provideComposable {
+                ListBody(
+                    ctx,
+                    state(entry(1, "בדיקה", at(2026, 9, 19, 7, 0))).copy(panelOpen = true),
+                    palette,
+                )
+            }
+            onNode(hasTestTag(WidgetTags.BULK_ENABLE)).assertHasText("כבה את כל השעמורים")
+        }
+
+    @Test
+    fun `the bulk row offers on when every alarm is switched off`() =
+        runGlanceAppWidgetUnitTest {
+            provideComposable {
+                ListBody(
+                    ctx,
+                    state(entry(1, "כבוי", fireAt = null, enabled = false)).copy(panelOpen = true),
+                    palette,
+                )
+            }
+            onNode(hasTestTag(WidgetTags.BULK_ENABLE)).assertHasText("הפעל את כל השעמורים")
+        }
+
+    @Test
+    fun `the freeze row offers to undo a freeze once anything is frozen`() =
+        runGlanceAppWidgetUnitTest {
+            val frozen = WidgetAlarmEntry(
+                alarm = Alarm(id = 1, name = "מוקפא", isFrozen = true),
+                fireAt = null,
+                isSnoozed = false,
+            )
+            provideComposable {
+                ListBody(ctx, state(frozen).copy(panelOpen = true), palette)
+            }
+            onNode(hasTestTag(WidgetTags.BULK_FREEZE)).assertHasText("בטל הקפאה")
+        }
+
+    @Test
+    fun `an open panel with no presets configured still offers the bulk actions`() =
+        runGlanceAppWidgetUnitTest {
+            provideComposable {
+                ListBody(
+                    ctx,
+                    state(entry(1, "בדיקה", at(2026, 9, 19, 7, 0))).copy(panelOpen = true),
+                    palette,
+                )
+            }
+
+            onNode(hasTestTag(WidgetTags.PANEL)).assertExists()
+            onNode(hasTestTag(WidgetTags.BULK_ENABLE)).assertExists()
+        }
 }

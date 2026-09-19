@@ -3,12 +3,15 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.smartring.app.data.repository.AlarmDefaultsRepository
 import com.smartring.app.data.repository.AlarmRepository
+import com.smartring.app.data.repository.QuickPresetsRepository
 import com.smartring.app.domain.model.Alarm
-import com.smartring.app.domain.model.AlarmRing
 import com.smartring.app.util.AlarmRow
+import com.smartring.app.util.QuickPreset
+import com.smartring.app.util.buildQuickAlarm
+import com.smartring.app.util.presetsForApp
+import com.smartring.app.util.quickPresetFireAt
 import com.smartring.app.util.AlarmScheduler
 import com.smartring.app.util.AppLogger
-import com.smartring.app.util.GENERIC_ALARM_NAME
 import com.smartring.app.util.formatDayAndTime
 import com.smartring.app.util.nextOccasionalDate
 import java.util.Calendar
@@ -36,6 +39,7 @@ data class AlarmListUiState(
 class AlarmListViewModel @Inject constructor(
     private val repository: AlarmRepository,
     private val defaultsRepository: AlarmDefaultsRepository,
+    private val quickPresetsRepository: QuickPresetsRepository,
     private val scheduler: AlarmScheduler,
     private val appLogger: AppLogger,
 ) : ViewModel() {
@@ -48,6 +52,17 @@ class AlarmListViewModel @Inject constructor(
             )
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), AlarmListUiState())
+
+    /**
+     * The shortcut chips the main screen should show, already filtered and capped.
+     *
+     * Exposed as its own flow rather than folded into [uiState]: the chips change when the
+     * user edits them in Settings, which has nothing to do with the alarms table, and
+     * putting the two in one state object would re-map every alarm row on a config change.
+     */
+    val quickPresets = quickPresetsRepository.config
+        .map { presetsForApp(it.presets, it.limits) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     fun toggle(alarm: Alarm, enabled: Boolean) = viewModelScope.launch {
         repository.setEnabled(alarm.id, enabled)
@@ -139,31 +154,11 @@ class AlarmListViewModel @Inject constructor(
      * time comes from the defaults the user set in Settings, so a quick alarm rings the
      * way their alarms ring.
      */
+    /** Creates the alarm one shortcut chip stands for. */
+    fun createFromPreset(preset: QuickPreset) = createQuickAlarm(quickPresetFireAt(preset))
+
     fun createQuickAlarm(at: Long) = viewModelScope.launch {
-        val d = defaultsRepository.defaults.first()
-        val cal = Calendar.getInstance().apply { timeInMillis = at }
-        val alarm = Alarm(
-            id = 0L,
-            name = GENERIC_ALARM_NAME,
-            hour = cal.get(Calendar.HOUR_OF_DAY),
-            minute = cal.get(Calendar.MINUTE),
-            // A specific datetime rather than a time-of-day, which is what makes it an
-            // ad-hoc alarm: it rings once, and the card offers "schedule for the next day"
-            // afterwards rather than silently repeating tomorrow.
-            specificDateTime = at,
-            ringDurationSeconds = d.ringDurationSeconds,
-            rings = listOf(AlarmRing(volumePercent = d.ringVolumePercent)),
-            snoozeEnabled = d.snoozeEnabled,
-            snoozeMinutes = d.snoozeMinutes,
-            snoozeMaxCount = d.snoozeMaxCount,
-            vibrationMode = d.vibrationMode,
-            vibrationOnlySeconds = d.vibrationOnlySeconds,
-            crescendoEnabled = d.crescendoEnabled,
-            crescendoStartVolume = d.crescendoStartVolume,
-            crescendoStepSeconds = d.crescendoStepSeconds,
-            crescendoStepPercent = d.crescendoStepPercent,
-            isShabbatMode = d.isShabbatMode,
-        )
+        val alarm = buildQuickAlarm(at, defaultsRepository.defaults.first())
         val id = repository.saveAlarm(alarm)
         scheduler.schedule(alarm.copy(id = id))
         appLogger.log("AlarmList", "שעמור מהיר נוצר ל-${formatDayAndTime(at)}")

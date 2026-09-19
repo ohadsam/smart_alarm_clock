@@ -6,6 +6,11 @@ import androidx.datastore.preferences.preferencesDataStore
 import androidx.lifecycle.ViewModel
 import com.smartring.app.data.repository.AlarmDefaults
 import com.smartring.app.data.repository.AlarmDefaultsRepository
+import com.smartring.app.data.repository.QuickPresetsConfig
+import com.smartring.app.data.repository.QuickPresetsRepository
+import com.smartring.app.util.QuickPreset
+import com.smartring.app.util.QuickPresetLimits
+import com.smartring.app.util.nextPresetId
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -30,7 +35,48 @@ data class SettingsUiState(
 class SettingsViewModel @Inject constructor(
     @ApplicationContext private val ctx: Context,
     private val alarmDefaults: AlarmDefaultsRepository,
+    private val quickPresets: QuickPresetsRepository,
 ) : ViewModel() {
+
+    /** The one-tap shortcut chips, and how many of them each surface shows. */
+    val quickConfig = quickPresets.config
+        .stateIn(viewModelScope, SharingStarted.Eagerly, QuickPresetsConfig())
+
+    fun addPreset(preset: QuickPreset) = viewModelScope.launch {
+        quickPresets.updatePresets { it + preset.copy(id = nextPresetId(it)).sanitized() }
+    }
+
+    /** Replaces one preset in place, keeping its position in the row. */
+    fun updatePreset(preset: QuickPreset) = viewModelScope.launch {
+        quickPresets.updatePresets { list ->
+            list.map { if (it.id == preset.id) preset.sanitized() else it }
+        }
+    }
+
+    fun deletePreset(id: Long) = viewModelScope.launch {
+        quickPresets.updatePresets { list -> list.filterNot { it.id == id } }
+    }
+
+    /**
+     * Moves a preset one place up or down.
+     *
+     * Order is not decoration here: it is half of "which chips are shown", because each
+     * surface takes the first N that are marked for it. Moving a preset up is how the
+     * user chooses it over another without unticking anything.
+     */
+    fun movePreset(id: Long, up: Boolean) = viewModelScope.launch {
+        quickPresets.updatePresets { list ->
+            val i = list.indexOfFirst { it.id == id }
+            val j = if (up) i - 1 else i + 1
+            if (i < 0 || j !in list.indices) list
+            else list.toMutableList().apply { add(j, removeAt(i)) }
+        }
+    }
+
+    fun updateQuickLimits(transform: (QuickPresetLimits) -> QuickPresetLimits) =
+        viewModelScope.launch { quickPresets.updateLimits(transform) }
+
+    fun resetQuickPresets() = viewModelScope.launch { quickPresets.resetAll() }
 
     /** What a brand-new alarm starts out as; edited from the Settings screen. */
     val defaults = alarmDefaults.defaults

@@ -74,35 +74,3 @@ fun nextOccasionalDate(
 /** "היום", "מחר", or a date — for the button that advances an ad-hoc alarm by a day. */
 fun occasionalDayLabel(targetMillis: Long, nowMillis: Long = System.currentTimeMillis()): String =
     formatDayAndTime(targetMillis, nowMillis)
-
-/**
- * "In N hours from now", rounded down to the minute.
- *
- * Seconds zeroed so the alarm rings on a whole minute like every other alarm in the app —
- * an alarm at 22:47:33 is indistinguishable from a bug, and the countdown everywhere else
- * is minute-granular anyway.
- */
-fun quickAlarmInHours(hours: Int, nowMillis: Long = System.currentTimeMillis()): Long =
-    Calendar.getInstance().apply {
-        timeInMillis = nowMillis
-        add(Calendar.HOUR_OF_DAY, hours)
-        set(Calendar.SECOND, 0)
-        set(Calendar.MILLISECOND, 0)
-    }.timeInMillis
-
-/**
- * Tomorrow at [hour]:[minute] — the "same time tomorrow" shortcut.
- *
- * Always tomorrow, never today, even when that time has not yet passed. The chip says
- * tomorrow, so it must mean tomorrow: a shortcut that sometimes lands today would be a
- * shortcut nobody could trust at a glance, which defeats the point of a one-tap control.
- */
-fun quickAlarmTomorrowAt(hour: Int, minute: Int, nowMillis: Long = System.currentTimeMillis()): Long =
-    Calendar.getInstance().apply {
-        timeInMillis = nowMillis
-        add(Calendar.DAY_OF_YEAR, 1)
-        set(Calendar.HOUR_OF_DAY, hour)
-        set(Calendar.MINUTE, minute)
-        set(Calendar.SECOND, 0)
-        set(Calendar.MILLISECOND, 0)
-    }.timeInMillis

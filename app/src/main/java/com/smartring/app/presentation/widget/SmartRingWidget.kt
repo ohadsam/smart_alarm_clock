@@ -20,6 +20,9 @@ import androidx.glance.appwidget.action.ActionCallback
 import androidx.glance.appwidget.action.actionRunCallback
 import androidx.glance.appwidget.*
 import androidx.glance.appwidget.action.actionStartActivity
+import androidx.glance.appwidget.state.updateAppWidgetState
+import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.glance.appwidget.lazy.LazyColumn
 import androidx.glance.appwidget.lazy.items
 import androidx.glance.layout.*
@@ -29,13 +32,23 @@ import androidx.glance.text.*
 import androidx.glance.unit.ColorProvider
 import com.smartring.app.MainActivity
 import com.smartring.app.R
+import com.smartring.app.data.repository.AlarmDefaultsRepository
 import com.smartring.app.data.repository.AlarmRepository
+import com.smartring.app.data.repository.QuickPresetsRepository
 import com.smartring.app.util.AlarmScheduler
+import com.smartring.app.util.AppLogger
+import com.smartring.app.util.QuickPreset
+import com.smartring.app.util.buildQuickAlarm
+import com.smartring.app.util.formatDayAndTime
+import com.smartring.app.util.presetLabel
+import com.smartring.app.util.presetsForWidget
+import com.smartring.app.util.quickPresetFireAt
 import com.smartring.app.util.WidgetAlarmEntry
 import com.smartring.app.util.buildWidgetRows
 import com.smartring.app.util.nextOccasionalDate
 import com.smartring.app.util.widgetDayLabel
 import java.util.Calendar
+import kotlinx.coroutines.flow.first
 import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
 import dagger.hilt.android.EntryPointAccessors
@@ -150,6 +163,12 @@ internal object WidgetTags {
     /** The row's own day label. Tagged because the hero line prints the same day text,
      *  so matching on the words alone is ambiguous by construction. */
     fun day(id: Long) = "widget-day-$id"
+
+    const val PANEL = "widget-panel"
+    const val PANEL_TOGGLE = "widget-panel-toggle"
+    const val BULK_ENABLE = "widget-bulk-enable"
+    const val BULK_FREEZE = "widget-bulk-freeze"
+    fun preset(id: Long) = "widget-preset-$id"
 }
 
 /**
@@ -232,6 +251,9 @@ private fun Countdown(ctx: Context, fireAt: Long, sizeSp: Float, color: Color) {
 interface WidgetEntryPoint {
     fun alarmRepository(): AlarmRepository
     fun alarmScheduler(): AlarmScheduler
+    fun alarmDefaultsRepository(): AlarmDefaultsRepository
+    fun quickPresetsRepository(): QuickPresetsRepository
+    fun appLogger(): AppLogger
 }
 
 /**
@@ -247,10 +269,15 @@ interface WidgetEntryPoint {
 internal data class WidgetUiState(
     val rows: List<WidgetAlarmEntry>,
     val nowMillis: Long,
+    /** The shortcut chips this surface should offer, already filtered and capped. */
+    val presets: List<QuickPreset> = emptyList(),
+    /** Whether the quick-actions panel is open, per widget instance. */
+    val panelOpen: Boolean = false,
 ) {
     val next: WidgetAlarmEntry? get() = rows.firstOrNull()?.takeIf { it.isArmed }
     val armedCount: Int get() = rows.count { it.isArmed }
     val hasAnyAlarms: Boolean get() = rows.isNotEmpty()
+    val anyFrozen: Boolean get() = rows.any { it.alarm.isFrozen }
 }
 
 abstract class SmartRingBaseWidget : GlanceAppWidget() {
@@ -279,6 +306,7 @@ abstract class SmartRingBaseWidget : GlanceAppWidget() {
     internal suspend fun widgetState(ctx: Context): WidgetUiState {
         val ep = EntryPointAccessors.fromApplication(ctx, WidgetEntryPoint::class.java)
         val scheduler = ep.alarmScheduler()
+        val quick = ep.quickPresetsRepository().config.first()
         return WidgetUiState(
             rows = buildWidgetRows(
                 alarms     = ep.alarmRepository().getAllAlarms(),
@@ -286,6 +314,7 @@ abstract class SmartRingBaseWidget : GlanceAppWidget() {
                 nextFireAt = { scheduler.nextFireTime(it) },
             ),
             nowMillis = System.currentTimeMillis(),
+            presets = presetsForWidget(quick.presets, quick.limits),
         )
     }
 }
@@ -310,7 +339,13 @@ class SmartRingWidgetWide : SmartRingBaseWidget() {
     override suspend fun provideGlance(ctx: Context, id: GlanceId) {
         val state = widgetState(ctx)
         val p = paletteFor(ctx)
-        provideContent { WidgetFrame { ListBody(ctx, state, p) } }
+        // currentState() has to be read inside provideContent — it is composition-scoped,
+        // and it is per widget instance, which is the point: one widget's open panel must
+        // not open every other widget's.
+        provideContent {
+            val open = currentState<Preferences>()[PANEL_OPEN_KEY] ?: false
+            WidgetFrame { ListBody(ctx, state.copy(panelOpen = open), p) }
+        }
     }
 }
 
@@ -318,9 +353,15 @@ class SmartRingWidgetLarge : SmartRingBaseWidget() {
     override suspend fun provideGlance(ctx: Context, id: GlanceId) {
         val state = widgetState(ctx)
         val p = paletteFor(ctx)
-        provideContent { WidgetFrame { ListBody(ctx, state, p) } }
+        provideContent {
+            val open = currentState<Preferences>()[PANEL_OPEN_KEY] ?: false
+            WidgetFrame { ListBody(ctx, state.copy(panelOpen = open), p) }
+        }
     }
 }
+
+/** Per-widget-instance flag for the quick-actions panel. */
+internal val PANEL_OPEN_KEY = booleanPreferencesKey("smartring_widget_panel_open")
 
 // ── Bodies ───────────────────────────────────────────────────────────────────
 
@@ -410,10 +451,12 @@ internal fun MediumBody(ctx: Context, state: WidgetUiState, p: WidgetPalette) {
 @Composable
 internal fun ListBody(ctx: Context, state: WidgetUiState, p: WidgetPalette) {
     Column(GlanceModifier.fillMaxSize().padding(horizontal = 10.dp, vertical = 8.dp)) {
-        WidgetHeader(ctx, state, p)
+        WidgetHeader(ctx, state, p, showPanelToggle = true)
         val next = state.next
         val fireAt = next?.fireAt
-        if (next != null && fireAt != null) {
+        // The hero line stands down while the panel is open: the panel is a mode, and a
+        // few cells of home screen cannot show both without showing neither properly.
+        if (!state.panelOpen && next != null && fireAt != null) {
             Row(GlanceModifier.fillMaxWidth().padding(bottom = 6.dp),
                 verticalAlignment = Alignment.CenterVertically) {
                 Text("הבא ",
@@ -427,15 +470,125 @@ internal fun ListBody(ctx: Context, state: WidgetUiState, p: WidgetPalette) {
                 Countdown(ctx, fireAt, 10f, p.accentBlue)
             }
         }
-        if (state.rows.isEmpty()) {
-            WidgetEmptyState(ctx, p, hasAnyAlarms = false)
-        } else {
-            LazyColumn(GlanceModifier.fillMaxSize().semantics { testTag = WidgetTags.ROWS }) {
+        when {
+            state.panelOpen -> QuickActionsPanel(state, p)
+            state.rows.isEmpty() -> WidgetEmptyState(ctx, p, hasAnyAlarms = false)
+            else -> LazyColumn(GlanceModifier.fillMaxSize().semantics { testTag = WidgetTags.ROWS }) {
                 items(state.rows, itemId = { it.alarm.id }) { entry ->
                     WidgetAlarmRow(ctx, entry, p, state.nowMillis)
                 }
             }
         }
+    }
+}
+
+/**
+ * The widget's quick-actions panel.
+ *
+ * Replaces the alarm list rather than sitting above it, because a widget is a few cells:
+ * a panel that pushed the list down would leave one row of each and be useless as both.
+ * It is a mode, and the same button that opens it closes it.
+ *
+ * What is in it, and why those:
+ * - **The shortcut chips**, configured in Settings exactly like the app's — the point of
+ *   the feature. Creating an alarm from a home screen without opening anything is the
+ *   thing a widget is uniquely good at.
+ * - **כבה הכל / הפעל הכל** and **הקפא הכל / בטל הקפאה**, which are the four global
+ *   operations the app already exposes behind "שליטה כללית". They are what someone
+ *   reaches for on a night away or a sick day, and that sheet is three taps deep inside
+ *   an app you have to find first.
+ *
+ * Deliberately *not* here: "snooze the next alarm" and "skip the next occurrence". Both
+ * read as obvious quick actions and neither has an honest implementation today — a snooze
+ * belongs to a ring that is happening, and skipping one occurrence has no representation
+ * in the data model (`occurrencesFired` counts rings that happened, not ones waved off).
+ * Inventing either here would mean a button that half-works on a surface with no room to
+ * explain itself.
+ */
+@Composable
+private fun QuickActionsPanel(state: WidgetUiState, p: WidgetPalette) {
+    LazyColumn(GlanceModifier.fillMaxSize().semantics { testTag = WidgetTags.PANEL }) {
+        items(state.presets, itemId = { it.id }) { preset ->
+            PanelRow(
+                label = presetLabel(preset, state.nowMillis),
+                iconRes = R.drawable.ic_widget_add,
+                tint = p.accentGreen,
+                tag = WidgetTags.preset(preset.id),
+                palette = p,
+                action = actionRunCallback<CreateQuickAlarmAction>(
+                    actionParametersOf(CreateQuickAlarmAction.presetIdKey to preset.id),
+                ),
+            )
+        }
+        item {
+            PanelRow(
+                label = if (state.armedCount > 0) "כבה את כל השעמורים" else "הפעל את כל השעמורים",
+                iconRes = if (state.armedCount > 0) R.drawable.ic_widget_alarm_off
+                          else R.drawable.ic_widget_alarm_on,
+                tint = p.accentBlue,
+                tag = WidgetTags.BULK_ENABLE,
+                palette = p,
+                action = actionRunCallback<BulkAlarmAction>(
+                    actionParametersOf(
+                        BulkAlarmAction.opKey to
+                            if (state.armedCount > 0) BulkAlarmAction.OP_DISABLE_ALL
+                            else BulkAlarmAction.OP_ENABLE_ALL,
+                    ),
+                ),
+            )
+        }
+        item {
+            PanelRow(
+                // Freezing is not the same as switching off, and the widget should not
+                // pretend otherwise: a frozen alarm keeps its schedule and simply does
+                // not ring, which is what "away for a few days" wants.
+                label = if (state.anyFrozen) "בטל הקפאה" else "הקפא את כל השעמורים",
+                iconRes = R.drawable.ic_widget_snooze,
+                tint = p.textSecondary,
+                tag = WidgetTags.BULK_FREEZE,
+                palette = p,
+                action = actionRunCallback<BulkAlarmAction>(
+                    actionParametersOf(
+                        BulkAlarmAction.opKey to
+                            if (state.anyFrozen) BulkAlarmAction.OP_UNFREEZE_ALL
+                            else BulkAlarmAction.OP_FREEZE_ALL,
+                    ),
+                ),
+            )
+        }
+    }
+}
+
+/** One tappable row in the panel: an icon, a label, and the whole row as the target. */
+@Composable
+private fun PanelRow(
+    label: String,
+    iconRes: Int,
+    tint: Color,
+    tag: String,
+    palette: WidgetPalette,
+    action: androidx.glance.action.Action,
+) {
+    Row(
+        GlanceModifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 7.dp)
+            .background(ImageProvider(R.drawable.widget_row_bg))
+            .semantics { testTag = tag }
+            // The whole row, not just the icon: there is no competing target inside a
+            // panel row, so the largest tap area is simply the right one.
+            .clickable(action),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Image(
+            provider = ImageProvider(iconRes),
+            contentDescription = null,
+            modifier = GlanceModifier.size(18.dp),
+            colorFilter = ColorFilter.tint(ColorProvider(tint)),
+        )
+        Spacer(GlanceModifier.width(8.dp))
+        Text(label,
+            style = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.Medium,
+                color = ColorProvider(palette.textPrimary)),
+            maxLines = 1)
     }
 }
 
@@ -446,7 +599,12 @@ internal fun ListBody(ctx: Context, state: WidgetUiState, p: WidgetPalette) {
  * how many alarms are armed, what time it is now, and a way to add one.
  */
 @Composable
-private fun WidgetHeader(ctx: Context, state: WidgetUiState, p: WidgetPalette) {
+private fun WidgetHeader(
+    ctx: Context,
+    state: WidgetUiState,
+    p: WidgetPalette,
+    showPanelToggle: Boolean = false,
+) {
     Row(GlanceModifier.fillMaxWidth().padding(bottom = 6.dp),
         verticalAlignment = Alignment.CenterVertically) {
         Text(
@@ -460,6 +618,19 @@ private fun WidgetHeader(ctx: Context, state: WidgetUiState, p: WidgetPalette) {
             maxLines = 1,
         )
         LiveClock(ctx, 10f, p.textSecondary.toArgb())
+        if (showPanelToggle) {
+            Image(
+                provider = ImageProvider(
+                    if (state.panelOpen) R.drawable.ic_widget_close else R.drawable.ic_widget_bolt,
+                ),
+                contentDescription = if (state.panelOpen) "סגור פעולות מהירות" else "פעולות מהירות",
+                modifier = GlanceModifier.size(26.dp).padding(start = 6.dp)
+                    .semantics { testTag = WidgetTags.PANEL_TOGGLE }
+                    .clickable(actionRunCallback<ToggleQuickPanelAction>()),
+                colorFilter = ColorFilter.tint(
+                    ColorProvider(if (state.panelOpen) p.accentGreen else p.textSecondary)),
+            )
+        }
         Image(
             provider = ImageProvider(R.drawable.ic_widget_add),
             contentDescription = "הוסף שעמור",
@@ -662,6 +833,103 @@ private fun WidgetAlarmRow(
                 ColorProvider(if (entry.isArmed) palette.accentGreen else palette.textSecondary),
             ),
         )
+    }
+}
+
+/**
+ * Opens and closes the quick-actions panel, for this widget instance only.
+ *
+ * The flag lives in the widget's own Glance state rather than in a repository, because it
+ * is a property of *this placement* and nothing else: two widgets on two home screens
+ * should not open in lockstep, and the state must not survive as a stored preference that
+ * outlives the widget being removed.
+ */
+class ToggleQuickPanelAction : ActionCallback {
+    override suspend fun onAction(context: Context, glanceId: GlanceId, parameters: ActionParameters) {
+        updateAppWidgetState(context, glanceId) { prefs ->
+            prefs[PANEL_OPEN_KEY] = !(prefs[PANEL_OPEN_KEY] ?: false)
+        }
+        refreshAllWidgets(context)
+    }
+}
+
+/**
+ * Creates the alarm one shortcut chip stands for, straight from the home screen.
+ *
+ * Goes through [buildQuickAlarm] — the same function the app's own chips use — so an alarm
+ * created here is byte-for-byte the one created there. Two copies of "what a quick alarm
+ * is" is exactly how the two surfaces start disagreeing about the user's defaults.
+ *
+ * The panel closes itself afterwards. Leaving it open would hide the very row that just
+ * appeared, so the tap would look like it did nothing.
+ */
+class CreateQuickAlarmAction : ActionCallback {
+    override suspend fun onAction(context: Context, glanceId: GlanceId, parameters: ActionParameters) {
+        val presetId = parameters[presetIdKey] ?: return
+        val ep = EntryPointAccessors.fromApplication(context, WidgetEntryPoint::class.java)
+        val config = ep.quickPresetsRepository().config.first()
+        val preset = config.presets.firstOrNull { it.id == presetId } ?: return
+        val at = quickPresetFireAt(preset)
+        val alarm = buildQuickAlarm(at, ep.alarmDefaultsRepository().defaults.first())
+        val id = ep.alarmRepository().saveAlarm(alarm)
+        ep.alarmScheduler().schedule(alarm.copy(id = id))
+        ep.appLogger().log("Widget", "שעמור מהיר נוצר מהווידג'ט ל-${formatDayAndTime(at)}")
+        updateAppWidgetState(context, glanceId) { prefs -> prefs[PANEL_OPEN_KEY] = false }
+        refreshAllWidgets(context)
+    }
+
+    companion object {
+        val presetIdKey = ActionParameters.Key<Long>("smartring_widget_preset_id")
+    }
+}
+
+/**
+ * The four global operations, from the panel.
+ *
+ * Each one is the same call the app's own "שליטה כללית" sheet makes, not a widget-specific
+ * reimplementation — including the ordering that matters: `disableAll` reads the active
+ * set *before* the write that clears it, or it cancels nothing.
+ */
+class BulkAlarmAction : ActionCallback {
+    override suspend fun onAction(context: Context, glanceId: GlanceId, parameters: ActionParameters) {
+        val op = parameters[opKey] ?: return
+        val ep = EntryPointAccessors.fromApplication(context, WidgetEntryPoint::class.java)
+        val repository = ep.alarmRepository()
+        val scheduler = ep.alarmScheduler()
+        when (op) {
+            OP_DISABLE_ALL -> {
+                val armed = repository.getActiveAlarms()
+                repository.disableAll()
+                scheduler.cancelAll(armed.map { it.id })
+            }
+            OP_ENABLE_ALL -> {
+                repository.enableAll()
+                scheduler.rescheduleAll(repository.getActiveAlarms(), refreshWidgets = false)
+            }
+            // Freezing keeps the schedule and stops the ringing, which is a different
+            // thing from switching off — an alarm comes back from a freeze exactly as it
+            // was, with no re-dating and no counter to clear.
+            OP_FREEZE_ALL -> {
+                val armed = repository.getActiveAlarms()
+                repository.freezeAll()
+                scheduler.cancelAll(armed.map { it.id })
+            }
+            OP_UNFREEZE_ALL -> {
+                repository.unfreezeAll()
+                scheduler.rescheduleAll(repository.getActiveAlarms(), refreshWidgets = false)
+            }
+        }
+        ep.appLogger().log("Widget", "פעולה קבוצתית מהווידג'ט: $op")
+        updateAppWidgetState(context, glanceId) { prefs -> prefs[PANEL_OPEN_KEY] = false }
+        refreshAllWidgets(context)
+    }
+
+    companion object {
+        val opKey = ActionParameters.Key<String>("smartring_widget_bulk_op")
+        const val OP_DISABLE_ALL = "disable_all"
+        const val OP_ENABLE_ALL = "enable_all"
+        const val OP_FREEZE_ALL = "freeze_all"
+        const val OP_UNFREEZE_ALL = "unfreeze_all"
     }
 }
 

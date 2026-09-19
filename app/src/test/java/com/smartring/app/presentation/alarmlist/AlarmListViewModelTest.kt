@@ -3,9 +3,14 @@ package com.smartring.app.presentation.alarmlist
 import com.smartring.app.data.repository.AlarmDefaults
 import com.smartring.app.data.repository.AlarmDefaultsRepository
 import com.smartring.app.data.repository.AlarmRepository
+import com.smartring.app.data.repository.QuickPresetsConfig
+import com.smartring.app.data.repository.QuickPresetsRepository
 import com.smartring.app.domain.model.Alarm
 import com.smartring.app.domain.model.AlarmRing
 import com.smartring.app.util.AlarmScheduler
+import com.smartring.app.util.QuickPreset
+import com.smartring.app.util.QuickPresetKind
+import com.smartring.app.util.QuickPresetLimits
 import com.smartring.app.util.AppLogger
 import io.mockk.coEvery
 import io.mockk.every
@@ -42,9 +47,10 @@ class AlarmListViewModelTest {
     private lateinit var scheduler: AlarmScheduler
     private lateinit var appLogger: AppLogger
     private lateinit var defaultsRepository: AlarmDefaultsRepository
+    private lateinit var quickPresetsRepository: QuickPresetsRepository
 
     private fun viewModel() =
-        AlarmListViewModel(repository, defaultsRepository, scheduler, appLogger)
+        AlarmListViewModel(repository, defaultsRepository, quickPresetsRepository, scheduler, appLogger)
 
     @Before
     fun setUp() {
@@ -54,6 +60,8 @@ class AlarmListViewModelTest {
         appLogger = mockk(relaxed = true)
         defaultsRepository = mockk(relaxed = true)
         every { defaultsRepository.defaults } returns flowOf(AlarmDefaults.BUILT_IN)
+        quickPresetsRepository = mockk(relaxed = true)
+        every { quickPresetsRepository.config } returns flowOf(QuickPresetsConfig())
         stubAlarms(emptyList())
     }
 
@@ -371,4 +379,54 @@ class AlarmListViewModelTest {
             )
         }
     }
+
+    // ── Quick-create from a configured preset ──────────────────────────────
+
+    @Test
+    fun `a preset creates an alarm at the moment it stands for`() = runTest(testDispatcher) {
+        coEvery { repository.saveAlarm(any()) } returns 9L
+        val vm = viewModel()
+        val preset = QuickPreset(1, QuickPresetKind.RELATIVE, minutes = 10)
+        val before = System.currentTimeMillis()
+
+        vm.createFromPreset(preset)
+        advanceUntilIdle()
+
+        coVerify {
+            repository.saveAlarm(
+                match {
+                    // Ad-hoc shape, and within the minute the preset asked for. Exact
+                    // equality would be flaky across the second boundary; the arithmetic
+                    // itself is pinned in QuickPresetsTest.
+                    it.id == 0L && it.repeatDaysBitmask == 0 &&
+                        (it.specificDateTime ?: 0L) >= before + 9 * 60_000L &&
+                        (it.specificDateTime ?: 0L) <= before + 11 * 60_000L
+                },
+            )
+        }
+        verify { scheduler.schedule(any()) }
+    }
+
+    @Test
+    fun `the chips expose only the presets marked for the app, capped by its limit`() =
+        runTest(testDispatcher) {
+            every { quickPresetsRepository.config } returns flowOf(
+                QuickPresetsConfig(
+                    presets = listOf(
+                        QuickPreset(1, QuickPresetKind.RELATIVE, minutes = 10),
+                        QuickPreset(2, QuickPresetKind.RELATIVE, minutes = 20),
+                        QuickPreset(3, QuickPresetKind.RELATIVE, minutes = 30, showInApp = false),
+                    ),
+                    limits = QuickPresetLimits(maxInApp = 1, maxInWidget = 5),
+                ),
+            )
+            val vm = viewModel()
+
+            val seen = mutableListOf<List<QuickPreset>>()
+            val job = launch { vm.quickPresets.collect { seen += it } }
+            runCurrent()
+            job.cancel()
+
+            assertEquals(listOf(1L), seen.last().map { it.id })
+        }
 }

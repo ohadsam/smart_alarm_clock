@@ -3,6 +3,7 @@ import android.app.Application
 import androidx.hilt.work.HiltWorkerFactory
 import androidx.work.*
 import com.smartring.app.data.repository.AlarmRepository
+import com.smartring.app.data.repository.QuickPresetsRepository
 import com.smartring.app.service.LogCleanupWorker
 import com.smartring.app.service.WidgetRefreshWorker
 import com.smartring.app.util.AlarmNotifications
@@ -14,6 +15,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
@@ -23,6 +25,7 @@ class SmartRingApp : Application(), Configuration.Provider {
     @Inject lateinit var workerFactory: HiltWorkerFactory
     @Inject lateinit var alarmRepository: AlarmRepository
     @Inject lateinit var widgetRefresher: WidgetRefresher
+    @Inject lateinit var quickPresetsRepository: QuickPresetsRepository
     @Inject lateinit var appLogger: AppLogger
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -91,6 +94,25 @@ class SmartRingApp : Application(), Configuration.Provider {
             while (true) {
                 runCatching { alarmRepository.observeAlarms().collect { widgetRefresher.refresh() } }
                     .onFailure { e -> appLogger.log("SmartRingApp", "מעקב אחר שינויי שעמורים לעדכון ווידג'טים נכשל, ינסה שוב: ${e.message}") }
+                delay(5_000)
+            }
+        }
+        // The widgets also render the user's quick-create shortcuts, and those live in
+        // DataStore — a completely separate store from the alarms table. The collector
+        // above cannot see a change to them, so editing the shortcuts in Settings would
+        // leave every widget showing the old set until the next alarm mutation or the
+        // 15-minute periodic refresh. This is the same belt-and-suspenders pattern, on
+        // the other source of truth the widgets read.
+        //
+        // drop(1): DataStore replays its current value to a new collector, so without it
+        // every process start would fire a widget refresh that changes nothing.
+        appScope.launch {
+            while (true) {
+                runCatching {
+                    quickPresetsRepository.config.drop(1).collect { widgetRefresher.refresh() }
+                }.onFailure { e ->
+                    appLogger.log("SmartRingApp", "מעקב אחר שינויי קיצורים לעדכון ווידג'טים נכשל, ינסה שוב: ${e.message}")
+                }
                 delay(5_000)
             }
         }
