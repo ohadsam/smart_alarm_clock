@@ -146,6 +146,10 @@ internal object WidgetTags {
     const val ADD = "widget-add"
     fun row(id: Long) = "widget-row-$id"
     fun toggle(id: Long) = "widget-toggle-$id"
+
+    /** The row's own day label. Tagged because the hero line prints the same day text,
+     *  so matching on the words alone is ambiguous by construction. */
+    fun day(id: Long) = "widget-day-$id"
 }
 
 /**
@@ -636,6 +640,7 @@ private fun WidgetAlarmRow(
                     color = ColorProvider(
                         if (entry.isArmed) palette.accentBlue else palette.textSecondary),
                 ),
+                modifier = GlanceModifier.semantics { testTag = WidgetTags.day(alarm.id) },
                 maxLines = 1,
             )
         }

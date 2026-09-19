@@ -2,6 +2,7 @@ package com.smartring.app.presentation.widget
 
 import androidx.glance.testing.unit.hasTestTag
 import androidx.glance.testing.unit.hasText
+import androidx.glance.testing.unit.assertHasText
 import androidx.glance.appwidget.testing.unit.runGlanceAppWidgetUnitTest
 import androidx.test.core.app.ApplicationProvider
 import android.content.Context
@@ -97,34 +98,39 @@ class WidgetRenderTest {
 
             onNode(hasTestTag(WidgetTags.row(7))).assertExists()
             onNode(hasTestTag(WidgetTags.toggle(7))).assertExists()
-            onNode(hasText("כבוי — הקש להפעלה")).assertExists()
+            onNode(hasTestTag(WidgetTags.day(7))).assertHasText("כבוי — הקש להפעלה")
         }
 
     // ── The day label: the half of "when" the widget never used to show ────
 
+    /**
+     * Asserted through the row's own tag rather than by matching the words: the hero line
+     * at the top prints the same day text ("07:00 · מחר"), so a bare text match is
+     * ambiguous by construction and finds two nodes for a correct render.
+     */
     @Test
     fun `a row shows which day it rings, not only the time`() = runGlanceAppWidgetUnitTest {
         provideComposable {
-            ListBody(ctx, state(entry(1, "מחרתיים", at(2026, 9, 21, 7, 0))), palette)
+            ListBody(ctx, state(entry(1, "בדיקה", at(2026, 9, 21, 7, 0))), palette)
         }
         // 2026-09-21 is a Monday; two days out, so the weekday name rather than מחר.
-        onNode(hasText("יום ב׳")).assertExists()
+        onNode(hasTestTag(WidgetTags.day(1))).assertHasText("יום ב׳")
     }
 
     @Test
     fun `tomorrow reads as tomorrow`() = runGlanceAppWidgetUnitTest {
         provideComposable {
-            ListBody(ctx, state(entry(1, "מחר", at(2026, 9, 20, 7, 0))), palette)
+            ListBody(ctx, state(entry(1, "בדיקה", at(2026, 9, 20, 7, 0))), palette)
         }
-        onNode(hasText("מחר")).assertExists()
+        onNode(hasTestTag(WidgetTags.day(1))).assertHasText("מחר")
     }
 
     @Test
     fun `a snoozed row says so and still shows its day`() = runGlanceAppWidgetUnitTest {
         provideComposable {
-            ListBody(ctx, state(entry(3, "נודניק", at(2026, 9, 19, 9, 10), snoozed = true)), palette)
+            ListBody(ctx, state(entry(3, "בדיקה", at(2026, 9, 19, 9, 10), snoozed = true)), palette)
         }
-        onNode(hasText("נודניק · היום")).assertExists()
+        onNode(hasTestTag(WidgetTags.day(3))).assertHasText("נודניק · היום")
     }
 
     // ── Empty states ───────────────────────────────────────────────────────

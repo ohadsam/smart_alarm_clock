@@ -894,6 +894,16 @@ If the user asks for a PR-based workflow going forward, follow that instead and 
   node tree; the enabling change is that the bodies take a plain state object instead of
   reaching for the repository, so they are ordinary composables over data. **When a batch
   touches any widget body, it needs a render assertion, not another descriptor check.**
+- **Match UI nodes by test tag, not by their words — this repo has been bitten twice.**
+  Compose's `onNodeWithText` and Glance's `hasText` both match a *substring* and both fail
+  the assertion when more than one node matches, so a passing-looking assertion breaks the
+  moment the same words appear twice. v1.6.11: `onNodeWithText("1 דק׳")` found three nodes,
+  because ring duration, snooze and per-round duration all default to one minute. v1.10.0:
+  `hasText("מחר")` found three, because the widget's hero line prints the same day text the
+  row does (`"07:00 · מחר"`) *and* the test had named its alarm "מחר". Neither was a product
+  bug; both cost a CI round. Add a tag (`Modifier.testTag` / `GlanceModifier.semantics {
+  testTag = … }`) and assert `onNode(hasTestTag(…)).assertHasText(…)`. Also: never give a
+  test fixture a name that collides with a label the same screen renders.
 - **A widget value computed at `provideGlance()` time is a value that will be wrong.**
   Nothing guarantees a re-render: `updatePeriodMillis` and periodic WorkManager are both
   deferred in Doze, which is where a phone spends every night. v1.10.0's stale countdown
