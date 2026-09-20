@@ -602,6 +602,65 @@ class WidgetRenderTest {
             onNode(hasTestTag(WidgetTags.PANEL_TOGGLE)).assertExists()
         }
 
+    // ── The manual refresh button ─────────────────────────────────────────
+
+    /**
+     * On every size, and the smallest one especially: a home-screen widget cannot be
+     * reloaded by any other means, so before this the only ways out of a stale widget were
+     * to change an alarm or to wait up to fifteen minutes for the periodic worker.
+     *
+     * It also keeps working when the automatic path does not — a widget's click handlers
+     * live in the RemoteViews pushed at its last render and are held by the host, so a
+     * widget a refresh never reached still answers a tap.
+     */
+    @Test
+    fun `every size offers a manual refresh`() = runGlanceAppWidgetUnitTest {
+        provideComposable {
+            SmallBody(ctx, state(entry(1, "בוקר", at(2026, 9, 19, 7, 30))), palette)
+        }
+        onNode(hasTestTag(WidgetTags.REFRESH)).assertExists()
+    }
+
+    @Test
+    fun `the medium body offers a manual refresh`() = runGlanceAppWidgetUnitTest {
+        provideComposable {
+            MediumBody(ctx, state(entry(1, "בוקר", at(2026, 9, 19, 7, 30))), palette)
+        }
+        onNode(hasTestTag(WidgetTags.REFRESH)).assertExists()
+    }
+
+    @Test
+    fun `the list body offers a manual refresh`() = runGlanceAppWidgetUnitTest {
+        provideComposable {
+            ListBody(ctx, state(entry(1, "בוקר", at(2026, 9, 19, 7, 30))), palette)
+        }
+        onNode(hasTestTag(WidgetTags.REFRESH)).assertExists()
+    }
+
+    /**
+     * The state where it is needed most. A widget showing "no alarms" while alarms exist is
+     * precisely the report this whole sequence began with, and a refresh must be reachable
+     * without first creating an alarm to shake it loose.
+     */
+    @Test
+    fun `an empty small body still offers a refresh`() = runGlanceAppWidgetUnitTest {
+        provideComposable { SmallBody(ctx, state(), palette) }
+
+        onNode(hasTestTag(WidgetTags.EMPTY)).assertExists()
+        onNode(hasTestTag(WidgetTags.REFRESH)).assertExists()
+    }
+
+    /** And when the data could not be read at all — the one state a retry directly serves. */
+    @Test
+    fun `a failed load still offers a refresh`() = runGlanceAppWidgetUnitTest {
+        provideComposable {
+            SmallBody(ctx, state().copy(loadError = "SQLiteException"), palette)
+        }
+
+        onNode(hasTestTag(WidgetTags.LOAD_ERROR)).assertExists()
+        onNode(hasTestTag(WidgetTags.REFRESH)).assertExists()
+    }
+
     // ── Every size is actually refreshed ──────────────────────────────────
 
     /**

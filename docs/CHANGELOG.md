@@ -1,5 +1,44 @@
 # SmartRing – Changelog
 
+## v1.12.6 (2026-09-20)
+
+### A refresh button, on all four sizes
+
+Requested, and right for a reason beyond the obvious one. A home-screen widget is a
+surface the user cannot reload by any other means — there is no pull-to-refresh and no
+reopening it — so when it disagreed with the app, the only remedies were to change an
+alarm or wait up to fifteen minutes for `WidgetRefreshWorker`.
+
+The less obvious reason it is worth having: **it keeps working when the automatic path
+does not.** A widget's click handlers live in the `RemoteViews` pushed at its last render
+and are held by the host process, so a widget that a refresh never reached still responds
+to a tap. That makes this a genuine way out of the exact failure v1.12.5 fixed, rather
+than a button that only works when it is not needed.
+
+It is on the 2x2 too, where a manual refresh matters most: that size shows one alarm, so
+it has the least on screen to make staleness obvious in the first place.
+
+### The measurement that is not testable here
+
+Three controls in two cells is a real budget, and this file has been caught by it before.
+The 2x2 declares a 110dp minimum; 8dp of padding a side leaves 94dp, and three 26dp icons
+plus a gap do not fit that. Vertically the strip now competes with four content lines
+(time, day, countdown, "and N more armed"). So the 2x2's strip runs at 22dp rather than the
+header's 26dp, with a 4dp gap before ＋, which brings the column back to roughly its
+declared minimum.
+
+Stated plainly because no test in this repo can check it: `runGlanceAppWidgetUnitTest`
+builds a node tree and never lays it out, so the five new render tests assert the button
+exists on every size and in every state — including the empty state and the load-error
+state, which are the two a retry directly serves — and say nothing about whether it fits.
+That distinction is what v1.12.1 was about.
+
+A manual refresh logs its own line, separate from the automatic ones: "I pressed refresh
+and it still showed the old alarm" is a different report from "it went stale on its own",
+and they have different causes.
+
++5 render tests (45).
+
 ## v1.12.5 (2026-09-20)
 
 ### The refresh reported success for work it had not done

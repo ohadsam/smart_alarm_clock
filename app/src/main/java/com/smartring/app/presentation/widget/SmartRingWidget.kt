@@ -11,6 +11,7 @@ import android.widget.RemoteViews
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.glance.*
@@ -171,6 +172,8 @@ internal object WidgetTags {
 
     /** The 2x2 hero line's "and N more armed" note. */
     const val MORE = "widget-more"
+
+    const val REFRESH = "widget-refresh"
 
     const val PANEL = "widget-panel"
     const val LOAD_ERROR = "widget-load-error"
@@ -488,16 +491,18 @@ internal fun SmallBody(ctx: Context, state: WidgetUiState, p: WidgetPalette) {
     Column(GlanceModifier.fillMaxSize().padding(horizontal = 8.dp, vertical = 6.dp)) {
         Row(GlanceModifier.fillMaxWidth().padding(bottom = 4.dp),
             verticalAlignment = Alignment.CenterVertically) {
-            // 26dp, the same as the larger sizes' header. Two cells have the width for
-            // two of them with room to spare, and a control that is smaller here than
-            // everywhere else is a control that is harder to hit on the widget where
-            // hitting it matters most.
+            // 22dp rather than the header's 26dp, now that the strip carries three
+            // controls instead of two. Two cells declare a 110dp minimum: 8dp of padding
+            // a side leaves 94dp, and three 26dp icons plus a gap would not fit it —
+            // while vertically the strip competes with four content lines. This is the
+            // measurement v1.12.1 was about, and a test here cannot make it: the Glance
+            // unit renderer builds a node tree and never lays it out.
             Image(
                 provider = ImageProvider(
                     if (state.panelOpen) R.drawable.ic_widget_close else R.drawable.ic_widget_menu,
                 ),
                 contentDescription = if (state.panelOpen) "סגור תפריט" else "תפריט פעולות מהירות",
-                modifier = GlanceModifier.size(26.dp)
+                modifier = GlanceModifier.size(22.dp)
                     .semantics { testTag = WidgetTags.PANEL_TOGGLE }
                     .clickable(actionRunCallback<ToggleQuickPanelAction>()),
                 colorFilter = ColorFilter.tint(
@@ -506,10 +511,12 @@ internal fun SmallBody(ctx: Context, state: WidgetUiState, p: WidgetPalette) {
             // The gap is a weighted Spacer, so the two controls sit at opposite edges and
             // mirror correctly under RTL without either of them being positioned by hand.
             Spacer(GlanceModifier.defaultWeight())
+            RefreshButton(p, size = 22.dp)
+            Spacer(GlanceModifier.width(4.dp))
             Image(
                 provider = ImageProvider(R.drawable.ic_widget_add),
                 contentDescription = "הוסף שעמור",
-                modifier = GlanceModifier.size(26.dp)
+                modifier = GlanceModifier.size(22.dp)
                     .semantics { testTag = WidgetTags.ADD }
                     .clickable(actionStartActivity(openAddIntent(ctx))),
                 colorFilter = ColorFilter.tint(ColorProvider(p.accentBlue)),
@@ -823,6 +830,36 @@ private fun PanelRow(
 }
 
 /**
+ * Fetch the current state, on demand.
+ *
+ * Every other control on these widgets acts on an alarm; this one acts on the widget. It
+ * exists because a home-screen widget is a surface the user cannot reload by any other
+ * means — there is no pull-to-refresh and no reopening it — so when it disagrees with the
+ * app, the only remedies were to change an alarm or wait up to fifteen minutes for the
+ * periodic worker.
+ *
+ * It keeps working when the automatic path does not, which is the point rather than a
+ * happy accident: a widget's click handlers live in the `RemoteViews` pushed at its last
+ * render and are held by the host, so a widget that a refresh never reached still responds
+ * to a tap. That makes this a genuine way out of a stale widget rather than a button that
+ * only works when it is not needed.
+ *
+ * It is on all four sizes. The smallest is where a manual refresh matters most — it shows
+ * one alarm, so it has the least on screen to make staleness obvious.
+ */
+@Composable
+private fun RefreshButton(p: WidgetPalette, size: Dp = 26.dp) {
+    Image(
+        provider = ImageProvider(R.drawable.ic_widget_refresh),
+        contentDescription = "רענן את הווידג'ט",
+        modifier = GlanceModifier.size(size)
+            .semantics { testTag = WidgetTags.REFRESH }
+            .clickable(actionRunCallback<RefreshWidgetAction>()),
+        colorFilter = ColorFilter.tint(ColorProvider(p.textSecondary)),
+    )
+}
+
+/**
  * The strip along the top of every widget but the smallest.
  *
  * Carries the three things true of the widget as a whole rather than of any single row:
@@ -869,6 +906,7 @@ private fun WidgetHeader(
                     ColorProvider(if (state.panelOpen) p.accentGreen else p.textSecondary)),
             )
         }
+        RefreshButton(p)
         Image(
             provider = ImageProvider(R.drawable.ic_widget_add),
             contentDescription = "הוסף שעמור",
@@ -1102,6 +1140,29 @@ class ToggleQuickPanelAction : ActionCallback {
  * The panel closes itself afterwards. Leaving it open would hide the very row that just
  * appeared, so the tap would look like it did nothing.
  */
+/**
+ * Re-reads everything and re-renders every widget, from a tap on one of them.
+ *
+ * Logged with its own reason so a manual refresh is distinguishable from an automatic one
+ * in the exported log — "the user pressed refresh and it still showed the old alarm" is a
+ * different report from "it went stale on its own", and they have different causes.
+ */
+class RefreshWidgetAction : ActionCallback {
+    override suspend fun onAction(context: Context, glanceId: GlanceId, parameters: ActionParameters) {
+        val report = runCatching { refreshAllWidgets(context) }.getOrNull()
+        runCatching {
+            EntryPointAccessors.fromApplication(context, WidgetEntryPoint::class.java)
+                .appLogger()
+                .log(
+                    "Widget",
+                    if (report == null) "רענון ידני מהווידג'ט נכשל"
+                    else "רענון ידני מהווידג'ט: ${report.found} מוצבים, ${report.updated} עודכנו" +
+                        if (report.failed) ", שגיאות: ${report.errors.joinToString("; ")}" else "",
+                )
+        }
+    }
+}
+
 class CreateQuickAlarmAction : ActionCallback {
     override suspend fun onAction(context: Context, glanceId: GlanceId, parameters: ActionParameters) {
         val presetId = parameters[presetIdKey] ?: return
