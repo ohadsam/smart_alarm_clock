@@ -1,5 +1,24 @@
 # SmartRing – Changelog
 
+## v1.12.2 (2026-09-20)
+
+Coverage for the 2x2 specifically, because that is the size actually on the reporter's
+home screen and the one where a failure is hardest to see: it shows a single alarm and
+little else, so a stale widget looks much like a fresh one.
+
+- **Every size is covered by a refresh, and that is now asserted.** `WIDGET_SIZES` — the
+  table `refreshAllWidgets` iterates — is `internal` so a test can check all four
+  receivers appear exactly once. A size missing from it would sync perfectly in every
+  other respect and simply never update.
+- **The device-level data-path test runs all four sizes**, not just the wide one. The four
+  share `widgetState` today, but "shares a function today" is not a property a test should
+  assume, and the size a user has is the one that matters.
+- **The 2x2 renders content in every state**, asserted for both an armed alarm and an
+  empty database. It used to put only a clock there, which is exactly how a widget showing
+  nothing about alarms came to look like a widget that was never refreshed.
+- The hero time carries `maxLines = 1`: at a large system font scale three lines already
+  fill two cells, and a wrapped one would push the rest out the way the clock did.
+
 ## v1.12.1 (2026-09-20)
 
 ### One bug, and it was hiding everything

@@ -439,6 +439,9 @@ internal fun SmallBody(ctx: Context, state: WidgetUiState, p: WidgetPalette) {
                 style = TextStyle(fontSize = 26.sp, fontWeight = FontWeight.Bold,
                     color = ColorProvider(p.textPrimary)),
                 modifier = GlanceModifier.semantics { testTag = WidgetTags.NEXT_TIME },
+                // At a large system font scale three lines already fill two cells; a
+                // wrapped one would push the rest out the way the clock used to.
+                maxLines = 1,
             )
             Text(
                 widgetDayLabel(fireAt, state.nowMillis),
@@ -1038,8 +1041,15 @@ class SmartRingWidgetMediumReceiver : GlanceAppWidgetReceiver() { override val g
 class SmartRingWidgetWideReceiver   : GlanceAppWidgetReceiver() { override val glanceAppWidget = SmartRingWidgetWide()   }
 class SmartRingWidgetLargeReceiver  : GlanceAppWidgetReceiver() { override val glanceAppWidget = SmartRingWidgetLarge()  }
 
-/** Each widget size, paired with the receiver the framework knows it by. */
-private val WIDGET_SIZES: List<Pair<() -> GlanceAppWidget, Class<out GlanceAppWidgetReceiver>>> = listOf(
+/**
+ * Each widget size, paired with the receiver the framework knows it by.
+ *
+ * `internal` so a test can assert that every size placed on a home screen is actually
+ * reached by a refresh. A size missing from this list would sync perfectly in every other
+ * respect and simply never update — and the smallest one, which shows a single alarm and
+ * little else, is the hardest to notice that about.
+ */
+internal val WIDGET_SIZES: List<Pair<() -> GlanceAppWidget, Class<out GlanceAppWidgetReceiver>>> = listOf(
     { SmartRingWidgetSmall() }  to SmartRingWidgetSmallReceiver::class.java,
     { SmartRingWidgetMedium() } to SmartRingWidgetMediumReceiver::class.java,
     { SmartRingWidgetWide() }   to SmartRingWidgetWideReceiver::class.java,

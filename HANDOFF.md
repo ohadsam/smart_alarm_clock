@@ -159,6 +159,8 @@
 | 130 | **`AndroidRemoteViews` חייב `wrapContentSize()` מפורש** — ברירת המחדל מתפרסת ובולעת את הווידג'ט | `LiveClock`/`Countdown` (v1.12.1) |
 | 131 | הווידג'ט הקטן ללא שעון שעה נוכחית; כפתורי הכותרת לפני השעון כדי שהם לא יידחקו | `SmallBody`/`WidgetHeader` (v1.12.1) |
 | 132 | `runGlanceAppWidgetUnitTest` לא פורס ולא מודד — לא יתפוס תוכן שנגזר מחוץ לווידג'ט | `WidgetRenderTest` (v1.12.1) |
+| 133 | `WIDGET_SIZES` internal, ונבדק שכל ארבעת ה-receivers נכללים בכל רענון בדיוק פעם אחת | `WidgetRenderTest` (v1.12.2) |
+| 134 | בדיקת מסלול הנתונים על מכשיר רצה על כל ארבעת הגדלים, לא רק על הרחב | `WidgetDataPathInstrumentedTest` (v1.12.2) |
 
 ---
 

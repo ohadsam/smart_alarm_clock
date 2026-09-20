@@ -5,6 +5,9 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.smartring.app.data.repository.AlarmRepository
 import com.smartring.app.domain.model.Alarm
+import com.smartring.app.presentation.widget.SmartRingWidgetLarge
+import com.smartring.app.presentation.widget.SmartRingWidgetMedium
+import com.smartring.app.presentation.widget.SmartRingWidgetSmall
 import com.smartring.app.presentation.widget.SmartRingWidgetWide
 import com.smartring.app.presentation.widget.refreshAllWidgets
 import com.smartring.app.util.AlarmScheduler
@@ -76,20 +79,39 @@ class WidgetDataPathInstrumentedTest {
         id
     }
 
+    /**
+     * Every size, not just one.
+     *
+     * The four widgets share `widgetState`, so this looks redundant — but "shares the same
+     * function today" is not a property a test should assume, and the size a user actually
+     * has is the one that matters. The 2x2 in particular shows a single alarm and little
+     * else, so a failure there is the hardest to notice and the easiest to mistake for
+     * "it just doesn't sync".
+     */
     @Test
-    fun widgetStateLoadsOnADeviceWithoutThrowing() = runBlocking {
+    fun everyWidgetSizeLoadsItsStateOnADeviceWithoutThrowing() = runBlocking {
         givenAlarm("בוקר", 7)
 
-        val state = SmartRingWidgetWide().widgetState(context)
+        listOf(
+            "Small" to SmartRingWidgetSmall(),
+            "Medium" to SmartRingWidgetMedium(),
+            "Wide" to SmartRingWidgetWide(),
+            "Large" to SmartRingWidgetLarge(),
+        ).forEach { (name, widget) ->
+            val state = widget.widgetState(context)
 
-        // loadError is how widgetState reports a caught exception. Non-null here means
-        // the real graph, database or preferences threw on this API level — the exact
-        // failure that is invisible everywhere else in this repo.
-        assertNull(
-            "widgetState reported a load failure: ${state.loadError}",
-            state.loadError,
-        )
-        assertTrue("the alarm just written should be in the widget's rows", state.rows.isNotEmpty())
+            // loadError is how widgetState reports a caught exception. Non-null here means
+            // the real graph, database or preferences threw on this API level — the exact
+            // failure that is invisible everywhere else in this repo.
+            assertNull(
+                "$name widget reported a load failure: ${state.loadError}",
+                state.loadError,
+            )
+            assertTrue(
+                "$name widget should see the alarm just written",
+                state.rows.isNotEmpty(),
+            )
+        }
     }
 
     @Test

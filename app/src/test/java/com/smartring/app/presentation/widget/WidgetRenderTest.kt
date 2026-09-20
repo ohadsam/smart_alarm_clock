@@ -12,6 +12,8 @@ import com.smartring.app.util.QuickPresetKind
 import com.smartring.app.util.WidgetAlarmEntry
 import java.util.Calendar
 import java.util.TimeZone
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -459,4 +461,46 @@ class WidgetRenderTest {
             onNode(hasTestTag(WidgetTags.NEXT_TIME)).assertExists()
             onNode(hasText("מחר")).assertExists()
         }
+
+    // ── Every size is actually refreshed ──────────────────────────────────
+
+    /**
+     * A size missing from the refresh table would sync perfectly in every other respect
+     * and simply never update. The 2x2 is the one where that is hardest to spot: it shows
+     * a single alarm and little else, so a stale one looks much like a fresh one.
+     */
+    @Test
+    fun `every widget size is covered by a refresh`() {
+        val receivers = WIDGET_SIZES.map { (_, receiver) -> receiver.simpleName }
+        listOf("Small", "Medium", "Wide", "Large").forEach { size ->
+            assertTrue(
+                "SmartRingWidget${size}Receiver must be refreshed; got $receivers",
+                receivers.any { it == "SmartRingWidget${size}Receiver" },
+            )
+        }
+        assertEquals("the four sizes should be listed exactly once each", 4, receivers.size)
+    }
+
+    // ── The 2x2 always renders something ──────────────────────────────────
+
+    /**
+     * Whatever the state, the smallest widget must put *something* on screen. It used to
+     * put only a clock there — which is how a widget showing nothing about alarms looked
+     * like a widget that was simply never refreshed.
+     */
+    @Test
+    fun `the small body renders content in every state`() = runGlanceAppWidgetUnitTest {
+        provideComposable {
+            SmallBody(ctx, state(entry(1, "בוקר", at(2026, 9, 19, 7, 30))), palette)
+        }
+        onNode(hasTestTag(WidgetTags.NEXT_TIME)).assertExists()
+    }
+
+    @Test
+    fun `the small body with no alarms at all says so`() = runGlanceAppWidgetUnitTest {
+        provideComposable { SmallBody(ctx, state(), palette) }
+
+        onNode(hasTestTag(WidgetTags.EMPTY)).assertExists()
+        onNode(hasText("אין שעמורים")).assertExists()
+    }
 }
