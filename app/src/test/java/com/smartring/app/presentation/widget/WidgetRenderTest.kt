@@ -462,6 +462,92 @@ class WidgetRenderTest {
             onNode(hasText("מחר")).assertExists()
         }
 
+    // ── The 2x2 has the menu too ──────────────────────────────────────────
+
+    /**
+     * v1.12.0 gave the hamburger to the three larger sizes and withheld it here, on the
+     * grounds that two cells have no room for a panel. That was wrong twice: the panel is
+     * a mode that *replaces* the body, so the room it needs is room the hero line already
+     * has — and the 2x2 is the size someone picks when they want one small thing on their
+     * home screen, which is exactly the person a shortcut helps most.
+     */
+    @Test
+    fun `the small body offers the menu, not only the larger sizes`() =
+        runGlanceAppWidgetUnitTest {
+            provideComposable {
+                SmallBody(ctx, state(entry(1, "בוקר", at(2026, 9, 19, 7, 30))), palette)
+            }
+
+            onNode(hasTestTag(WidgetTags.PANEL_TOGGLE)).assertExists()
+            onNode(hasTestTag(WidgetTags.ADD)).assertExists()
+        }
+
+    @Test
+    fun `the small body opens the panel in place of its hero line`() =
+        runGlanceAppWidgetUnitTest {
+            provideComposable {
+                SmallBody(
+                    ctx,
+                    state(entry(1, "בוקר", at(2026, 9, 19, 7, 30)))
+                        .copy(presets = listOf(preset(1, 10)), panelOpen = true),
+                    palette,
+                )
+            }
+
+            onNode(hasTestTag(WidgetTags.PANEL)).assertExists()
+            onNode(hasTestTag(WidgetTags.preset(1))).assertExists()
+            // In place of, not above: two cells stacking a panel on a hero line would
+            // leave an unusable sliver of each.
+            onNode(hasTestTag(WidgetTags.NEXT_TIME)).assertDoesNotExist()
+        }
+
+    @Test
+    fun `the small panel carries the bulk actions as well as the shortcuts`() =
+        runGlanceAppWidgetUnitTest {
+            provideComposable {
+                SmallBody(
+                    ctx,
+                    state(entry(1, "בוקר", at(2026, 9, 19, 7, 30)))
+                        .copy(presets = listOf(preset(1, 10)), panelOpen = true),
+                    palette,
+                )
+            }
+
+            onNode(hasTestTag(WidgetTags.BULK_ENABLE)).assertExists()
+            onNode(hasTestTag(WidgetTags.BULK_FREEZE)).assertExists()
+        }
+
+    /**
+     * The state where the shortcuts are worth most: no alarm set, so the hero line has
+     * nothing to say and the user's next move is to create one.
+     */
+    @Test
+    fun `the small body keeps its menu when no alarm is set`() = runGlanceAppWidgetUnitTest {
+        provideComposable { SmallBody(ctx, state(), palette) }
+
+        onNode(hasTestTag(WidgetTags.EMPTY)).assertExists()
+        onNode(hasTestTag(WidgetTags.PANEL_TOGGLE)).assertExists()
+    }
+
+    /** Same precedence the list sizes have: a database that could not be read is not a
+     *  database to create alarms in. The controls stay reachable either way. */
+    @Test
+    fun `a failed load outranks an open panel on the small body too`() =
+        runGlanceAppWidgetUnitTest {
+            provideComposable {
+                SmallBody(
+                    ctx,
+                    state().copy(loadError = "IOException", panelOpen = true,
+                        presets = listOf(preset(1, 10))),
+                    palette,
+                )
+            }
+
+            onNode(hasTestTag(WidgetTags.LOAD_ERROR)).assertExists()
+            onNode(hasTestTag(WidgetTags.PANEL)).assertDoesNotExist()
+            onNode(hasTestTag(WidgetTags.PANEL_TOGGLE)).assertExists()
+        }
+
     // ── Every size is actually refreshed ──────────────────────────────────
 
     /**

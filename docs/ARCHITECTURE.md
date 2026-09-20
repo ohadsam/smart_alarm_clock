@@ -40,7 +40,9 @@ Glance Widgets (SmartRingWidget.kt) → WidgetUiState → גופי Glance טהו
 ## ווידג'טים (v1.3.0)
 `SmartRingWidget.kt` (4 גדלים) כולל:
 - שעון חי (`res/layout/widget_clock.xml`, `android.widget.TextClock` דרך `AndroidRemoteViews`)
-  — מתעדכן בעצמו בתוך תהליך ה-widget host, בלי להעיר את האפליקציה.
+  — מתעדכן בעצמו בתוך תהליך ה-widget host, בלי להעיר את האפליקציה. **בשלושת הגדלים
+  הגדולים בלבד מאז v1.12.1**; ה-2x2 ויתר עליו לטובת השעמור הבא. כל `AndroidRemoteViews`
+  חייב `GlanceModifier.wrapContentSize()` מפורש — ברירת המחדל מתפרסת ובולעת את הווידג'ט.
 - אינדיקציית "בעוד X שע' Y דק'" לשעמור הבא, מחושבת מ-`AlarmScheduler.effectiveNextFireTime()`
   (לא `nextFireTime()` הרגיל — זה לא מודע לנודניק פעיל, שמתוזמן בנפרד דרך `scheduleAt()`
   ונשמר ב-SharedPreferences `pending_snooze` כדי ש-`pendingSnoozeUntil()` יוכל לראות אותו).
@@ -230,3 +232,17 @@ SQLite אמיתי, הגדרות ערוץ ההתראות האמיתי, ועליי
 
 ## Security
 allowBackup=false · exported=false · FLAG_IMMUTABLE · ProGuard · prepareAsync() · startForeground() ראשון
+
+## תפריט הפעולות המהירות בווידג'ט (v1.11.0, הורחב ב-v1.12.0 וב-v1.12.3)
+`QuickActionsPanel` הוא **מצב**, לא רכיב נוסף: הוא מחליף את גוף הווידג'ט (את הרשימה
+בגדולים, את שורת "השעמור הבא" בבינוני ובקטן) במקום להיערם מעליה. זו הסיבה שהוא נכנס גם
+ב-2x2 — המקום שהוא צריך הוא המקום שהגוף כבר תופס, ולא מקום נוסף.
+
+- המצב פתוח/סגור נשמר ב-`PANEL_OPEN_KEY` דרך `updateAppWidgetState`, ונקרא ב-
+  `provideContent` דרך `currentState<Preferences>()`. הוא **פר-מופע**: פאנל פתוח בווידג'ט
+  אחד לא פותח את הפאנל בכל השאר.
+- `PanelRow(compact = true)` הוא הווריאנט של ה-2x2: אייקון 14dp, טקסט 11sp, ריווח אנכי
+  5dp — כ-26dp לשורה במקום 32dp.
+- סדר העדיפות בכל הגדלים: `loadError` → `panelOpen` → גוף רגיל.
+- כל פעולה בפאנל מסיימת ב-`refreshAllWidgets`, שעובר על כל ארבעת ה-receivers, ולכן
+  הווידג'ט הקטן מתרענן גם מפעולה שבוצעה בגדול ולהפך.

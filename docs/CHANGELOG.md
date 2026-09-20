@@ -1,5 +1,58 @@
 # SmartRing – Changelog
 
+## v1.12.3 (2026-09-20)
+
+### The 2x2 gets the menu it was deliberately denied
+
+Reported with a screenshot that also, for the first time, showed the widget **working**:
+16:45 / היום / בעוד 1:59:59, one minute after that alarm was created. The accompanying log
+carried the line this release cycle was waiting for —
+`WidgetRefresher: רענון ווידג'טים: 1 ווידג'טים עודכנו` — so the refresh does reach the
+placed widget. Sync is settled.
+
+What was left was the hamburger, and its absence was not a bug: v1.12.0 withheld it from
+the 2x2 on purpose, reasoning that two cells have no room for a panel. That reasoning was
+wrong on both halves.
+
+- The panel is a **mode that replaces the body**, not a component stacked beneath one —
+  which is exactly what `MediumBody` already does with its next-alarm line. The room it
+  needs is room the hero line already occupies.
+- The 2x2 is the size someone picks *because* they want one small thing on their home
+  screen. That makes a one-tap shortcut worth more there, not less. Withholding the menu
+  from the smallest widget withheld it from the person most likely to be using only that.
+
+### What the 2x2 has now
+
+- A control strip: **☰ and ＋, nothing else.** No title, no clock — those are precisely
+  what consumed the header's width in v1.12.1 and pushed both buttons off the edge. Two
+  icons and a weighted spacer cannot do that.
+- The panel itself, with the same contents as the larger sizes: the configured quick-create
+  shortcuts, כבה/הפעל הכל, and הקפא/בטל הקפאה.
+- **Compact panel rows** (14dp icon, 11sp text, 5dp vertical padding — roughly 26dp per row
+  instead of 32dp). That is the difference between three shortcuts visible in two cells and
+  two. It still scrolls, but a shortcut you have to scroll to find is one you will open the
+  app for instead.
+- `SmartRingWidgetSmall` now reads `PANEL_OPEN_KEY` from `currentState<Preferences>()`, the
+  same per-instance flag Wide and Large use, so one widget's open panel is its own.
+
+### One deliberate change to tapping
+
+"Open the app" moved off the root `Column` onto the hero area alone. As the root it sat
+*underneath* the two icons, and a tap meant for the menu that sometimes launches the app
+instead is worse than no menu at all. Tapping the alarm still opens the app; tapping the
+strip does not.
+
+### Precedence kept, not re-derived
+
+A failed load outranks an open panel here too, matching `ListBody`. The first draft had
+those branches the other way round; the rule exists because the shortcuts would otherwise
+be writing alarms into a database that could not be read, and the bulk rows acting on rows
+that never loaded.
+
++5 render tests (37). As always, they pin the node tree, not the layout —
+`runGlanceAppWidgetUnitTest` does not measure, so "the strip fits" is not something any
+test here can claim.
+
 ## v1.12.2 (2026-09-20)
 
 Coverage for the 2x2 specifically, because that is the size actually on the reporter's

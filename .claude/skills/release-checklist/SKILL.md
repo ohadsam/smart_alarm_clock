@@ -999,6 +999,24 @@ If the user asks for a PR-based workflow going forward, follow that instead and 
   `AlarmReceiver` and forwarded to `AlarmFiringService`; when adding bookkeeping to the
   firing path, check whether it belongs behind that flag.
 
+- **A `clickable` on a container sits *under* the controls inside it, and will eat their taps.**
+  `SmallBody` originally put `clickable(openListIntent)` on its root `Column` and nothing else
+  in it was tappable, which was fine — until v1.12.3 added ☰ and ＋ inside that same `Column`.
+  A child's click handler does win in RemoteViews, but the margin is the child's own bounds:
+  anything the user aims slightly wide of lands on the container and launches the app instead
+  of opening the menu, which reads as "the button doesn't work". The fix is the same one
+  `WidgetFrame` already made for the same reason in v1.10.0 — move the container-level target
+  down onto the specific content area it means, never the root. **When adding a control to a
+  widget body, check what `clickable` the enclosing containers already carry.**
+
+- **A deliberate omission, documented and defended, is still an absence the user will report.**
+  v1.12.0 withheld the quick-actions menu from the 2x2 with a reason written into the changelog,
+  FEATURES.md and the code comment ("two cells have no room for a panel"). The reason was wrong —
+  the panel *replaces* the body rather than stacking below it, so the room it needs already
+  exists — and the volume of justification is what made it survive. The user then reported the
+  missing button twice. **Writing down why something is missing does not make it less missing;
+  when a user reports the same absence a second time, implement it rather than re-explaining.**
+
 ## Known limitations (don't re-report these as new findings unless you're the batch fixing them)
 
 - **Settings' English toggle doesn't change any visible UI text.** Every screen hardcodes Hebrew

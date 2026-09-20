@@ -372,7 +372,10 @@ class SmartRingWidgetSmall : SmartRingBaseWidget() {
     override suspend fun provideGlance(ctx: Context, id: GlanceId) {
         val state = widgetState(ctx)
         val p = paletteFor(ctx)
-        provideContent { WidgetFrame { SmallBody(ctx, state, p) } }
+        provideContent {
+            val open = currentState<Preferences>()[PANEL_OPEN_KEY] ?: false
+            WidgetFrame { SmallBody(ctx, state.copy(panelOpen = open), p) }
+        }
     }
 }
 
@@ -414,43 +417,105 @@ internal val PANEL_OPEN_KEY = booleanPreferencesKey("smartring_widget_panel_open
 
 // ── Bodies ───────────────────────────────────────────────────────────────────
 
-/** 2x2: one question answered — when is the next one, and how long have I got. */
+/**
+ * 2x2: one question answered — when is the next one, and how long have I got.
+ *
+ * It has the quick-actions menu too, now. v1.12.0 withheld it on the grounds that two
+ * cells have no room for a panel, which was the wrong call twice over: the panel is a
+ * *mode* that replaces the body rather than something stacked below it, so the room it
+ * needs is the room the hero line already occupies; and the 2x2 is the size someone picks
+ * precisely because they want one small thing on their home screen, which makes shortcuts
+ * more valuable there, not less. Withholding the menu from the smallest widget meant
+ * withholding it from the person most likely to be using only that.
+ *
+ * The strip carries no title and no clock, unlike the larger sizes' header — at this
+ * width those would push the two controls off the edge, which is the exact failure
+ * v1.12.1 fixed. Two icons and the space between them.
+ */
 @Composable
 internal fun SmallBody(ctx: Context, state: WidgetUiState, p: WidgetPalette) {
     val next = state.next
-    Column(
-        GlanceModifier.fillMaxSize().padding(10.dp)
-            .clickable(actionStartActivity(openListIntent(ctx))),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        // No current-time clock at this size any more. Two cells fit about three short
-        // lines, and the current time is the least valuable of the four things that were
-        // competing for them — the phone shows it in the status bar, on the lock screen
-        // and usually in another widget, while "when does my next alarm ring" is the one
-        // question only this widget answers. It was also the element that expanded and
-        // hid the other three.
+    Column(GlanceModifier.fillMaxSize().padding(horizontal = 8.dp, vertical = 6.dp)) {
+        Row(GlanceModifier.fillMaxWidth().padding(bottom = 4.dp),
+            verticalAlignment = Alignment.CenterVertically) {
+            // 26dp, the same as the larger sizes' header. Two cells have the width for
+            // two of them with room to spare, and a control that is smaller here than
+            // everywhere else is a control that is harder to hit on the widget where
+            // hitting it matters most.
+            Image(
+                provider = ImageProvider(
+                    if (state.panelOpen) R.drawable.ic_widget_close else R.drawable.ic_widget_menu,
+                ),
+                contentDescription = if (state.panelOpen) "סגור תפריט" else "תפריט פעולות מהירות",
+                modifier = GlanceModifier.size(26.dp)
+                    .semantics { testTag = WidgetTags.PANEL_TOGGLE }
+                    .clickable(actionRunCallback<ToggleQuickPanelAction>()),
+                colorFilter = ColorFilter.tint(
+                    ColorProvider(if (state.panelOpen) p.accentGreen else p.textSecondary)),
+            )
+            // The gap is a weighted Spacer, so the two controls sit at opposite edges and
+            // mirror correctly under RTL without either of them being positioned by hand.
+            Spacer(GlanceModifier.defaultWeight())
+            Image(
+                provider = ImageProvider(R.drawable.ic_widget_add),
+                contentDescription = "הוסף שעמור",
+                modifier = GlanceModifier.size(26.dp)
+                    .semantics { testTag = WidgetTags.ADD }
+                    .clickable(actionStartActivity(openAddIntent(ctx))),
+                colorFilter = ColorFilter.tint(ColorProvider(p.accentBlue)),
+            )
+        }
+
+        // No current-time clock at this size. Two cells fit about three short lines, and
+        // the current time is the least valuable of the things competing for them — the
+        // phone shows it in the status bar, on the lock screen and usually in another
+        // widget, while "when does my next alarm ring" is the one question only this
+        // widget answers. It was also the element that expanded and hid the other three.
         val fireAt = next?.fireAt
+        // A failed load outranks an open panel, the same way it does on the list sizes:
+        // the shortcuts would be writing alarms into a database that could not be read,
+        // and the bulk rows would be acting on rows that never loaded.
         if (state.loadError != null) {
-            WidgetLoadError(ctx, p, compact = true)
-        } else if (next != null && fireAt != null) {
-            Text(
-                next.timeText,
-                style = TextStyle(fontSize = 26.sp, fontWeight = FontWeight.Bold,
-                    color = ColorProvider(p.textPrimary)),
-                modifier = GlanceModifier.semantics { testTag = WidgetTags.NEXT_TIME },
-                // At a large system font scale three lines already fill two cells; a
-                // wrapped one would push the rest out the way the clock used to.
-                maxLines = 1,
-            )
-            Text(
-                widgetDayLabel(fireAt, state.nowMillis),
-                style = TextStyle(fontSize = 10.sp, color = ColorProvider(p.textSecondary)),
-                maxLines = 1,
-            )
-            Countdown(ctx, fireAt, 9f, p.accentBlue)
+            Column(
+                GlanceModifier.fillMaxSize(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) { WidgetLoadError(ctx, p, compact = true) }
+        } else if (state.panelOpen) {
+            // Compact rows, because the whole point is that several fit: the panel
+            // scrolls, but a shortcut you have to scroll to find is one you will open the
+            // app for instead.
+            QuickActionsPanel(state, p, compact = true)
         } else {
-            WidgetEmptyState(ctx, p, state.hasAnyAlarms, compact = true)
+            // The "open the app" target is this area, not the root Column. As the root it
+            // would sit under the two icons above, and a tap meant for the menu that
+            // sometimes launches the app instead is worse than no menu at all.
+            Column(
+                GlanceModifier.fillMaxSize()
+                    .clickable(actionStartActivity(openListIntent(ctx))),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                if (next != null && fireAt != null) {
+                    Text(
+                        next.timeText,
+                        style = TextStyle(fontSize = 24.sp, fontWeight = FontWeight.Bold,
+                            color = ColorProvider(p.textPrimary)),
+                        modifier = GlanceModifier.semantics { testTag = WidgetTags.NEXT_TIME },
+                        // At a large system font scale three lines already fill two cells;
+                        // a wrapped one would push the rest out the way the clock used to.
+                        maxLines = 1,
+                    )
+                    Text(
+                        widgetDayLabel(fireAt, state.nowMillis),
+                        style = TextStyle(fontSize = 10.sp, color = ColorProvider(p.textSecondary)),
+                        maxLines = 1,
+                    )
+                    Countdown(ctx, fireAt, 9f, p.accentBlue)
+                } else {
+                    WidgetEmptyState(ctx, p, state.hasAnyAlarms, compact = true)
+                }
+            }
         }
     }
 }
@@ -570,7 +635,7 @@ internal fun ListBody(ctx: Context, state: WidgetUiState, p: WidgetPalette) {
  * explain itself.
  */
 @Composable
-private fun QuickActionsPanel(state: WidgetUiState, p: WidgetPalette) {
+private fun QuickActionsPanel(state: WidgetUiState, p: WidgetPalette, compact: Boolean = false) {
     LazyColumn(GlanceModifier.fillMaxSize().semantics { testTag = WidgetTags.PANEL }) {
         items(state.presets, itemId = { it.id }) { preset ->
             PanelRow(
@@ -579,6 +644,7 @@ private fun QuickActionsPanel(state: WidgetUiState, p: WidgetPalette) {
                 tint = p.accentGreen,
                 tag = WidgetTags.preset(preset.id),
                 palette = p,
+                compact = compact,
                 action = actionRunCallback<CreateQuickAlarmAction>(
                     actionParametersOf(CreateQuickAlarmAction.presetIdKey to preset.id),
                 ),
@@ -592,6 +658,7 @@ private fun QuickActionsPanel(state: WidgetUiState, p: WidgetPalette) {
                 tint = p.accentBlue,
                 tag = WidgetTags.BULK_ENABLE,
                 palette = p,
+                compact = compact,
                 action = actionRunCallback<BulkAlarmAction>(
                     actionParametersOf(
                         BulkAlarmAction.opKey to
@@ -611,6 +678,7 @@ private fun QuickActionsPanel(state: WidgetUiState, p: WidgetPalette) {
                 tint = p.textSecondary,
                 tag = WidgetTags.BULK_FREEZE,
                 palette = p,
+                compact = compact,
                 action = actionRunCallback<BulkAlarmAction>(
                     actionParametersOf(
                         BulkAlarmAction.opKey to
@@ -659,9 +727,14 @@ private fun PanelRow(
     tag: String,
     palette: WidgetPalette,
     action: androidx.glance.action.Action,
+    // The 2x2 gets the same rows, tightened. Roughly 26dp instead of 32dp apiece, which
+    // is the difference between three shortcuts visible in two cells and two.
+    compact: Boolean = false,
 ) {
     Row(
-        GlanceModifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 7.dp)
+        GlanceModifier.fillMaxWidth()
+            .padding(horizontal = if (compact) 6.dp else 8.dp,
+                     vertical = if (compact) 5.dp else 7.dp)
             .background(ImageProvider(R.drawable.widget_row_bg))
             // The whole row, not just the icon: there is no competing target inside a
             // panel row, so the largest tap area is simply the right one.
@@ -671,15 +744,16 @@ private fun PanelRow(
         Image(
             provider = ImageProvider(iconRes),
             contentDescription = null,
-            modifier = GlanceModifier.size(18.dp),
+            modifier = GlanceModifier.size(if (compact) 14.dp else 18.dp),
             colorFilter = ColorFilter.tint(ColorProvider(tint)),
         )
-        Spacer(GlanceModifier.width(8.dp))
+        Spacer(GlanceModifier.width(if (compact) 6.dp else 8.dp))
         // The tag belongs on the Text, not on the Row that contains it: an assertion
         // about text reads the tagged node's *own* text and does not descend into its
         // children, so a tag one level up matches a node with no text at all.
         Text(label,
-            style = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.Medium,
+            style = TextStyle(fontSize = if (compact) 11.sp else 12.sp,
+                fontWeight = FontWeight.Medium,
                 color = ColorProvider(palette.textPrimary)),
             modifier = GlanceModifier.semantics { testTag = tag },
             maxLines = 1)
