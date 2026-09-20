@@ -61,6 +61,14 @@ class SmartRingApp : Application(), Configuration.Provider {
         // API 26+, which would take the receiver's "couldn't start the service"
         // fallback notification down with it on a fresh install.
         AlarmNotifications.ensureChannel(this)
+        // Which build is actually running, in the log the user exports.
+        //
+        // Nothing recorded this before, and it cost a round of guessing: a report of "the
+        // widgets still don't sync" arrived with a three-day log in which the only clue
+        // about the version was a MY_PACKAGE_REPLACED line with no version attached, so
+        // "is this fixed and still broken" and "this build predates the fix" were
+        // indistinguishable.
+        appLogger.log("SmartRingApp", "גרסה ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
         lastNightMode = (resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
             android.content.res.Configuration.UI_MODE_NIGHT_YES
         // Runs daily (not every 3 days) so a log written right after one cleanup pass

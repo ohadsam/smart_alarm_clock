@@ -351,4 +351,78 @@ class WidgetRenderTest {
             onNode(hasTestTag(WidgetTags.PANEL)).assertExists()
             onNode(hasTestTag(WidgetTags.BULK_ENABLE)).assertExists()
         }
+
+    // ── A failed load says so, instead of looking like an empty schedule ───
+
+    /**
+     * Glance substitutes its own error layout for anything that escapes `provideGlance`,
+     * silently and without reaching AppLogger — so a widget that failed to render looked
+     * exactly like one that was never refreshed. That ambiguity is most of why "the
+     * widgets don't sync" survived three releases.
+     */
+    @Test
+    fun `a failed load is reported rather than shown as an empty schedule`() =
+        runGlanceAppWidgetUnitTest {
+            provideComposable {
+                ListBody(ctx, state().copy(loadError = "SQLiteException"), palette)
+            }
+
+            onNode(hasTestTag(WidgetTags.LOAD_ERROR)).assertExists()
+            // Not the empty state: "אין שעמורים" when the database could not be read is
+            // the widget asserting something untrue.
+            onNode(hasTestTag(WidgetTags.EMPTY)).assertDoesNotExist()
+        }
+
+    @Test
+    fun `the small body reports a failed load too`() = runGlanceAppWidgetUnitTest {
+        provideComposable {
+            SmallBody(ctx, state().copy(loadError = "IllegalStateException"), palette)
+        }
+        onNode(hasTestTag(WidgetTags.LOAD_ERROR)).assertExists()
+    }
+
+    @Test
+    fun `a failed load outranks an open panel`() = runGlanceAppWidgetUnitTest {
+        provideComposable {
+            ListBody(
+                ctx,
+                state().copy(loadError = "IOException", panelOpen = true, presets = listOf(preset(1, 10))),
+                palette,
+            )
+        }
+
+        onNode(hasTestTag(WidgetTags.LOAD_ERROR)).assertExists()
+        onNode(hasTestTag(WidgetTags.PANEL)).assertDoesNotExist()
+    }
+
+    // ── The menu reaches the medium size too ──────────────────────────────
+
+    /**
+     * The first report of this feature was that the widget had no menu button. It was on
+     * the two list sizes only, and drawn as a bolt.
+     */
+    @Test
+    fun `the medium body offers the menu as well`() = runGlanceAppWidgetUnitTest {
+        provideComposable {
+            MediumBody(ctx, state(entry(1, "בדיקה", at(2026, 9, 19, 7, 30))), palette)
+        }
+        onNode(hasTestTag(WidgetTags.PANEL_TOGGLE)).assertExists()
+    }
+
+    @Test
+    fun `the medium body opens the panel in place of its next-alarm line`() =
+        runGlanceAppWidgetUnitTest {
+            provideComposable {
+                MediumBody(
+                    ctx,
+                    state(entry(1, "בדיקה", at(2026, 9, 19, 7, 30)))
+                        .copy(presets = listOf(preset(1, 10)), panelOpen = true),
+                    palette,
+                )
+            }
+
+            onNode(hasTestTag(WidgetTags.PANEL)).assertExists()
+            onNode(hasTestTag(WidgetTags.preset(1))).assertExists()
+            onNode(hasTestTag(WidgetTags.NEXT_TIME)).assertDoesNotExist()
+        }
 }

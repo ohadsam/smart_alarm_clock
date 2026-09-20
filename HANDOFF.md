@@ -151,6 +151,11 @@
 | 122 | תפריט פעולות מהירות בווידג'ט; הדגל במצב ה-Glance של המופע, לא במאגר | `PANEL_OPEN_KEY` + `ToggleQuickPanelAction` (v1.11.0) |
 | 123 | פעולות קבוצתיות מהווידג'ט (כבה/הפעל/הקפא/בטל) דרך אותן קריאות של "שליטה כללית" | `BulkAlarmAction` (v1.11.0) |
 | 124 | שינוי קיצורים ב-DataStore מרענן ווידג'טים — ה-collector של טבלת השעמורים לא רואה אותו | `SmartRingApp` (v1.11.0) |
+| 125 | `WidgetRefresher` רושם כמה ווידג'טים עודכנו, ובמפורש כשזה אפס — קודם רק כישלונות נרשמו | `WidgetRefresher` (v1.12.0) |
+| 126 | `updateAll` לבדו יכול לעבור על אפס מזהים ולהצליח; הרענון שולח גם `APPWIDGET_UPDATE` עם מזהי `AppWidgetManager` | `refreshAllWidgets` (v1.12.0) |
+| 127 | חריגה ב-`provideGlance` נתפסת ונרשמת; Glance בולע אותה לפריסת שגיאה משלו בלי לוג | `widgetState` + `WidgetLoadError` (v1.12.0) |
+| 128 | מספר הגרסה נרשם בכל הפעלה — `MY_PACKAGE_REPLACED` לבדו לא מזהה איזו גרסה רצה | `SmartRingApp` (v1.12.0) |
+| 129 | כפתור התפריט בווידג'ט = המבורגר, וגם בבינוני; הברק נקרא כקישוט | `ic_widget_menu.xml` (v1.12.0) |
 
 ---
 

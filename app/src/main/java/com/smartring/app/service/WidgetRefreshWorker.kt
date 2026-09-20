@@ -25,6 +25,9 @@ class WidgetRefreshWorker @AssistedInject constructor(
     override suspend fun doWork(): Result = try {
         refreshAllWidgets(applicationContext)
         Result.success()
+        // Deliberately not logged here: this runs every 15 minutes forever, and a line
+        // per run would bury everything else within the log's three-day retention.
+        // WidgetRefresher's count covers the paths a user actually triggers.
     } catch (e: CancellationException) {
         throw e
     } catch (e: Exception) {

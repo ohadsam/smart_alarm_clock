@@ -24,10 +24,35 @@ class WidgetRefresher @Inject constructor(
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
+    /**
+     * Last count reported, so a burst of refreshes does not fill the log with the same
+     * line. A change in the count is the interesting event — especially a drop to zero.
+     */
+    private var lastReported: Int? = null
+
     fun refresh() {
         scope.launch {
             runCatching { refreshAllWidgets(context) }
-                .onFailure { appLogger.log("WidgetRefresher", "רענון ווידג'טים נכשל: ${it.message}") }
+                .onSuccess { count ->
+                    // Logged, not silent. Until v1.12.0 this method logged only failures,
+                    // which made a refresh that succeeded-but-updated-nothing look
+                    // identical to one that worked — and "the widgets don't sync" reports
+                    // could not be told apart from "the widgets are fine" in the log.
+                    // Zero is the diagnosis: the refresh ran, and there was nothing
+                    // registered for it to update.
+                    if (count != lastReported) {
+                        lastReported = count
+                        appLogger.log(
+                            "WidgetRefresher",
+                            if (count == 0) "רענון ווידג'טים רץ אך לא נמצא אף ווידג'ט מוצב"
+                            else "רענון ווידג'טים: $count ווידג'טים עודכנו",
+                        )
+                    }
+                }
+                .onFailure {
+                    lastReported = null
+                    appLogger.log("WidgetRefresher", "רענון ווידג'טים נכשל: ${it.message}")
+                }
         }
     }
 }

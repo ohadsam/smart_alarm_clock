@@ -1,4 +1,6 @@
 package com.smartring.app.presentation.widget
+import android.appwidget.AppWidgetManager
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.res.Configuration
@@ -48,6 +50,7 @@ import com.smartring.app.util.buildWidgetRows
 import com.smartring.app.util.nextOccasionalDate
 import com.smartring.app.util.widgetDayLabel
 import java.util.Calendar
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.first
 import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
@@ -165,6 +168,7 @@ internal object WidgetTags {
     fun day(id: Long) = "widget-day-$id"
 
     const val PANEL = "widget-panel"
+    const val LOAD_ERROR = "widget-load-error"
     const val PANEL_TOGGLE = "widget-panel-toggle"
     const val BULK_ENABLE = "widget-bulk-enable"
     const val BULK_FREEZE = "widget-bulk-freeze"
@@ -273,6 +277,14 @@ internal data class WidgetUiState(
     val presets: List<QuickPreset> = emptyList(),
     /** Whether the quick-actions panel is open, per widget instance. */
     val panelOpen: Boolean = false,
+    /**
+     * Set when gathering the data threw.
+     *
+     * Rendered as its own state rather than falling back to the empty one: "אין שעמורים"
+     * when the database could not be read is the widget stating something untrue, and a
+     * user staring at a wrong-but-plausible widget has no reason to go looking at the log.
+     */
+    val loadError: String? = null,
 ) {
     val next: WidgetAlarmEntry? get() = rows.firstOrNull()?.takeIf { it.isArmed }
     val armedCount: Int get() = rows.count { it.isArmed }
@@ -303,11 +315,11 @@ abstract class SmartRingBaseWidget : GlanceAppWidget() {
     // internal, not protected: WidgetUiState is internal, and a protected member may not
     // expose an internal type. The four subclasses live in this module, so internal
     // reaches every caller that actually exists.
-    internal suspend fun widgetState(ctx: Context): WidgetUiState {
+    internal suspend fun widgetState(ctx: Context): WidgetUiState = try {
         val ep = EntryPointAccessors.fromApplication(ctx, WidgetEntryPoint::class.java)
         val scheduler = ep.alarmScheduler()
         val quick = ep.quickPresetsRepository().config.first()
-        return WidgetUiState(
+        WidgetUiState(
             rows = buildWidgetRows(
                 alarms     = ep.alarmRepository().getAllAlarms(),
                 snoozeAt   = scheduler::pendingSnoozeUntil,
@@ -315,6 +327,24 @@ abstract class SmartRingBaseWidget : GlanceAppWidget() {
             ),
             nowMillis = System.currentTimeMillis(),
             presets = presetsForWidget(quick.presets, quick.limits),
+        )
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        // Glance catches whatever escapes provideGlance and substitutes its own error
+        // layout — silently, with nothing reaching AppLogger. A widget that failed to
+        // render therefore looked exactly like a widget that was never refreshed, which
+        // is precisely the ambiguity that let "the widgets don't sync" survive three
+        // releases. Caught here so the next log export names the cause.
+        runCatching {
+            EntryPointAccessors.fromApplication(ctx, WidgetEntryPoint::class.java)
+                .appLogger()
+                .log("Widget", "טעינת נתוני הווידג'ט נכשלה: ${e.javaClass.simpleName}: ${e.message}")
+        }
+        WidgetUiState(
+            rows = emptyList(),
+            nowMillis = System.currentTimeMillis(),
+            loadError = e.javaClass.simpleName,
         )
     }
 }
@@ -377,7 +407,9 @@ internal fun SmallBody(ctx: Context, state: WidgetUiState, p: WidgetPalette) {
     ) {
         LiveClock(ctx, 11f, p.textSecondary.toArgb())
         val fireAt = next?.fireAt
-        if (next != null && fireAt != null) {
+        if (state.loadError != null) {
+            WidgetLoadError(ctx, p, compact = true)
+        } else if (next != null && fireAt != null) {
             Text(
                 next.timeText,
                 style = TextStyle(fontSize = 26.sp, fontWeight = FontWeight.Bold,
@@ -402,8 +434,12 @@ internal fun MediumBody(ctx: Context, state: WidgetUiState, p: WidgetPalette) {
     val next = state.next
     val fireAt = next?.fireAt
     Column(GlanceModifier.fillMaxSize().padding(12.dp)) {
-        WidgetHeader(ctx, state, p)
-        if (next != null && fireAt != null) {
+        WidgetHeader(ctx, state, p, showPanelToggle = true)
+        if (state.loadError != null) {
+            WidgetLoadError(ctx, p)
+        } else if (state.panelOpen) {
+            QuickActionsPanel(state, p)
+        } else if (next != null && fireAt != null) {
             Row(GlanceModifier.fillMaxWidth()
                 .clickable(actionStartActivity(openEditIntent(ctx, next.alarm.id))),
                 verticalAlignment = Alignment.CenterVertically) {
@@ -471,6 +507,7 @@ internal fun ListBody(ctx: Context, state: WidgetUiState, p: WidgetPalette) {
             }
         }
         when {
+            state.loadError != null -> WidgetLoadError(ctx, p)
             state.panelOpen -> QuickActionsPanel(state, p)
             state.rows.isEmpty() -> WidgetEmptyState(ctx, p, hasAnyAlarms = false)
             else -> LazyColumn(GlanceModifier.fillMaxSize().semantics { testTag = WidgetTags.ROWS }) {
@@ -559,6 +596,33 @@ private fun QuickActionsPanel(state: WidgetUiState, p: WidgetPalette) {
     }
 }
 
+/**
+ * The widget could not read its own data.
+ *
+ * Said plainly rather than dressed up as an empty schedule: the user's next move is to
+ * open the app (which will work, and will re-render this), and the log now carries the
+ * exception that caused it.
+ */
+@Composable
+private fun WidgetLoadError(ctx: Context, palette: WidgetPalette, compact: Boolean = false) {
+    Column(
+        GlanceModifier.fillMaxWidth().padding(vertical = 6.dp)
+            .semantics { testTag = WidgetTags.LOAD_ERROR }
+            .clickable(actionStartActivity(openListIntent(ctx))),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text("לא ניתן לטעון את השעמורים",
+            style = TextStyle(fontSize = if (compact) 9.sp else 11.sp,
+                fontWeight = FontWeight.Medium, color = ColorProvider(palette.textPrimary)),
+            maxLines = 1)
+        Text("הקש לפתיחת האפליקציה",
+            style = TextStyle(fontSize = if (compact) 8.sp else 10.sp,
+                color = ColorProvider(palette.accentBlue)),
+            maxLines = 1)
+    }
+}
+
 /** One tappable row in the panel: an icon, a label, and the whole row as the target. */
 @Composable
 private fun PanelRow(
@@ -623,10 +687,14 @@ private fun WidgetHeader(
         LiveClock(ctx, 10f, p.textSecondary.toArgb())
         if (showPanelToggle) {
             Image(
+                // A hamburger, not a bolt. The bolt was meant to read as "quick
+                // actions" and read as decoration instead — the first report of this
+                // feature was that the widget had no menu button at all. ☰ is the one
+                // mark everybody already knows means "there is a menu here".
                 provider = ImageProvider(
-                    if (state.panelOpen) R.drawable.ic_widget_close else R.drawable.ic_widget_bolt,
+                    if (state.panelOpen) R.drawable.ic_widget_close else R.drawable.ic_widget_menu,
                 ),
-                contentDescription = if (state.panelOpen) "סגור פעולות מהירות" else "פעולות מהירות",
+                contentDescription = if (state.panelOpen) "סגור תפריט" else "תפריט פעולות מהירות",
                 modifier = GlanceModifier.size(26.dp).padding(start = 6.dp)
                     .semantics { testTag = WidgetTags.PANEL_TOGGLE }
                     .clickable(actionRunCallback<ToggleQuickPanelAction>()),
@@ -941,12 +1009,53 @@ class SmartRingWidgetMediumReceiver : GlanceAppWidgetReceiver() { override val g
 class SmartRingWidgetWideReceiver   : GlanceAppWidgetReceiver() { override val glanceAppWidget = SmartRingWidgetWide()   }
 class SmartRingWidgetLargeReceiver  : GlanceAppWidgetReceiver() { override val glanceAppWidget = SmartRingWidgetLarge()  }
 
-/** Re-renders every widget instance of every size. Called immediately after any
- *  alarm mutation (via WidgetRefresher, from AlarmScheduler) and periodically
- *  (via WidgetRefreshWorker) so the next-alarm row doesn't go stale. */
-suspend fun refreshAllWidgets(ctx: Context) {
-    SmartRingWidgetSmall().updateAll(ctx)
-    SmartRingWidgetMedium().updateAll(ctx)
-    SmartRingWidgetWide().updateAll(ctx)
-    SmartRingWidgetLarge().updateAll(ctx)
+/** Each widget size, paired with the receiver the framework knows it by. */
+private val WIDGET_SIZES: List<Pair<() -> GlanceAppWidget, Class<out GlanceAppWidgetReceiver>>> = listOf(
+    { SmartRingWidgetSmall() }  to SmartRingWidgetSmallReceiver::class.java,
+    { SmartRingWidgetMedium() } to SmartRingWidgetMediumReceiver::class.java,
+    { SmartRingWidgetWide() }   to SmartRingWidgetWideReceiver::class.java,
+    { SmartRingWidgetLarge() }  to SmartRingWidgetLargeReceiver::class.java,
+)
+
+/**
+ * Re-renders every placed widget, and says how many it found.
+ *
+ * Two mechanisms, deliberately, because the first one can silently do nothing:
+ *
+ * 1. **`updateAll`** resolves which widgets exist through `GlanceAppWidgetManager`, which
+ *    keeps its own persisted mapping from provider to `GlanceAppWidget` class. When that
+ *    mapping is missing or stale, `updateAll` iterates zero ids, returns normally, and
+ *    updates nothing at all. That is indistinguishable from success to every caller —
+ *    `WidgetRefresher` only logs failures, so a refresh that quietly no-ops leaves no
+ *    trace whatsoever. Reports of "the widgets don't sync" survived three releases partly
+ *    because nothing here could tell those two apart.
+ * 2. **An explicit `APPWIDGET_UPDATE` broadcast** to each of our receivers, carrying the
+ *    ids `AppWidgetManager` itself reports. Those ids are the framework's own and cannot
+ *    be stale. `GlanceAppWidgetReceiver` extends `AppWidgetProvider`, so the broadcast
+ *    lands in `onUpdate` and forces a render — and rebuilds Glance's mapping on the way.
+ *
+ * The count is returned so the caller can log it. A refresh that reports 0 widgets when
+ * the user is looking at one on their home screen is the whole diagnosis in a single line.
+ */
+suspend fun refreshAllWidgets(ctx: Context): Int {
+    val manager = AppWidgetManager.getInstance(ctx)
+    var found = 0
+    WIDGET_SIZES.forEach { (widget, receiver) ->
+        val ids = runCatching {
+            manager.getAppWidgetIds(ComponentName(ctx, receiver))
+        }.getOrNull() ?: IntArray(0)
+        found += ids.size
+        // Best-effort per size: one size failing must not stop the other three.
+        runCatching { widget().updateAll(ctx) }
+        if (ids.isNotEmpty()) {
+            runCatching {
+                ctx.sendBroadcast(
+                    Intent(AppWidgetManager.ACTION_APPWIDGET_UPDATE)
+                        .setComponent(ComponentName(ctx, receiver))
+                        .putExtra(AppWidgetManager.EXTRA_APPWIDGET_IDS, ids),
+                )
+            }
+        }
+    }
+    return found
 }

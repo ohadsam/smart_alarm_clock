@@ -1,5 +1,77 @@
 # SmartRing – Changelog
 
+## v1.12.0 (2026-09-20)
+
+Reported as "the widgets still don't sync, and there is no hamburger button to open the
+menu", with a three-day log attached. The menu was a straightforward mistake. The sync
+report could not be answered from the log at all — and **that** is the finding this
+release is mostly about.
+
+### What the log could and could not say
+
+It showed every alarm operation working: created, scheduled, rang, auto-stopped, edited,
+deleted. It showed `MY_PACKAGE_REPLACED` three times. It contained **no
+`WidgetRefresher` line whatsoever** — and that was not evidence of health, because until
+now `WidgetRefresher` logged *only failures*. A refresh that ran and updated nothing
+looked exactly like a refresh that worked.
+
+Nor could the log say which build produced it: `MY_PACKAGE_REPLACED` carries no version,
+so "this is fixed and still broken" and "this build predates the fix" were
+indistinguishable. Three rounds of widget fixes have now been shipped against reports
+that could not be localised, which is a diagnosis problem before it is a widget problem.
+
+So, first:
+
+- **`WidgetRefresher` now reports the count**, and says so explicitly when it is zero:
+  "רענון ווידג'טים רץ אך לא נמצא אף ווידג'ט מוצב". Zero, while a widget is visibly on the
+  home screen, is the entire diagnosis in one line. Logged only when the count *changes*,
+  so a burst of refreshes cannot flood a log with three-day retention.
+- **The app logs its version on every start.**
+- **A `provideGlance` that throws is caught and logged.** Glance substitutes its own error
+  layout for anything that escapes, silently, with nothing reaching AppLogger — so a
+  widget that failed to render was indistinguishable from one that was never refreshed.
+  The widget now says "לא ניתן לטעון את השעמורים · הקש לפתיחת האפליקציה" rather than
+  falling back to the empty state, because "אין שעמורים" when the database could not be
+  read is the widget asserting something untrue.
+
+### The refresh no longer depends on Glance's own bookkeeping
+
+`GlanceAppWidget.updateAll()` resolves which widgets exist through
+`GlanceAppWidgetManager`, which keeps a persisted mapping from provider to
+`GlanceAppWidget` class. **When that mapping is missing or stale, `updateAll` iterates
+zero ids, returns normally, and updates nothing** — success, to every caller.
+
+`refreshAllWidgets` now also asks `AppWidgetManager` for the ids of each of our four
+receivers — the framework's own ids, which cannot be stale — and sends an explicit
+`APPWIDGET_UPDATE` broadcast carrying them. `GlanceAppWidgetReceiver` extends
+`AppWidgetProvider`, so that lands in `onUpdate` and forces a render, rebuilding Glance's
+mapping on the way. Each size is attempted independently, so one failing does not stop the
+other three.
+
+**Stated honestly: this is not a confirmed diagnosis.** I could not reproduce the user's
+device from here, and the log — by the shortcoming described above — does not name a
+cause. The stale-mapping path is a real way for `updateAll` to no-op silently, and the
+broadcast makes the refresh correct whether or not that is what was happening. The count
+in the log is what will actually settle it on the next report.
+
+### The menu button
+
+It was a bolt (⚡), and only on the two large sizes. The bolt was meant to read as "quick
+actions" and read as decoration instead — the first report of the feature was that the
+widget had no menu button at all, which is as clear a verdict on an icon as one gets. It
+is a hamburger (☰) now, the one mark everybody already reads as "there is a menu here",
+and the medium widget has it too. The medium size opens the panel in place of its
+next-alarm line, the same way the large ones replace their list.
+
+The small (2x2) widget still has no menu: at two cells there is no room for a panel, and a
+button that opened something unreadable would be worse than its absence.
+
+### Tests
+
+`WidgetRenderTest` (+5, now 27) — a failed load is reported rather than shown as an empty
+schedule, it outranks an open panel, the medium body offers the menu, and opening it
+replaces the next-alarm line.
+
 ## v1.11.0 (2026-09-19)
 
 ### The shortcuts are the user's now

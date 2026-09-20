@@ -881,6 +881,25 @@ If the user asks for a PR-based workflow going forward, follow that instead and 
   armed on the alarm's own code would have silently cancelled the real 06:30 — the user
   tests their alarm and, in doing so, destroys it. Any future "fire this alarm now/soon"
   feature needs a fourth space, not a reuse of an existing one.
+- **A code path whose logging is failure-only cannot be diagnosed from a user's log.**
+  `WidgetRefresher` logged only exceptions, so "the refresh ran and updated nothing" and
+  "the refresh worked" produced identical logs — namely, no line at all. Three rounds of
+  widget fixes shipped against reports that could not be localised because of it. When a
+  batch adds a background path the user will later report on, log the *outcome*, not only
+  the exception: a count, and an explicit line for the zero case, which is usually the
+  bug. Rate-limit by logging only when the value changes — this app's log keeps three days
+  and a 15-minute worker would otherwise bury everything else. Log `BuildConfig.VERSION_NAME`
+  at startup too: `MY_PACKAGE_REPLACED` does not say *which* version replaced it, so
+  without it "still broken after the fix" and "this build predates the fix" read the same.
+- **`GlanceAppWidget.updateAll()` can update nothing and report success.** It resolves
+  which widgets exist through `GlanceAppWidgetManager`'s persisted provider→class mapping;
+  if that is missing or stale it iterates zero ids and returns normally. Pair it with the
+  framework's own answer — `AppWidgetManager.getAppWidgetIds(ComponentName(ctx, receiver))`
+  — and send an explicit `ACTION_APPWIDGET_UPDATE` broadcast with those ids, which lands in
+  `GlanceAppWidgetReceiver.onUpdate`, forces a render and rebuilds the mapping. Also wrap
+  `provideGlance`'s data-gathering: Glance replaces anything that escapes with its own
+  error layout, silently, so a render that throws looks exactly like a refresh that never
+  happened.
 - **"There are widget tests" is not "the widget is tested".** Until v1.10.0 this repo had
   four kinds of widget coverage — descriptor XML parsing (`WidgetProviderInfoTest`),
   "are the providers installed" (`WidgetProviderInstrumentedTest`), the pure row-ordering
