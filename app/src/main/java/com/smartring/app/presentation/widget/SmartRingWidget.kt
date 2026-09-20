@@ -49,6 +49,7 @@ import com.smartring.app.util.WidgetAlarmEntry
 import com.smartring.app.util.buildWidgetRows
 import com.smartring.app.util.nextOccasionalDate
 import com.smartring.app.util.widgetDayLabel
+import com.smartring.app.util.widgetMoreAlarmsLabel
 import com.smartring.app.util.widgetRenderSummary
 import java.util.Calendar
 import kotlinx.coroutines.CancellationException
@@ -167,6 +168,9 @@ internal object WidgetTags {
     /** The row's own day label. Tagged because the hero line prints the same day text,
      *  so matching on the words alone is ambiguous by construction. */
     fun day(id: Long) = "widget-day-$id"
+
+    /** The 2x2 hero line's "and N more armed" note. */
+    const val MORE = "widget-more"
 
     const val PANEL = "widget-panel"
     const val LOAD_ERROR = "widget-load-error"
@@ -558,6 +562,18 @@ internal fun SmallBody(ctx: Context, state: WidgetUiState, p: WidgetPalette) {
                         maxLines = 1,
                     )
                     Countdown(ctx, fireAt, 9f, p.accentBlue)
+                    // Without this the 2x2 looked identical whether one alarm was armed
+                    // or four, which is most of why a stale widget was so hard to tell
+                    // apart from a correct one.
+                    widgetMoreAlarmsLabel(state.armedCount)?.let {
+                        Text(
+                            it,
+                            style = TextStyle(fontSize = 9.sp,
+                                color = ColorProvider(p.textSecondary)),
+                            modifier = GlanceModifier.semantics { testTag = WidgetTags.MORE },
+                            maxLines = 1,
+                        )
+                    }
                 } else {
                     WidgetEmptyState(ctx, p, state.hasAnyAlarms, compact = true)
                 }
@@ -1179,11 +1195,12 @@ internal val WIDGET_SIZES: List<Pair<() -> GlanceAppWidget, Class<out GlanceAppW
 /**
  * What a refresh actually did, rather than how many widgets exist.
  *
- * [found] is how many are placed on a home screen, per `AppWidgetManager`. [updated] is
- * how many `updateAll` calls returned without throwing. Until v1.12.4 only [found] was
- * reported, and it was logged as "N widgets updated" — an overclaim, since a size whose
- * `updateAll` threw was counted exactly like one that rendered. [errors] carries whatever
- * did throw, which nothing recorded at all before.
+ * [found] is how many are placed on a home screen, per `AppWidgetManager` — the
+ * framework's own count, which cannot be stale. [updated] is how many of those a
+ * per-widget `update()` call actually completed for. Before v1.12.5 the two were the same
+ * number by construction: `updated` was incremented by `ids.size` whenever the single
+ * `updateAll()` call did not throw, so a refresh that resolved zero widgets internally and
+ * returned normally still reported every placed widget as updated.
  */
 internal data class WidgetRefreshReport(
     val found: Int,
@@ -1194,40 +1211,62 @@ internal data class WidgetRefreshReport(
 }
 
 /**
- * Re-renders every placed widget, and reports what it managed to do.
+ * Re-renders every placed widget, one widget at a time, and reports what it managed.
  *
- * Two mechanisms, deliberately, because the first one can silently do nothing:
+ * ## Why not `updateAll`
  *
- * 1. **`updateAll`** resolves which widgets exist through `GlanceAppWidgetManager`, which
- *    keeps its own persisted mapping from provider to `GlanceAppWidget` class. When that
- *    mapping is missing or stale, `updateAll` iterates zero ids, returns normally, and
- *    updates nothing at all — indistinguishable from success to every caller.
- * 2. **An explicit `APPWIDGET_UPDATE` broadcast** to each of our receivers, carrying the
- *    ids `AppWidgetManager` itself reports. Those ids are the framework's own and cannot
- *    be stale. `GlanceAppWidgetReceiver` extends `AppWidgetProvider`, so the broadcast
- *    lands in `onUpdate` and forces a render — and rebuilds Glance's mapping on the way.
- *    (`APPWIDGET_UPDATE` is not one of the framework's protected broadcasts — unlike
- *    `APPWIDGET_UPDATE_OPTIONS`, `APPWIDGET_DELETED` and `APPWIDGET_ENABLED` — so an app
- *    may send it, and `setComponent` keeps it explicit, which API 26+ requires for a
- *    manifest-declared receiver.)
+ * `updateAll` resolves which widgets exist through `GlanceAppWidgetManager`, which keeps
+ * its own persisted mapping from provider to `GlanceAppWidget` class. When that mapping is
+ * missing or stale it iterates **zero** ids, returns normally, and updates nothing — and
+ * that is indistinguishable from success to every caller.
  *
- * Each size is still best-effort — one failing must not stop the other three — but a
- * failure is now *returned* rather than dropped on the floor.
+ * v1.12.4's log caught exactly this shape. Two alarms were created 14 seconds apart, both
+ * earlier than the one already showing; both refreshes reported "1 placed, 1 updated"; and
+ * no render line followed either one. The render log dedupes on content, and the content
+ * had changed, so a render would have been recorded. None happened. The refresh reported
+ * success for work it had not done.
+ *
+ * `GlanceAppWidgetManager.getGlanceIdBy(appWidgetId)` builds a `GlanceId` straight from
+ * the framework's own id without consulting that mapping at all, so the per-id `update()`
+ * below cannot be defeated by it. It also makes [updated] mean something: one increment
+ * per widget that actually completed a render.
+ *
+ * The `APPWIDGET_UPDATE` broadcast (added in v1.12.0, and legitimate — it is not one of
+ * the framework's protected broadcasts, unlike `APPWIDGET_UPDATE_OPTIONS`,
+ * `APPWIDGET_DELETED` and `APPWIDGET_ENABLED`) is kept only as a last resort, when the
+ * explicit path updated nothing at all. Sending it unconditionally would queue a second,
+ * asynchronous render through `onUpdate`'s `goAsync` window for every refresh — redundant
+ * work, and a second source of render timing that made the ordering in the log harder to
+ * read than it needed to be.
  */
 internal suspend fun refreshAllWidgets(ctx: Context): WidgetRefreshReport {
-    val manager = AppWidgetManager.getInstance(ctx)
+    val appWidgetManager = AppWidgetManager.getInstance(ctx)
+    val glanceManager = GlanceAppWidgetManager(ctx)
     var found = 0
     var updated = 0
     val errors = mutableListOf<String>()
-    WIDGET_SIZES.forEach { (widget, receiver) ->
+
+    WIDGET_SIZES.forEach { (newWidget, receiver) ->
         val ids = runCatching {
-            manager.getAppWidgetIds(ComponentName(ctx, receiver))
+            appWidgetManager.getAppWidgetIds(ComponentName(ctx, receiver))
         }.getOrNull() ?: IntArray(0)
         found += ids.size
-        runCatching { widget().updateAll(ctx) }
-            .onSuccess { updated += ids.size }
-            .onFailure { errors += "${receiver.simpleName}: ${it.javaClass.simpleName}: ${it.message}" }
-        if (ids.isNotEmpty()) {
+        if (ids.isEmpty()) return@forEach
+
+        val widget = newWidget()
+        var updatedHere = 0
+        ids.forEach { appWidgetId ->
+            // Best-effort per widget: one failing must not stop the others.
+            runCatching { widget.update(ctx, glanceManager.getGlanceIdBy(appWidgetId)) }
+                .onSuccess { updatedHere++ }
+                .onFailure {
+                    errors += "${receiver.simpleName}#$appWidgetId: " +
+                        "${it.javaClass.simpleName}: ${it.message}"
+                }
+        }
+        updated += updatedHere
+
+        if (updatedHere == 0) {
             runCatching {
                 ctx.sendBroadcast(
                     Intent(AppWidgetManager.ACTION_APPWIDGET_UPDATE)

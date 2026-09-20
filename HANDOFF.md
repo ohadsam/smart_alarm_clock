@@ -166,6 +166,9 @@
 | 137 | הווידג'ט רושם ללוג **מה הוא צייר**, מדודפ לפי תוכן — לא רק שהרענון רץ | `SmartRingBaseWidget.logRender` (v1.12.4) |
 | 138 | כל רענון נרשם עם סיבה; `found` ו-`updated` נפרדים, ושגיאת `updateAll` לא נבלעת | `WidgetRefresher`/`WidgetRefreshReport` (v1.12.4) |
 | 139 | `APPWIDGET_UPDATE` אינו שידור מוגן (בניגוד ל-`_UPDATE_OPTIONS`/`_DELETED`/`_ENABLED`) — מותר לשלוח אותו | `refreshAllWidgets` (v1.12.4) |
+| 140 | **`updateAll` לא אמין** — הוא מוצא ווידג'טים דרך מיפוי מתמיד שיכול להיות ריק, ואז מעדכן אפס ומסיים בהצלחה | `refreshAllWidgets` (v1.12.5) |
+| 141 | עדכון לפי `getGlanceIdBy(appWidgetId)` עוקף את המיפוי לגמרי — זה המסלול הנכון | `refreshAllWidgets` (v1.12.5) |
+| 142 | ה-2x2 מציג "ועוד N פעילים"; בלעדיו ווידג'ט תקוע נראה כמו תקין | `widgetMoreAlarmsLabel` (v1.12.5) |
 
 ---
 

@@ -1044,6 +1044,30 @@ If the user asks for a PR-based workflow going forward, follow that instead and 
   invalidated the flow, refreshed the widget and rendered again, forever. It does not, but
   **check the table sets before adding a log call to a render or refresh path.**
 
+- **`GlanceAppWidget.updateAll()` can update nothing and return successfully.** It resolves
+  which widgets exist through `GlanceAppWidgetManager`'s persisted provider→class mapping;
+  when that mapping is missing or stale it iterates zero ids and returns normally. This
+  cost five releases. The symptom is a widget frozen on old content while every log line
+  says the refresh succeeded. **Update each widget explicitly instead:**
+  `GlanceAppWidgetManager(ctx).getGlanceIdBy(appWidgetId)` builds a `GlanceId` straight
+  from an `AppWidgetManager.getAppWidgetIds(...)` entry without touching the mapping, and
+  `widget.update(ctx, glanceId)` then cannot be defeated by it.
+
+- **Instrument the effect, not the trigger — and make the two distinguishable.** Three
+  releases of "the widgets don't sync" were unresolvable because every log line described
+  the *refresh* (it ran; N widgets are placed) and none described the *render* (what was
+  actually drawn). One render line per content change settled it immediately: a refresh
+  with no render after it is a refresh that did nothing. When a report is "X doesn't
+  update", the log needs a line written by the thing that draws X, not by the thing that
+  asks it to.
+
+- **A UI that looks identical in the healthy and broken states hides its own bugs.** The
+  2x2 widget showed only the next alarm, so three armed alarms rendered exactly like one —
+  which meant a stale widget and a correct one were visually the same, and the user could
+  only report "it seems wrong" rather than "it's showing the wrong one". Adding "and N
+  more armed" was a UX improvement *and* a diagnostic one. When a surface summarises,
+  check whether it can also say how much it is leaving out.
+
 ## Known limitations (don't re-report these as new findings unless you're the batch fixing them)
 
 - **Settings' English toggle doesn't change any visible UI text.** Every screen hardcodes Hebrew

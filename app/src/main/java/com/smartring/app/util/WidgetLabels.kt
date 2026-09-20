@@ -91,3 +91,20 @@ fun widgetRenderSummary(rowCount: Int, nextTimeText: String?, nextName: String?)
     nextTimeText == null -> "$rowCount שעמורים, אף אחד לא פעיל"
     else -> "$rowCount שעמורים, הבא $nextTimeText (\"${nextName.orEmpty()}\")"
 }
+
+/**
+ * "And N more armed", for the 2x2 — or null when there is nothing more to say.
+ *
+ * The smallest widget shows one alarm, the next one to ring. That is the right thing to
+ * show and the wrong thing to show *alone*: with three alarms armed it looked exactly like
+ * a phone with one, so a widget that was merely stale and a widget that was correct were
+ * visually identical. A line that says how many others are waiting makes the difference
+ * visible without spending the room a second row would cost.
+ *
+ * Singular is spelled out rather than rendered as "ועוד 1 פעילים", which is not Hebrew.
+ */
+fun widgetMoreAlarmsLabel(armedCount: Int): String? = when {
+    armedCount <= 1 -> null
+    armedCount == 2 -> "ועוד שעמור אחד"
+    else -> "ועוד ${armedCount - 1} פעילים"
+}

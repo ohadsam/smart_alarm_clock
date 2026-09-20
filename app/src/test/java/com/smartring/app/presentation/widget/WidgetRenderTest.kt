@@ -462,6 +462,60 @@ class WidgetRenderTest {
             onNode(hasText("מחר")).assertExists()
         }
 
+    // ── The 2x2 says when it is not showing everything ────────────────────
+
+    /**
+     * Reported as: "it showed only the first one created, and there was no indication at
+     * all that other alarms were set." Two alarms were then created for *earlier* times
+     * than the one on screen, and the widget looked the same as it would with one alarm —
+     * so a widget that had gone stale and a widget that was correct were indistinguishable
+     * by eye. The count is what separates them.
+     */
+    @Test
+    fun `the small body says how many other alarms are armed`() = runGlanceAppWidgetUnitTest {
+        provideComposable {
+            SmallBody(
+                ctx,
+                state(
+                    entry(1, "מוקדם", at(2026, 9, 19, 15, 28)),
+                    entry(2, "אחר כך", at(2026, 9, 19, 15, 49)),
+                    entry(3, "מאוחר", at(2026, 9, 19, 16, 45)),
+                ),
+                palette,
+            )
+        }
+
+        onNode(hasTestTag(WidgetTags.NEXT_TIME)).assertExists()
+        onNode(hasTestTag(WidgetTags.MORE)).assertHasText("ועוד 2 פעילים")
+    }
+
+    @Test
+    fun `a lone armed alarm gets no more-alarms line`() = runGlanceAppWidgetUnitTest {
+        provideComposable {
+            SmallBody(ctx, state(entry(1, "בוקר", at(2026, 9, 19, 7, 30))), palette)
+        }
+
+        onNode(hasTestTag(WidgetTags.NEXT_TIME)).assertExists()
+        onNode(hasTestTag(WidgetTags.MORE)).assertDoesNotExist()
+    }
+
+    /** Switched-off alarms are not "armed" and must not be counted as though they were. */
+    @Test
+    fun `alarms that are switched off do not inflate the count`() = runGlanceAppWidgetUnitTest {
+        provideComposable {
+            SmallBody(
+                ctx,
+                state(
+                    entry(1, "פעיל", at(2026, 9, 19, 7, 30)),
+                    entry(2, "כבוי", fireAt = null, enabled = false),
+                ),
+                palette,
+            )
+        }
+
+        onNode(hasTestTag(WidgetTags.MORE)).assertDoesNotExist()
+    }
+
     // ── The 2x2 has the menu too ──────────────────────────────────────────
 
     /**

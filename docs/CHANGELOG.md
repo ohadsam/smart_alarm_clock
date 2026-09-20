@@ -1,5 +1,61 @@
 # SmartRing – Changelog
 
+## v1.12.5 (2026-09-20)
+
+### The refresh reported success for work it had not done
+
+v1.12.4's render log found it in one read. Two alarms created 14 seconds apart, both for
+times *earlier* than the one already on screen:
+
+```
+[15:18:38] Widget: ווידג'ט 2x2 רונדר — 2 שעמורים, הבא 16:45 ("השכמה (עותק)")
+[15:18:51] Scheduler: תוזמן: "כללי" (#10) ל-20/09 15:28
+[15:18:51] WidgetRefresher: רענון (שינוי בשעמורים): 1 מוצבים, 1 עודכנו     ← no render
+[15:19:05] Scheduler: תוזמן: "כללי" (#11) ל-20/09 15:49
+[15:19:05] WidgetRefresher: רענון (שינוי בשעמורים): 1 מוצבים, 1 עודכנו     ← no render
+```
+
+Both refreshes reported "1 placed, 1 updated". Neither produced a render line — and the
+render log dedupes on *content*, which had changed, so a render would have been recorded.
+None happened. The widget stayed on the first alarm created, which is exactly what was
+reported.
+
+**Cause.** `updateAll` resolves which widgets exist through `GlanceAppWidgetManager`'s own
+persisted provider→class mapping. When that mapping is missing or stale it iterates zero
+ids, returns normally, and updates nothing — indistinguishable from success. v1.12.0 named
+this as a possibility and added a broadcast alongside it; what it did not do was stop
+*trusting* `updateAll`, or count anything other than the widgets the framework said were
+placed.
+
+**Fix.** Every placed widget is now updated individually, by the framework's own id:
+`GlanceAppWidgetManager.getGlanceIdBy(appWidgetId)` builds a `GlanceId` without consulting
+that mapping at all, and `update()` is called per widget. The mapping cannot defeat it.
+
+The `APPWIDGET_UPDATE` broadcast stays, but only as a last resort when the explicit path
+updated nothing. Sending it on every refresh queued a second asynchronous render through
+`onUpdate`'s `goAsync` window each time — redundant work, and a second source of render
+timing that made the log harder to read than it needed to be. (It is legitimate to send:
+checked against AOSP, `APPWIDGET_UPDATE` is not a protected broadcast, though
+`APPWIDGET_UPDATE_OPTIONS`, `APPWIDGET_DELETED` and `APPWIDGET_ENABLED` are.)
+
+**And the count means something now.** `updated` increments once per widget whose
+`update()` actually completed. v1.12.4 still incremented it by the framework's id count
+whenever the single `updateAll` call did not throw — so the honest-looking line
+"1 מוצבים, 1 עודכנו" was, in the log above, reporting a widget as updated that had not
+rendered. That was the last thing standing between the log and the diagnosis.
+
+### The 2x2 says when it is not showing everything
+
+Also reported: "no indication at all that other alarms were set." With three alarms armed
+the smallest widget looked precisely as it does with one — so a widget that had gone stale
+and a widget that was correct were indistinguishable by eye, which is part of why this took
+five rounds to pin down. It now carries a line under the countdown: `ועוד שעמור אחד`, or
+`ועוד N פעילים`. Switched-off alarms are not counted, and the singular is spelled out
+rather than rendered as the ungrammatical "ועוד 1 פעילים".
+
+`widgetMoreAlarmsLabel` is pure and in `WidgetLabels.kt`, per this codebase's rule. +6
+tests (40 render tests).
+
 ## v1.12.4 (2026-09-20)
 
 ### The log could not answer the question, again

@@ -3,6 +3,7 @@ package com.smartring.app.util
 import java.util.Calendar
 import java.util.TimeZone
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Before
 import org.junit.Test
 
@@ -125,5 +126,24 @@ class WidgetLabelsTest {
             widgetRenderSummary(2, "14:58", "בוקר"),
         )
         assertEquals("each distinct state needs its own line", summaries.size, summaries.toSet().size)
+    }
+
+    // ── "And N more armed", on the smallest widget ─────────────────────────
+
+    @Test
+    fun `a single armed alarm has nothing more to say`() {
+        assertNull(widgetMoreAlarmsLabel(1))
+        assertNull(widgetMoreAlarmsLabel(0))
+    }
+
+    /** "ועוד 1 פעילים" is not Hebrew; the singular is spelled out. */
+    @Test
+    fun `two armed alarms read as one more, in the singular`() =
+        assertEquals("ועוד שעמור אחד", widgetMoreAlarmsLabel(2))
+
+    @Test
+    fun `more than two counts the others, not the total`() {
+        assertEquals("ועוד 2 פעילים", widgetMoreAlarmsLabel(3))
+        assertEquals("ועוד 4 פעילים", widgetMoreAlarmsLabel(5))
     }
 }
