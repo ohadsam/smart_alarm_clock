@@ -210,9 +210,23 @@ private fun clockRemoteViews(ctx: Context, sizeSp: Float, colorArgb: Int): Remot
         setTextColor(R.id.widget_clock, colorArgb)
     }
 
+/**
+ * `wrapContentSize()` is not decoration — without it this view swallows the widget.
+ *
+ * Glance gives an `AndroidRemoteViews` an expanding container by default, so the embedded
+ * TextClock filled the whole of a 2x2 widget and pushed every sibling out of bounds: the
+ * next alarm's time, its day, its countdown and even the empty state were all laid out
+ * past the visible area. What the user saw was a blank box with the current time in the
+ * corner — reported, reasonably, as "the widget shows nothing and doesn't sync", because
+ * no data ever appeared and nothing about it ever changed.
+ *
+ * The same clock sits in the header Row of the three larger sizes, where expanding
+ * consumed the width instead and pushed the menu and ＋ buttons off the edge. That is why
+ * the hamburger "wasn't there": it was rendered, off-screen.
+ */
 @Composable
 private fun LiveClock(ctx: Context, sizeSp: Float, colorArgb: Int) {
-    AndroidRemoteViews(clockRemoteViews(ctx, sizeSp, colorArgb))
+    AndroidRemoteViews(clockRemoteViews(ctx, sizeSp, colorArgb), GlanceModifier.wrapContentSize())
 }
 
 /** Chronometer's base is on the elapsed-realtime clock, not the wall clock, so the
@@ -248,7 +262,12 @@ private fun countdownRemoteViews(ctx: Context, fireAt: Long, sizeSp: Float, colo
  */
 @Composable
 private fun Countdown(ctx: Context, fireAt: Long, sizeSp: Float, color: Color) {
-    AndroidRemoteViews(countdownRemoteViews(ctx, fireAt, sizeSp, color.toArgb()))
+    // Bounded for the same reason as LiveClock: an embedded RemoteViews left to its
+    // default container expands and pushes its siblings out of the widget.
+    AndroidRemoteViews(
+        countdownRemoteViews(ctx, fireAt, sizeSp, color.toArgb()),
+        GlanceModifier.wrapContentSize(),
+    )
 }
 
 @EntryPoint @InstallIn(SingletonComponent::class)
@@ -405,7 +424,12 @@ internal fun SmallBody(ctx: Context, state: WidgetUiState, p: WidgetPalette) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        LiveClock(ctx, 11f, p.textSecondary.toArgb())
+        // No current-time clock at this size any more. Two cells fit about three short
+        // lines, and the current time is the least valuable of the four things that were
+        // competing for them — the phone shows it in the status bar, on the lock screen
+        // and usually in another widget, while "when does my next alarm ring" is the one
+        // question only this widget answers. It was also the element that expanded and
+        // hid the other three.
         val fireAt = next?.fireAt
         if (state.loadError != null) {
             WidgetLoadError(ctx, p, compact = true)
@@ -684,7 +708,11 @@ private fun WidgetHeader(
                 .clickable(actionStartActivity(openListIntent(ctx))),
             maxLines = 1,
         )
-        LiveClock(ctx, 10f, p.textSecondary.toArgb())
+        // Controls before the clock, deliberately. A Row lays out in order, so whatever
+        // sits last is what a squeeze pushes off the edge — and a menu button nobody can
+        // reach is worse than a clock nobody can see. The clock was previously between
+        // the title and these buttons, which is how an expanding TextClock managed to
+        // hide both of them.
         if (showPanelToggle) {
             Image(
                 // A hamburger, not a bolt. The bolt was meant to read as "quick
@@ -705,11 +733,12 @@ private fun WidgetHeader(
         Image(
             provider = ImageProvider(R.drawable.ic_widget_add),
             contentDescription = "הוסף שעמור",
-            modifier = GlanceModifier.size(26.dp).padding(start = 6.dp)
+            modifier = GlanceModifier.size(26.dp).padding(horizontal = 6.dp)
                 .semantics { testTag = WidgetTags.ADD }
                 .clickable(actionStartActivity(openAddIntent(ctx))),
             colorFilter = ColorFilter.tint(ColorProvider(p.accentBlue)),
         )
+        LiveClock(ctx, 10f, p.textSecondary.toArgb())
     }
 }
 

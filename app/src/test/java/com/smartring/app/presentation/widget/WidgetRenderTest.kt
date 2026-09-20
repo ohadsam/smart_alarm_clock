@@ -425,4 +425,38 @@ class WidgetRenderTest {
             onNode(hasTestTag(WidgetTags.preset(1))).assertExists()
             onNode(hasTestTag(WidgetTags.NEXT_TIME)).assertDoesNotExist()
         }
+
+    // ── The 2x2 body fits in 2x2 ──────────────────────────────────────────
+
+    /**
+     * The regression this pins could not be caught by asserting on the node tree, because
+     * the tree was always right: `runGlanceAppWidgetUnitTest` does not lay out or measure,
+     * so content pushed off a real widget still "exists". An embedded TextClock took
+     * Glance's expanding default container, filled the whole 2x2, and hid everything
+     * below it — while every test here passed.
+     *
+     * What is assertable is the structural cause: the smallest body no longer competes
+     * for its three lines with a fourth element that can expand.
+     */
+    @Test
+    fun `the small body spends its space on the alarm, not on a clock`() =
+        runGlanceAppWidgetUnitTest {
+            provideComposable {
+                SmallBody(ctx, state(entry(1, "בוקר", at(2026, 9, 19, 7, 30))), palette)
+            }
+
+            onNode(hasTestTag(WidgetTags.NEXT_TIME)).assertExists()
+            onNode(hasTestTag(WidgetTags.day(0))).assertDoesNotExist()
+        }
+
+    @Test
+    fun `the small body still shows the day and the countdown alongside the time`() =
+        runGlanceAppWidgetUnitTest {
+            provideComposable {
+                SmallBody(ctx, state(entry(1, "בוקר", at(2026, 9, 20, 7, 30))), palette)
+            }
+
+            onNode(hasTestTag(WidgetTags.NEXT_TIME)).assertExists()
+            onNode(hasText("מחר")).assertExists()
+        }
 }

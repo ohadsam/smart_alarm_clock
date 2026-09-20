@@ -900,6 +900,18 @@ If the user asks for a PR-based workflow going forward, follow that instead and 
   `provideGlance`'s data-gathering: Glance replaces anything that escapes with its own
   error layout, silently, so a render that throws looks exactly like a refresh that never
   happened.
+- **`runGlanceAppWidgetUnitTest` does not lay out or measure — it cannot see a widget
+  that renders off-screen.** It builds a node tree and answers questions about it, so
+  `onNode(hasTestTag(NEXT_TIME)).assertExists()` passes for content that a real host
+  clips away entirely. v1.12.1: an `AndroidRemoteViews` (an embedded `TextClock`) took
+  Glance's *expanding* default container, filled a whole 2x2 widget, and pushed the next
+  alarm, its day, its countdown and the empty state out of bounds — the user saw a blank
+  box with the time in one corner. Twenty-seven render tests passed throughout. **Always
+  pass an explicit `GlanceModifier.wrapContentSize()` to `AndroidRemoteViews`**, and order
+  a header `Row` so the controls come before decorative content, since a Row lays out in
+  order and what sits last is what a squeeze pushes off the edge. Treat "the render tests
+  pass" as "the content is correct", never as "the widget looks right" — for layout there
+  is no substitute for a screenshot from a real home screen, so ask for one.
 - **"There are widget tests" is not "the widget is tested".** Until v1.10.0 this repo had
   four kinds of widget coverage — descriptor XML parsing (`WidgetProviderInfoTest`),
   "are the providers installed" (`WidgetProviderInstrumentedTest`), the pure row-ordering

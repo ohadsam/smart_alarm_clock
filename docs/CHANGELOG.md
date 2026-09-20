@@ -1,5 +1,60 @@
 # SmartRing – Changelog
 
+## v1.12.1 (2026-09-20)
+
+### One bug, and it was hiding everything
+
+A screenshot settled what four rounds of code reading could not. A 2x2 widget on a real
+home screen: a blank box with **12:11 alone in one corner** — while an alarm was set for
+16:45 that should have been printed directly beneath it.
+
+The embedded `TextClock` — a real `android.widget.TextClock` inserted via
+`AndroidRemoteViews`, so the displayed time stays live without waking the app — takes
+Glance's **expanding** container by default. It filled the entire widget. Everything after
+it in the `Column` was laid out past the visible area: the next alarm's time, its day
+label, its countdown, and even the "אין שעמורים" empty state.
+
+That is the whole of "the widgets don't sync". Nothing ever appeared and nothing ever
+changed, because the only thing on screen was a clock that ticks by itself.
+
+**And it explains the missing menu button.** The same clock sits in the header `Row` of
+the three larger sizes, where expanding consumes the *width* instead and pushes the ☰ and
+＋ off the edge. The hamburger added in v1.12.0 was rendering — off-screen.
+
+The fix is one line per call site: an explicit `GlanceModifier.wrapContentSize()` on both
+embedded RemoteViews.
+
+### Two consequences worth taking
+
+- **The 2x2 widget no longer shows the current time at all.** Two cells fit about three
+  short lines, and the clock was the least valuable of the four things competing for them:
+  the phone shows the time in the status bar, on the lock screen, and usually in another
+  widget, while "when does my next alarm ring" is the one question only this widget
+  answers. It was also the element doing the damage.
+- **The header's controls now come before the clock.** A `Row` lays out in order, so
+  whatever sits last is what a squeeze pushes off the edge. A menu button nobody can reach
+  is worse than a clock nobody can see.
+
+### Why twenty-seven render tests did not catch it
+
+`runGlanceAppWidgetUnitTest` builds a node tree and answers questions about it. **It does
+not lay out or measure.** `onNode(hasTestTag(NEXT_TIME)).assertExists()` passed the entire
+time, for content a real host was clipping away completely.
+
+v1.10.0's claim that "widget rendering is now verified automatically" was true in a sense
+that excluded the actual failure mode, and saying so plainly here is the point: those
+tests verify that the *content* is correct, never that the widget *looks* right. For
+layout there is no substitute for a screenshot from a real home screen. That limit is now
+in the release checklist, along with the rule that an `AndroidRemoteViews` always gets an
+explicit size.
+
+### Tests
+
+`WidgetRenderTest` (+2, now 29) — pins the structural cause rather than the symptom, which
+is all a non-measuring renderer can pin: the smallest body no longer competes for its
+three lines with a fourth element that can expand, and still carries the day and countdown
+beside the time.
+
 ## v1.12.0 (2026-09-20)
 
 Reported as "the widgets still don't sync, and there is no hamburger button to open the

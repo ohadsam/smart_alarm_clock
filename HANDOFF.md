@@ -156,6 +156,9 @@
 | 127 | חריגה ב-`provideGlance` נתפסת ונרשמת; Glance בולע אותה לפריסת שגיאה משלו בלי לוג | `widgetState` + `WidgetLoadError` (v1.12.0) |
 | 128 | מספר הגרסה נרשם בכל הפעלה — `MY_PACKAGE_REPLACED` לבדו לא מזהה איזו גרסה רצה | `SmartRingApp` (v1.12.0) |
 | 129 | כפתור התפריט בווידג'ט = המבורגר, וגם בבינוני; הברק נקרא כקישוט | `ic_widget_menu.xml` (v1.12.0) |
+| 130 | **`AndroidRemoteViews` חייב `wrapContentSize()` מפורש** — ברירת המחדל מתפרסת ובולעת את הווידג'ט | `LiveClock`/`Countdown` (v1.12.1) |
+| 131 | הווידג'ט הקטן ללא שעון שעה נוכחית; כפתורי הכותרת לפני השעון כדי שהם לא יידחקו | `SmallBody`/`WidgetHeader` (v1.12.1) |
+| 132 | `runGlanceAppWidgetUnitTest` לא פורס ולא מודד — לא יתפוס תוכן שנגזר מחוץ לווידג'ט | `WidgetRenderTest` (v1.12.1) |
 
 ---
 
