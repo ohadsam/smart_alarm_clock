@@ -1,5 +1,66 @@
 # SmartRing – Changelog
 
+## v1.12.4 (2026-09-20)
+
+### The log could not answer the question, again
+
+A report: "I deleted and re-added an alarm and the widget shows no alarms." Between
+14:43:47 and 14:48:43 the attached log contains six alarm mutations — a delete, a create,
+an edit, another delete — and **not one `WidgetRefresher` line**. Not because the refresh
+did not run, but because v1.12.0 logged only when the *count of placed widgets changed*,
+and it stayed at 1 throughout.
+
+That dedup was wrong, and wrong on its own stated grounds. It existed to keep a
+15-minute periodic refresh from burying the log — but `WidgetRefreshWorker` calls
+`refreshAllWidgets` directly and logs nothing at all, so nothing that reaches
+`WidgetRefresher` is periodic. Everything it sees is user-triggered and therefore bounded.
+The noise it was protecting against did not exist; the six lines it suppressed were the
+entire diagnosis.
+
+### What is instrumented now
+
+- **Every refresh is logged, with the reason that triggered it** — `שינוי בשעמורים`,
+  `שינוי בקיצורים`, `נודניק`, `תזמון מחדש`, `צלצול נודניק`, `מעבר בהיר/כהה`. Which change
+  caused a refresh is most of what makes the line worth reading.
+- **The counts are honest.** `refreshAllWidgets` now returns a `WidgetRefreshReport` with
+  `found` (widgets placed, per `AppWidgetManager`) and `updated` (update calls that
+  returned without throwing) as separate numbers, plus the errors. v1.12.0 reported
+  `found` as "N widgets updated", which counted a size whose `updateAll` threw exactly
+  like one that rendered — and the throw itself went nowhere, swallowed by a bare
+  `runCatching`.
+- **The widget logs what it actually drew.** This is the fact no log has ever carried.
+  Every line to date described the *refresh*; none described the *render*. A report of
+  "it shows no alarms while one is set" has three causes, and one line now separates them:
+  no render line at that moment means the refresh never reached the widget; a line naming
+  the alarm means it did draw it and the question moves to the host; a line showing
+  nothing while an alarm exists means the data path is wrong, and the row count says how
+  wrong.
+
+The render line is deduplicated on its **content**, not on a count or a timer — a render
+that draws the same thing is not news, and one that draws something different always is.
+That keeps the periodic refresh quiet without suppressing a single change, which is
+exactly what the count-based rule failed to do.
+
+### What was ruled out, and one thing I got wrong mid-investigation
+
+I suspected the `APPWIDGET_UPDATE` broadcast added in v1.12.0 was a silent no-op, on the
+theory that it is a protected broadcast an app may not send and that the `runCatching`
+around it was swallowing a `SecurityException` on every call. Checked against AOSP's
+`core/res/AndroidManifest.xml` before building anything on it: `APPWIDGET_UPDATE` is
+**not** in the protected list, though `APPWIDGET_UPDATE_OPTIONS`, `APPWIDGET_DELETED`,
+`APPWIDGET_ENABLED` and `APPWIDGET_DISABLED` all are. The broadcast is legitimate and the
+`setComponent` keeps it explicit, which is what API 26+ requires. Hypothesis discarded.
+
+Also read end to end and found sound: `getAllAlarmsWithDetails` (reads every alarm, no
+filter), `buildWidgetRows` (no path that drops a freshly created alarm), and the
+`observeAlarms()` collector (Room re-emits on any write to the table). **No defect
+located.** The honest position is that this release does not claim a fix — it makes the
+next report answerable in one read instead of four rounds.
+
+`widgetRenderSummary` is pure and in `WidgetLabels.kt`, per this codebase's standing rule
+that the decision goes in a testable function and the Android component only performs it.
++6 tests.
+
 ## v1.12.3 (2026-09-20)
 
 ### The 2x2 gets the menu it was deliberately denied

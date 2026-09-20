@@ -49,7 +49,7 @@ class SmartRingApp : Application(), Configuration.Provider {
         // locale, font scale and more, none of which change what a widget looks like.
         if (lastNightMode != night) {
             lastNightMode = night
-            widgetRefresher.refresh()
+            widgetRefresher.refresh("מעבר בהיר/כהה")
         }
     }
 
@@ -100,7 +100,7 @@ class SmartRingApp : Application(), Configuration.Provider {
         // backoff so a failure that recurs immediately doesn't spin in a tight loop).
         appScope.launch {
             while (true) {
-                runCatching { alarmRepository.observeAlarms().collect { widgetRefresher.refresh() } }
+                runCatching { alarmRepository.observeAlarms().collect { widgetRefresher.refresh("שינוי בשעמורים") } }
                     .onFailure { e -> appLogger.log("SmartRingApp", "מעקב אחר שינויי שעמורים לעדכון ווידג'טים נכשל, ינסה שוב: ${e.message}") }
                 delay(5_000)
             }
@@ -117,7 +117,7 @@ class SmartRingApp : Application(), Configuration.Provider {
         appScope.launch {
             while (true) {
                 runCatching {
-                    quickPresetsRepository.config.drop(1).collect { widgetRefresher.refresh() }
+                    quickPresetsRepository.config.drop(1).collect { widgetRefresher.refresh("שינוי בקיצורים") }
                 }.onFailure { e ->
                     appLogger.log("SmartRingApp", "מעקב אחר שינויי קיצורים לעדכון ווידג'טים נכשל, ינסה שוב: ${e.message}")
                 }

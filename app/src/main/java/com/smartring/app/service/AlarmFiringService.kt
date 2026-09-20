@@ -151,7 +151,7 @@ class AlarmFiringService : Service() {
                 // all, so it still needs its own explicit refresh — otherwise the
                 // widget keeps showing the now-elapsed snooze countdown until the next
                 // periodic WidgetRefreshWorker run, up to 15 minutes later.
-            } else if (!isTest) widgetRefresher.refresh()
+            } else if (!isTest) widgetRefresher.refresh("צלצול נודניק")
 
             // Superseded while the bookkeeping above was running: that work is done and
             // committed, but the alarm that arrived after this one owns the ring.

@@ -1017,6 +1017,33 @@ If the user asks for a PR-based workflow going forward, follow that instead and 
   missing button twice. **Writing down why something is missing does not make it less missing;
   when a user reports the same absence a second time, implement it rather than re-explaining.**
 
+- **Deduplicating a diagnostic log on a value that rarely changes silently deletes the
+  diagnosis.** `WidgetRefresher` logged only when the *count of placed widgets* changed, to
+  keep a 15-minute periodic refresh from burying the log. The count is 1 for anyone with
+  one widget, forever — so across a report containing a delete, a create, an edit and
+  another delete, the log recorded **nothing**, and "the refresh ran four times" was
+  indistinguishable from "the refresh never ran". The justification was also false on
+  inspection: `WidgetRefreshWorker` calls `refreshAllWidgets` directly and logs nothing, so
+  nothing reaching `WidgetRefresher` was ever periodic. **Before deduping a log line, check
+  (a) that the noise you are suppressing actually exists, and (b) that the key you dedupe on
+  changes whenever the thing you are trying to observe does.** Deduping on the rendered
+  *content* is usually the right key: identical output is not news, different output always
+  is.
+
+- **A count of things that exist is not a count of things that worked.** The same line
+  reported `AppWidgetManager`'s widget count as "N widgets updated", while the `updateAll`
+  call that would actually update them sat in a bare `runCatching {}` whose failure went
+  nowhere. A size whose update threw was counted exactly like one that rendered. When a log
+  line asserts an outcome, it must be derived from the call that produces that outcome —
+  and `runCatching` with no `onFailure` in a diagnostic path is almost always a bug.
+
+- **Logging from inside a Room-backed writer that a Flow observes can feed back.** The
+  widget's render log writes to `app_logs` while `observeAllAlarms()` drives widget
+  refreshes; had the log shared a table with that query (or been pulled in by its
+  `@Transaction` relations — `alarms`, `alarm_rings`, `alarm_dates`), each render would have
+  invalidated the flow, refreshed the widget and rendered again, forever. It does not, but
+  **check the table sets before adding a log call to a render or refresh path.**
+
 ## Known limitations (don't re-report these as new findings unless you're the batch fixing them)
 
 - **Settings' English toggle doesn't change any visible UI text.** Every screen hardcodes Hebrew

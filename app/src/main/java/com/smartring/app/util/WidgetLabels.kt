@@ -75,3 +75,19 @@ internal fun startOfDayMillis(millis: Long): Long = Calendar.getInstance().apply
     set(Calendar.SECOND, 0)
     set(Calendar.MILLISECOND, 0)
 }.timeInMillis
+
+/**
+ * What a widget drew, in one line for the log.
+ *
+ * Pure and here rather than inline in the widget, following this codebase's standing rule
+ * (see `docs/ARCHITECTURE.md`): the *decision* goes in a testable function, the Android
+ * component only performs it. The decision this one makes is the distinction that matters
+ * most in a log — "nothing is set up" versus "things are set up and none is armed" versus
+ * "here is what is armed". Conflating the first two is what made a widget that had lost
+ * its data look identical to one with an empty schedule.
+ */
+fun widgetRenderSummary(rowCount: Int, nextTimeText: String?, nextName: String?): String = when {
+    rowCount == 0 -> "אין שעמורים"
+    nextTimeText == null -> "$rowCount שעמורים, אף אחד לא פעיל"
+    else -> "$rowCount שעמורים, הבא $nextTimeText (\"${nextName.orEmpty()}\")"
+}

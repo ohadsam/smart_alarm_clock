@@ -150,14 +150,22 @@ class WidgetDataPathInstrumentedTest {
     /**
      * The refresh path itself, on a device.
      *
-     * No widget is placed on a test emulator, so the count is expected to be zero — the
+     * No widget is placed on a test emulator, so `found` is expected to be zero — the
      * assertion is that it *completes and reports*, because until v1.12.0 this path could
      * neither throw visibly nor say what it had done.
      */
     @Test
-    fun refreshAllWidgetsCompletesAndReportsACount() = runBlocking {
-        val count = refreshAllWidgets(context)
+    fun refreshAllWidgetsCompletesAndReportsWhatItDid() = runBlocking {
+        val report = refreshAllWidgets(context)
 
-        assertTrue("a refresh must report a non-negative count, got $count", count >= 0)
+        assertTrue("a refresh must report a non-negative count, got ${report.found}",
+            report.found >= 0)
+        // The invariant the honest log line rests on: a widget cannot be updated unless
+        // it is placed. v1.12.0 reported `found` as "N widgets updated", which counted a
+        // size whose update threw exactly like one that rendered.
+        assertTrue("updated (${report.updated}) cannot exceed found (${report.found})",
+            report.updated <= report.found)
+        assertTrue("a refresh on a device with no widgets should not error: ${report.errors}",
+            report.errors.isEmpty())
     }
 }

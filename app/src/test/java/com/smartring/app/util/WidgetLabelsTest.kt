@@ -86,4 +86,44 @@ class WidgetLabelsTest {
             sectionFor(AlarmRow(com.smartring.app.domain.model.Alarm(id = 1), target), now),
         )
     }
+
+    // ── The render summary that goes into the log ──────────────────────────
+
+    /**
+     * The three cases exist because conflating the first two is how a widget that had
+     * lost its data came to look, in the log, exactly like one with an empty schedule.
+     */
+    @Test
+    fun `an empty widget says so rather than naming a next alarm`() =
+        assertEquals("אין שעמורים", widgetRenderSummary(0, null, null))
+
+    @Test
+    fun `alarms that exist but are all idle read differently from none at all`() =
+        assertEquals("2 שעמורים, אף אחד לא פעיל", widgetRenderSummary(2, null, null))
+
+    @Test
+    fun `an armed widget names the time and the alarm`() =
+        assertEquals("""3 שעמורים, הבא 14:58 ("כללי")""", widgetRenderSummary(3, "14:58", "כללי"))
+
+    /** An unnamed alarm must not turn the line into "null". */
+    @Test
+    fun `a missing name degrades to empty quotes, not to the word null`() =
+        assertEquals("""1 שעמורים, הבא 07:00 ("")""", widgetRenderSummary(1, "07:00", null))
+
+    /**
+     * The dedup the widget applies is equality on this string, so two genuinely different
+     * states must never produce the same one — otherwise the second render is suppressed
+     * and the log goes quiet exactly when something changed.
+     */
+    @Test
+    fun `different states produce different summaries`() {
+        val summaries = listOf(
+            widgetRenderSummary(0, null, null),
+            widgetRenderSummary(1, null, null),
+            widgetRenderSummary(1, "07:00", "בוקר"),
+            widgetRenderSummary(1, "14:58", "בוקר"),
+            widgetRenderSummary(2, "14:58", "בוקר"),
+        )
+        assertEquals("each distinct state needs its own line", summaries.size, summaries.toSet().size)
+    }
 }

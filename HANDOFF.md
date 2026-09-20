@@ -163,6 +163,9 @@
 | 134 | בדיקת מסלול הנתונים על מכשיר רצה על כל ארבעת הגדלים, לא רק על הרחב | `WidgetDataPathInstrumentedTest` (v1.12.2) |
 | 135 | גם ל-2x2 יש ☰ ו-＋; הפאנל מחליף את הגוף, ולכן המקום שהוא צריך כבר קיים | `SmallBody` (v1.12.3) |
 | 136 | "פתח אפליקציה" ב-2x2 יושב על אזור השעמור, לא על השורש — אחרת הוא מתחת לכפתורים | `SmallBody` (v1.12.3) |
+| 137 | הווידג'ט רושם ללוג **מה הוא צייר**, מדודפ לפי תוכן — לא רק שהרענון רץ | `SmartRingBaseWidget.logRender` (v1.12.4) |
+| 138 | כל רענון נרשם עם סיבה; `found` ו-`updated` נפרדים, ושגיאת `updateAll` לא נבלעת | `WidgetRefresher`/`WidgetRefreshReport` (v1.12.4) |
+| 139 | `APPWIDGET_UPDATE` אינו שידור מוגן (בניגוד ל-`_UPDATE_OPTIONS`/`_DELETED`/`_ENABLED`) — מותר לשלוח אותו | `refreshAllWidgets` (v1.12.4) |
 
 ---
 

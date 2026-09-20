@@ -123,7 +123,7 @@ class AlarmScheduler @Inject constructor(
         armExact(at, buildSnoozePendingIntent(alarm.id), "נודניק \"${alarm.name}\" (#${alarm.id})")
         snoozePrefs.edit().putLong(alarm.id.toString(), at).apply()
         appLogger.log("Scheduler", "נודניק תוזמן: \"${alarm.name}\" (#${alarm.id})")
-        widgetRefresher.refresh()
+        widgetRefresher.refresh("נודניק")
     }
 
     /**
@@ -192,7 +192,7 @@ class AlarmScheduler @Inject constructor(
             if (pendingSnooze != null && alarm.isActive) scheduleAt(alarm, pendingSnooze)
         }
         appLogger.log("Scheduler", "תוזמנו מחדש ${alarms.size} שעמורים")
-        if (refreshWidgets) widgetRefresher.refresh()
+        if (refreshWidgets) widgetRefresher.refresh("תזמון מחדש")
     }
 
     /**

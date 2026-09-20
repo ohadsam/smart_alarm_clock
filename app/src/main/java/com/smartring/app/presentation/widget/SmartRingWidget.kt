@@ -49,6 +49,7 @@ import com.smartring.app.util.WidgetAlarmEntry
 import com.smartring.app.util.buildWidgetRows
 import com.smartring.app.util.nextOccasionalDate
 import com.smartring.app.util.widgetDayLabel
+import com.smartring.app.util.widgetRenderSummary
 import java.util.Calendar
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.first
@@ -313,6 +314,9 @@ internal data class WidgetUiState(
 
 abstract class SmartRingBaseWidget : GlanceAppWidget() {
 
+    /** How this size names itself in the log. */
+    internal abstract val sizeName: String
+
     /**
      * Render per actual size rather than once at the smallest one.
      *
@@ -346,7 +350,7 @@ abstract class SmartRingBaseWidget : GlanceAppWidget() {
             ),
             nowMillis = System.currentTimeMillis(),
             presets = presetsForWidget(quick.presets, quick.limits),
-        )
+        ).also { logRender(ctx, it) }
     } catch (e: CancellationException) {
         throw e
     } catch (e: Exception) {
@@ -366,9 +370,48 @@ abstract class SmartRingBaseWidget : GlanceAppWidget() {
             loadError = e.javaClass.simpleName,
         )
     }
+
+    /**
+     * What this widget just drew, in the log the user exports.
+     *
+     * The one fact no log has ever carried. Every line to date has described the *refresh*
+     * — that it ran, and how many widgets were placed — and none has described the
+     * *render*. Those are different events, and the gap between them is exactly where four
+     * rounds of "the widgets don't sync" have been unresolvable: a report of "it shows no
+     * alarms while one is set" has three possible causes that no existing line separates.
+     *
+     *  - No line at this timestamp → the refresh never reached the widget.
+     *  - A line showing the alarm → the widget did draw it, and the question moves to the
+     *    host (a cached surface, or a look at the wrong moment).
+     *  - A line showing nothing while an alarm exists → the data path is wrong, and the
+     *    row count says how wrong.
+     *
+     * Deduplicated on the *content*, not on a timer: a render that draws the same thing is
+     * not news, and a render that draws something different always is. That is what the
+     * 15-minute periodic refresh needs in order not to bury the log — and it is a strictly
+     * better rule than v1.12.0's count-based dedup, which suppressed six consecutive
+     * user-triggered refreshes in the report that prompted this.
+     */
+    private fun logRender(ctx: Context, state: WidgetUiState) {
+        val next = state.next
+        val summary = widgetRenderSummary(state.rows.size, next?.timeText, next?.alarm?.name)
+        if (lastRendered.put(sizeName, summary) == summary) return
+        runCatching {
+            EntryPointAccessors.fromApplication(ctx, WidgetEntryPoint::class.java)
+                .appLogger()
+                .log("Widget", "$sizeName רונדר — $summary")
+        }
+    }
+
+    private companion object {
+        /** Last summary drawn per size. Process-wide, and concurrent because the four
+         *  sizes can render at once. */
+        val lastRendered = java.util.concurrent.ConcurrentHashMap<String, String>()
+    }
 }
 
 class SmartRingWidgetSmall : SmartRingBaseWidget() {
+    internal override val sizeName: String = "ווידג'ט 2x2"
     override suspend fun provideGlance(ctx: Context, id: GlanceId) {
         val state = widgetState(ctx)
         val p = paletteFor(ctx)
@@ -380,6 +423,7 @@ class SmartRingWidgetSmall : SmartRingBaseWidget() {
 }
 
 class SmartRingWidgetMedium : SmartRingBaseWidget() {
+    internal override val sizeName: String = "ווידג'ט 4x2"
     override suspend fun provideGlance(ctx: Context, id: GlanceId) {
         val state = widgetState(ctx)
         val p = paletteFor(ctx)
@@ -388,6 +432,7 @@ class SmartRingWidgetMedium : SmartRingBaseWidget() {
 }
 
 class SmartRingWidgetWide : SmartRingBaseWidget() {
+    internal override val sizeName: String = "ווידג'ט 4x3"
     override suspend fun provideGlance(ctx: Context, id: GlanceId) {
         val state = widgetState(ctx)
         val p = paletteFor(ctx)
@@ -402,6 +447,7 @@ class SmartRingWidgetWide : SmartRingBaseWidget() {
 }
 
 class SmartRingWidgetLarge : SmartRingBaseWidget() {
+    internal override val sizeName: String = "ווידג'ט 4x4"
     override suspend fun provideGlance(ctx: Context, id: GlanceId) {
         val state = widgetState(ctx)
         val p = paletteFor(ctx)
@@ -1131,35 +1177,56 @@ internal val WIDGET_SIZES: List<Pair<() -> GlanceAppWidget, Class<out GlanceAppW
 )
 
 /**
- * Re-renders every placed widget, and says how many it found.
+ * What a refresh actually did, rather than how many widgets exist.
+ *
+ * [found] is how many are placed on a home screen, per `AppWidgetManager`. [updated] is
+ * how many `updateAll` calls returned without throwing. Until v1.12.4 only [found] was
+ * reported, and it was logged as "N widgets updated" — an overclaim, since a size whose
+ * `updateAll` threw was counted exactly like one that rendered. [errors] carries whatever
+ * did throw, which nothing recorded at all before.
+ */
+internal data class WidgetRefreshReport(
+    val found: Int,
+    val updated: Int,
+    val errors: List<String> = emptyList(),
+) {
+    val failed: Boolean get() = errors.isNotEmpty()
+}
+
+/**
+ * Re-renders every placed widget, and reports what it managed to do.
  *
  * Two mechanisms, deliberately, because the first one can silently do nothing:
  *
  * 1. **`updateAll`** resolves which widgets exist through `GlanceAppWidgetManager`, which
  *    keeps its own persisted mapping from provider to `GlanceAppWidget` class. When that
  *    mapping is missing or stale, `updateAll` iterates zero ids, returns normally, and
- *    updates nothing at all. That is indistinguishable from success to every caller —
- *    `WidgetRefresher` only logs failures, so a refresh that quietly no-ops leaves no
- *    trace whatsoever. Reports of "the widgets don't sync" survived three releases partly
- *    because nothing here could tell those two apart.
+ *    updates nothing at all — indistinguishable from success to every caller.
  * 2. **An explicit `APPWIDGET_UPDATE` broadcast** to each of our receivers, carrying the
  *    ids `AppWidgetManager` itself reports. Those ids are the framework's own and cannot
  *    be stale. `GlanceAppWidgetReceiver` extends `AppWidgetProvider`, so the broadcast
  *    lands in `onUpdate` and forces a render — and rebuilds Glance's mapping on the way.
+ *    (`APPWIDGET_UPDATE` is not one of the framework's protected broadcasts — unlike
+ *    `APPWIDGET_UPDATE_OPTIONS`, `APPWIDGET_DELETED` and `APPWIDGET_ENABLED` — so an app
+ *    may send it, and `setComponent` keeps it explicit, which API 26+ requires for a
+ *    manifest-declared receiver.)
  *
- * The count is returned so the caller can log it. A refresh that reports 0 widgets when
- * the user is looking at one on their home screen is the whole diagnosis in a single line.
+ * Each size is still best-effort — one failing must not stop the other three — but a
+ * failure is now *returned* rather than dropped on the floor.
  */
-suspend fun refreshAllWidgets(ctx: Context): Int {
+internal suspend fun refreshAllWidgets(ctx: Context): WidgetRefreshReport {
     val manager = AppWidgetManager.getInstance(ctx)
     var found = 0
+    var updated = 0
+    val errors = mutableListOf<String>()
     WIDGET_SIZES.forEach { (widget, receiver) ->
         val ids = runCatching {
             manager.getAppWidgetIds(ComponentName(ctx, receiver))
         }.getOrNull() ?: IntArray(0)
         found += ids.size
-        // Best-effort per size: one size failing must not stop the other three.
         runCatching { widget().updateAll(ctx) }
+            .onSuccess { updated += ids.size }
+            .onFailure { errors += "${receiver.simpleName}: ${it.javaClass.simpleName}: ${it.message}" }
         if (ids.isNotEmpty()) {
             runCatching {
                 ctx.sendBroadcast(
@@ -1167,8 +1234,11 @@ suspend fun refreshAllWidgets(ctx: Context): Int {
                         .setComponent(ComponentName(ctx, receiver))
                         .putExtra(AppWidgetManager.EXTRA_APPWIDGET_IDS, ids),
                 )
+            }.onFailure {
+                errors += "שידור ${receiver.simpleName}: ${it.javaClass.simpleName}: ${it.message}"
             }
         }
     }
-    return found
+    return WidgetRefreshReport(found = found, updated = updated, errors = errors)
 }
+

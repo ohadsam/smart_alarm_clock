@@ -8,14 +8,28 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Fire-and-forget widget refresh. Called directly from AlarmScheduler.scheduleAt()
- * (snoozing) and rescheduleAll() (boot reschedule) — the two cases that change what
- * the widgets should show without a corresponding alarms-table write for
- * SmartRingApp's observeAlarms()-based fallback collector to react to on its own.
- * Every other alarm mutation (schedule/cancel/cancelAll) relies on that fallback
- * instead of calling this directly. Reads live DB state at execution time, so it
- * doesn't matter that this fires before the caller's own DB write has necessarily
- * committed.
+ * Fire-and-forget widget refresh, with a reason attached.
+ *
+ * Called directly from `AlarmScheduler.scheduleAt()` (snoozing) and `rescheduleAll()`
+ * (boot reschedule) — the two cases that change what the widgets should show without a
+ * corresponding alarms-table write for `SmartRingApp`'s `observeAlarms()` collector to
+ * react to. Every other alarm mutation relies on that collector instead. Reads live DB
+ * state at execution time, so it does not matter that this fires before the caller's own
+ * write has necessarily committed.
+ *
+ * ## Why every call is logged now
+ *
+ * v1.12.0 logged only when the *count* of placed widgets changed, reasoning that a burst
+ * of identical lines would bury the log. The reasoning was wrong about where the noise
+ * comes from: the 15-minute periodic refresh does not go through this class at all
+ * ([com.smartring.app.service.WidgetRefreshWorker] calls `refreshAllWidgets` directly and
+ * logs nothing), so everything here is user-triggered and therefore bounded. What the
+ * dedup actually suppressed was six consecutive alarm mutations in the one report that
+ * needed them — the log went quiet for five minutes across a delete, a create, an edit
+ * and another delete, and "the refresh ran four times" was indistinguishable from "the
+ * refresh never ran".
+ *
+ * The reason string is what makes the line worth reading: *which* change triggered it.
  */
 @Singleton
 class WidgetRefresher @Inject constructor(
@@ -24,34 +38,27 @@ class WidgetRefresher @Inject constructor(
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    /**
-     * Last count reported, so a burst of refreshes does not fill the log with the same
-     * line. A change in the count is the interesting event — especially a drop to zero.
-     */
-    private var lastReported: Int? = null
-
-    fun refresh() {
+    fun refresh(reason: String) {
         scope.launch {
             runCatching { refreshAllWidgets(context) }
-                .onSuccess { count ->
-                    // Logged, not silent. Until v1.12.0 this method logged only failures,
-                    // which made a refresh that succeeded-but-updated-nothing look
-                    // identical to one that worked — and "the widgets don't sync" reports
-                    // could not be told apart from "the widgets are fine" in the log.
-                    // Zero is the diagnosis: the refresh ran, and there was nothing
-                    // registered for it to update.
-                    if (count != lastReported) {
-                        lastReported = count
-                        appLogger.log(
-                            "WidgetRefresher",
-                            if (count == 0) "רענון ווידג'טים רץ אך לא נמצא אף ווידג'ט מוצב"
-                            else "רענון ווידג'טים: $count ווידג'טים עודכנו",
-                        )
+                .onSuccess { report ->
+                    val line = when {
+                        // The diagnosis, in one line: the refresh ran and there was
+                        // nothing registered for it to update.
+                        report.found == 0 -> "רענון ($reason) רץ אך לא נמצא אף ווידג'ט מוצב"
+                        // Honest about what is known. `found` is how many widgets are
+                        // placed; `updated` is how many update calls came back without
+                        // throwing. v1.12.0 reported `found` as "widgets updated", which
+                        // counted a size whose update threw exactly like one that rendered.
+                        report.failed ->
+                            "רענון ($reason): ${report.found} מוצבים, ${report.updated} עודכנו, " +
+                                "שגיאות: ${report.errors.joinToString("; ")}"
+                        else -> "רענון ($reason): ${report.found} מוצבים, ${report.updated} עודכנו"
                     }
+                    appLogger.log("WidgetRefresher", line)
                 }
                 .onFailure {
-                    lastReported = null
-                    appLogger.log("WidgetRefresher", "רענון ווידג'טים נכשל: ${it.message}")
+                    appLogger.log("WidgetRefresher", "רענון ($reason) נכשל: ${it.message}")
                 }
         }
     }
