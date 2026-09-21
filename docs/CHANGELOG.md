@@ -1,5 +1,66 @@
 # SmartRing – Changelog
 
+## v1.12.7 (2026-09-21)
+
+### The root cause, after six releases of fixing things around it
+
+```
+[21:47:38] Scheduler: תוזמן: "כללי" (#13) ל-22:17
+[21:47:40] Widget: רענון ידני מהווידג'ט: 1 מוצבים, 1 עודכנו
+[21:47:42] Widget: רענון ידני מהווידג'ט: 1 מוצבים, 1 עודכנו
+   ... eleven manual refresh taps ...
+[21:48:04] AlarmList: נמחק: "כללי" (#13)
+[21:48:06] AlarmList: נמחק: "כללי" (#12)
+[21:48:09] Widget: רענון ידני מהווידג'ט: 1 מוצבים, 1 עודכנו
+```
+
+Thirteen consecutive `update()` calls, all reporting success, **none producing a render**
+— and a screenshot taken at 21:48 still showing alarm #12, which had been deleted.
+
+**The cause was in `provideGlance`, and it had been there the whole time:**
+
+```kotlin
+val state = widgetState(ctx)            // read once
+provideContent { Body(ctx, state, p) }  // closes over it
+```
+
+`provideGlance` runs **once per Glance session**, not once per update, and `provideContent`
+never returns — it suspends for the session's lifetime to keep the composition alive. Every
+later `update()` recomposes that lambda, and the lambda had closed over a `state` captured
+before it. The widget read its data when the session opened and never again.
+
+Everything follows from that. The refresh button could not help, because recomposing a
+closure over stale data produces stale output. The render log went silent, because
+`logRender` lives inside `widgetState` and `widgetState` was not being called. The renders
+that *did* appear — at 1s, 14s, 39s and 45s after a refresh — were the host recreating the
+session, the only thing that re-ran `provideGlance`. And a freshly installed build always
+looked fixed for a moment, because the first session was always correct.
+
+**The fix.** State is read inside the composition now, from a flow that combines the Room
+alarms query with the shortcuts DataStore. A change to either recomposes the widget on its
+own. `widgetState` still supplies the first frame, so a new session paints correct content
+immediately rather than flashing an empty state while the flow's first value arrives.
+
+`provideGlance` is `final` on the base class and all four sizes now declare only which body
+they draw. A size cannot reintroduce this independently.
+
+### What the previous five releases were, honestly
+
+v1.12.5's `updateAll` finding was real — it does resolve widgets through a persisted
+mapping that can iterate zero ids and return successfully — and per-id `getGlanceIdBy` is
+the right way to call `update()`. But it was not this bug, and shipping it did not fix the
+symptom. Both doc comments that claimed a completed `update()` means a render have been
+corrected; it does not, and cannot, when a session is already alive. The refresh path is a
+safety net now. What keeps the widget correct is the flow it collects.
+
+### The test that would have caught it
+
+`WidgetRenderTest` hands the bodies a state object directly, and the earlier device tests
+called `widgetState` themselves — which is exactly the read that was only happening once.
+Neither could see it. The new instrumented test asserts the property that actually matters:
+**the widget's state re-emits after a write**, against the real graph, the real database,
+and a second alarm created after the first read.
+
 ## v1.12.6 (2026-09-20)
 
 ### A refresh button, on all four sizes

@@ -9,6 +9,8 @@ import android.os.SystemClock
 import android.util.TypedValue
 import android.widget.RemoteViews
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.unit.Dp
@@ -54,7 +56,12 @@ import com.smartring.app.util.widgetMoreAlarmsLabel
 import com.smartring.app.util.widgetRenderSummary
 import java.util.Calendar
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.onEach
 import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
 import dagger.hilt.android.EntryPointAccessors
@@ -335,6 +342,87 @@ abstract class SmartRingBaseWidget : GlanceAppWidget() {
      */
     override val sizeMode: SizeMode = SizeMode.Exact
 
+    /** The body this size draws. One `provideGlance` below serves all four. */
+    @Composable
+    internal abstract fun Body(ctx: Context, state: WidgetUiState, p: WidgetPalette)
+
+    /**
+     * The one place state reaches the composition — and `final`, deliberately.
+     *
+     * ## The bug this shape exists to make impossible
+     *
+     * Every size used to override `provideGlance` like this:
+     *
+     * ```
+     * val state = widgetState(ctx)          // read once
+     * provideContent { Body(ctx, state, p) } // closes over it
+     * ```
+     *
+     * `provideGlance` runs **once per Glance session**, not once per update, and
+     * `provideContent` never returns — it suspends for the session's lifetime to keep the
+     * composition alive. Every later `update()` recomposes that lambda, and the lambda
+     * closed over a `state` captured before it. So the data was read when the session
+     * opened and never again: an alarm created, edited or deleted afterwards could not
+     * reach the widget, however many times anything called `update()`.
+     *
+     * It matched the reports exactly. Thirteen consecutive `update()` calls — eleven of
+     * them manual taps on the refresh button — all reported success and none produced a
+     * render, because `logRender` lives inside `widgetState` and `widgetState` was not
+     * being called. The renders that *did* appear, at 1s, 14s, 39s and 45s after a
+     * refresh, were sessions being recreated by the host, which is the only thing that
+     * re-ran `provideGlance`. That also explains why a freshly installed build looked
+     * fixed and then stopped: the first session was always correct.
+     *
+     * The state is read inside the composition now, from a flow, so a change to the
+     * alarms table or to the shortcuts recomposes the widget on its own. `widgetState`
+     * still provides the first frame, so a new session paints correct content immediately
+     * instead of flashing an empty state while the flow's first value arrives.
+     */
+    final override suspend fun provideGlance(ctx: Context, id: GlanceId) {
+        val initial = widgetState(ctx)
+        val live = widgetStateFlow(ctx)
+        provideContent {
+            val state by live.collectAsState(initial = initial)
+            // Composition-scoped and per widget instance: one widget's open panel must
+            // not open every other widget's.
+            val open = currentState<Preferences>()[PANEL_OPEN_KEY] ?: false
+            // Read inside the composition too, so a day/night flip repaints rather than
+            // keeping the palette the session happened to open with.
+            WidgetFrame { Body(ctx, state.copy(panelOpen = open), paletteFor(ctx)) }
+        }
+    }
+
+    /**
+     * Live state: re-emitted whenever anything the widget draws changes.
+     *
+     * Two sources, because the widget draws from two: Room for the alarms, DataStore for
+     * the quick-create shortcuts. `combine` re-emits on either. This is what makes the
+     * widget correct without anything having to remember to refresh it — the refresh path
+     * is now a safety net rather than the mechanism.
+     */
+    internal fun widgetStateFlow(ctx: Context): Flow<WidgetUiState> = try {
+        val ep = EntryPointAccessors.fromApplication(ctx, WidgetEntryPoint::class.java)
+        val scheduler = ep.alarmScheduler()
+        combine(
+            ep.alarmRepository().observeAlarms(),
+            ep.quickPresetsRepository().config,
+        ) { alarms, quick ->
+            WidgetUiState(
+                rows = buildWidgetRows(
+                    alarms     = alarms,
+                    snoozeAt   = scheduler::pendingSnoozeUntil,
+                    nextFireAt = { scheduler.nextFireTime(it) },
+                ),
+                nowMillis = System.currentTimeMillis(),
+                presets = presetsForWidget(quick.presets, quick.limits),
+            )
+        }
+            .onEach { logRender(ctx, it) }
+            .catch { e -> emit(loadErrorState(ctx, e)) }
+    } catch (e: Exception) {
+        flowOf(loadErrorState(ctx, e))
+    }
+
     /**
      * Every alarm, armed first — the list the widgets render.
      *
@@ -366,12 +454,17 @@ abstract class SmartRingBaseWidget : GlanceAppWidget() {
         // render therefore looked exactly like a widget that was never refreshed, which
         // is precisely the ambiguity that let "the widgets don't sync" survive three
         // releases. Caught here so the next log export names the cause.
+        loadErrorState(ctx, e)
+    }
+
+    /** One definition of "could not load", shared by the one-shot read and the flow. */
+    private fun loadErrorState(ctx: Context, e: Throwable): WidgetUiState {
         runCatching {
             EntryPointAccessors.fromApplication(ctx, WidgetEntryPoint::class.java)
                 .appLogger()
                 .log("Widget", "טעינת נתוני הווידג'ט נכשלה: ${e.javaClass.simpleName}: ${e.message}")
         }
-        WidgetUiState(
+        return WidgetUiState(
             rows = emptyList(),
             nowMillis = System.currentTimeMillis(),
             loadError = e.javaClass.simpleName,
@@ -419,50 +512,30 @@ abstract class SmartRingBaseWidget : GlanceAppWidget() {
 
 class SmartRingWidgetSmall : SmartRingBaseWidget() {
     internal override val sizeName: String = "ווידג'ט 2x2"
-    override suspend fun provideGlance(ctx: Context, id: GlanceId) {
-        val state = widgetState(ctx)
-        val p = paletteFor(ctx)
-        provideContent {
-            val open = currentState<Preferences>()[PANEL_OPEN_KEY] ?: false
-            WidgetFrame { SmallBody(ctx, state.copy(panelOpen = open), p) }
-        }
-    }
+    @Composable
+    internal override fun Body(ctx: Context, state: WidgetUiState, p: WidgetPalette) =
+        SmallBody(ctx, state, p)
 }
 
 class SmartRingWidgetMedium : SmartRingBaseWidget() {
     internal override val sizeName: String = "ווידג'ט 4x2"
-    override suspend fun provideGlance(ctx: Context, id: GlanceId) {
-        val state = widgetState(ctx)
-        val p = paletteFor(ctx)
-        provideContent { WidgetFrame { MediumBody(ctx, state, p) } }
-    }
+    @Composable
+    internal override fun Body(ctx: Context, state: WidgetUiState, p: WidgetPalette) =
+        MediumBody(ctx, state, p)
 }
 
 class SmartRingWidgetWide : SmartRingBaseWidget() {
     internal override val sizeName: String = "ווידג'ט 4x3"
-    override suspend fun provideGlance(ctx: Context, id: GlanceId) {
-        val state = widgetState(ctx)
-        val p = paletteFor(ctx)
-        // currentState() has to be read inside provideContent — it is composition-scoped,
-        // and it is per widget instance, which is the point: one widget's open panel must
-        // not open every other widget's.
-        provideContent {
-            val open = currentState<Preferences>()[PANEL_OPEN_KEY] ?: false
-            WidgetFrame { ListBody(ctx, state.copy(panelOpen = open), p) }
-        }
-    }
+    @Composable
+    internal override fun Body(ctx: Context, state: WidgetUiState, p: WidgetPalette) =
+        ListBody(ctx, state, p)
 }
 
 class SmartRingWidgetLarge : SmartRingBaseWidget() {
     internal override val sizeName: String = "ווידג'ט 4x4"
-    override suspend fun provideGlance(ctx: Context, id: GlanceId) {
-        val state = widgetState(ctx)
-        val p = paletteFor(ctx)
-        provideContent {
-            val open = currentState<Preferences>()[PANEL_OPEN_KEY] ?: false
-            WidgetFrame { ListBody(ctx, state.copy(panelOpen = open), p) }
-        }
-    }
+    @Composable
+    internal override fun Body(ctx: Context, state: WidgetUiState, p: WidgetPalette) =
+        ListBody(ctx, state, p)
 }
 
 /** Per-widget-instance flag for the quick-actions panel. */
@@ -1258,10 +1331,18 @@ internal val WIDGET_SIZES: List<Pair<() -> GlanceAppWidget, Class<out GlanceAppW
  *
  * [found] is how many are placed on a home screen, per `AppWidgetManager` — the
  * framework's own count, which cannot be stale. [updated] is how many of those a
- * per-widget `update()` call actually completed for. Before v1.12.5 the two were the same
- * number by construction: `updated` was incremented by `ids.size` whenever the single
- * `updateAll()` call did not throw, so a refresh that resolved zero widgets internally and
- * returned normally still reported every placed widget as updated.
+ * per-widget `update()` call completed for. Before v1.12.5 the two were the same number by
+ * construction: `updated` was incremented by `ids.size` whenever the single `updateAll()`
+ * call did not throw, so a refresh that resolved zero widgets internally and returned
+ * normally still reported every placed widget as updated.
+ *
+ * **[updated] still does not mean "re-rendered", and cannot.** `update()` completing only
+ * means Glance accepted the request; when a session for that widget is already alive it
+ * recomposes the existing content rather than re-running `provideGlance`. v1.12.6's log
+ * showed thirteen consecutive completed updates against a widget that never redrew. What
+ * makes the widget correct is `widgetStateFlow` — the composition reads live data, so a
+ * recomposition is enough. This report says a refresh was delivered, nothing more; the
+ * `Widget: ... רונדר` lines are what say something was drawn.
  */
 internal data class WidgetRefreshReport(
     val found: Int,
@@ -1289,8 +1370,14 @@ internal data class WidgetRefreshReport(
  *
  * `GlanceAppWidgetManager.getGlanceIdBy(appWidgetId)` builds a `GlanceId` straight from
  * the framework's own id without consulting that mapping at all, so the per-id `update()`
- * below cannot be defeated by it. It also makes [updated] mean something: one increment
- * per widget that actually completed a render.
+ * below cannot be defeated by it.
+ *
+ * That was a real defect and this is the right way to call `update()`, but it was not the
+ * cause of "the widget shows the wrong alarm" — v1.12.6 shipped it and the widget still
+ * did not redraw. The cause was that the composition held state captured before
+ * `provideContent`, so recomposing changed nothing. See `provideGlance`. With the state
+ * now live, this whole path is a safety net rather than the mechanism: what actually keeps
+ * the widget correct is the flow it collects.
  *
  * The `APPWIDGET_UPDATE` broadcast (added in v1.12.0, and legitimate — it is not one of
  * the framework's protected broadcasts, unlike `APPWIDGET_UPDATE_OPTIONS`,

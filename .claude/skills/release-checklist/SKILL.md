@@ -1068,6 +1068,33 @@ If the user asks for a PR-based workflow going forward, follow that instead and 
   more armed" was a UX improvement *and* a diagnostic one. When a surface summarises,
   check whether it can also say how much it is leaving out.
 
+- **`provideGlance` runs once per Glance session, not once per update — never capture state
+  before `provideContent`.** This one cost six releases. `provideContent` does not return;
+  it suspends for the session's lifetime to keep the composition alive, so every later
+  `update()` recomposes the lambda you passed it. A `val state = load()` above that call is
+  read when the session opens and never again, and the widget renders that snapshot
+  forever. The symptoms are maddening because they look like a refresh problem: updates
+  report success, nothing redraws, a manual refresh button does nothing, and the widget
+  *does* update at random-looking intervals — those are the host recreating the session,
+  the only thing that re-runs `provideGlance`. A freshly installed build always looks fixed,
+  because the first session is always correct. **Read state inside `provideContent`, from a
+  flow (`collectAsState`), so a data change recomposes on its own**; pass a one-shot read as
+  the flow's `initial` so a new session paints correctly instead of flashing an empty state.
+  Make `provideGlance` `final` on a base class and have each size declare only its body, so
+  one size cannot reintroduce it alone.
+
+- **A completed `update()` does not mean the widget re-rendered.** It means Glance accepted
+  the request. With a live session it recomposes existing content, which can produce
+  identical output. Any log line, counter or test that treats "update returned" as "widget
+  redrew" is asserting something it cannot know — the only evidence of a render is a line
+  written by the render path itself.
+
+- **A test that calls the data-loading function directly cannot catch a bug in how often
+  that function is called.** Both widget suites here missed the above: the render tests hand
+  the bodies a state object, and the device tests called `widgetState()` themselves — which
+  was precisely the read that was only happening once. **Test the property, not the
+  function: write, then assert the state re-emits.**
+
 ## Known limitations (don't re-report these as new findings unless you're the batch fixing them)
 
 - **Settings' English toggle doesn't change any visible UI text.** Every screen hardcodes Hebrew

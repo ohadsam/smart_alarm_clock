@@ -13,7 +13,9 @@ import com.smartring.app.presentation.widget.refreshAllWidgets
 import com.smartring.app.util.AlarmScheduler
 import dagger.hilt.android.testing.HiltAndroidRule
 import dagger.hilt.android.testing.HiltAndroidTest
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -111,6 +113,67 @@ class WidgetDataPathInstrumentedTest {
                 "$name widget should see the alarm just written",
                 state.rows.isNotEmpty(),
             )
+        }
+    }
+
+    /**
+     * The one that would have caught six releases of this.
+     *
+     * Until v1.12.7 each size read its state **once**, before `provideContent`, and the
+     * composition closed over that value. `provideGlance` runs once per Glance session and
+     * `provideContent` never returns, so every later `update()` recomposed a lambda holding
+     * data from whenever the session opened. An alarm created afterwards could not reach
+     * the widget however many times anything called `update()` — thirteen consecutive
+     * completed updates, eleven of them manual refresh taps, redrew nothing.
+     *
+     * Nothing in the repo could see it: `WidgetRenderTest` hands the bodies a state object
+     * directly, and the older data-path tests called `widgetState` themselves, which is
+     * exactly the read that was happening only once. This asserts the property that
+     * actually matters — **the widget's state re-emits after a write** — against the real
+     * graph, the real database and a real second write.
+     */
+    @Test
+    fun widgetStateFlowReEmitsWhenAnAlarmIsAddedAfterTheFirstRead() = runBlocking {
+        givenAlarm("ראשון", 7)
+        val widget = SmartRingWidgetSmall()
+
+        // The first value: what a newly opened session would paint.
+        val first = widget.widgetStateFlow(context).first()
+        assertNull("the first emission must not be a load failure: ${first.loadError}",
+            first.loadError)
+        val firstCount = first.rows.size
+
+        // A second alarm, written after that first read — the case that was broken.
+        givenAlarm("שני", 8)
+
+        val afterWrite = withTimeout(10_000) {
+            widget.widgetStateFlow(context).first { it.rows.size > firstCount }
+        }
+
+        assertTrue(
+            "the widget's state must re-emit with the alarm added after the first read; " +
+                "got ${afterWrite.rows.map { it.alarm.name }}",
+            afterWrite.rows.any { it.alarm.name == "שני" },
+        )
+    }
+
+    /** Every size shares one `provideGlance` now, but each must still build a live flow. */
+    @Test
+    fun everyWidgetSizeExposesALiveStateFlow() = runBlocking {
+        givenAlarm("בוקר", 7)
+
+        listOf(
+            "Small" to SmartRingWidgetSmall(),
+            "Medium" to SmartRingWidgetMedium(),
+            "Wide" to SmartRingWidgetWide(),
+            "Large" to SmartRingWidgetLarge(),
+        ).forEach { (name, widget) ->
+            val state = withTimeout(10_000) { widget.widgetStateFlow(context).first() }
+
+            assertNull("$name widget's flow reported a load failure: ${state.loadError}",
+                state.loadError)
+            assertTrue("$name widget's flow should see the alarm just written",
+                state.rows.isNotEmpty())
         }
     }
 
