@@ -24,6 +24,10 @@ class AlarmRepository @Inject constructor(
     fun observeLocalAlarms(): Flow<List<Alarm>> =
         dao.observeLocalAlarms().map { it.map { a -> a.toDomain() } }
 
+    /** Alarms this phone keeps for its children (never rung here), for the Devices screen. */
+    fun observeManagedForChildren(): Flow<List<Alarm>> =
+        dao.observeManagedForChildren().map { it.map { a -> a.toDomain() } }
+
     suspend fun getAlarm(id: Long): Alarm? =
         dao.getAlarmWithDetails(id)?.toDomain()
 

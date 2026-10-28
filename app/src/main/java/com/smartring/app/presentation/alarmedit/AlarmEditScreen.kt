@@ -41,6 +41,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.smartring.app.domain.model.*
 import kotlinx.coroutines.delay
 import com.smartring.app.presentation.theme.*
+import com.smartring.app.presentation.devices.TargetsViewModel
 import com.smartring.app.util.GENERIC_ALARM_NAME
 import com.smartring.app.util.TEST_RING_DELAY_SECONDS
 import com.smartring.app.util.RingtonePreviewPlayer
@@ -83,19 +84,29 @@ fun AlarmEditScreen(
     prefillMinute: Int? = null,
     /** Non-zero when this screen is a *copy* of that alarm, not an edit of it. */
     copyOfAlarmId: Long = 0L,
+    /** For a new alarm: the child's device id it is being created for, or null for this phone. */
+    targetDeviceId: String? = null,
     onBack: () -> Unit,
     vm: AlarmEditViewModel = hiltViewModel(),
+    targets: TargetsViewModel = hiltViewModel(),
 ) {
-    LaunchedEffect(alarmId, prefillName, prefillHour, prefillMinute, copyOfAlarmId) {
+    LaunchedEffect(alarmId, prefillName, prefillHour, prefillMinute, copyOfAlarmId, targetDeviceId) {
         when {
             alarmId > 0L       -> vm.loadAlarm(alarmId)
             copyOfAlarmId > 0L -> vm.loadAsCopy(copyOfAlarmId)
             // Every new alarm — prefilled from History or not — starts from the user's
             // configured defaults rather than the constants compiled into the state class.
-            else               -> vm.startNew(prefillName, prefillHour, prefillMinute)
+            else               -> vm.startNew(prefillName, prefillHour, prefillMinute, targetDeviceId)
         }
     }
     val s by vm.state.collectAsStateWithLifecycle()
+    val children by targets.children.collectAsStateWithLifecycle()
+    // An alarm another phone set for this one is shown, not edited: every control on this form would
+    // be a promise the repository then refuses to keep.
+    if (s.sync.isRemoteManaged) {
+        LockedAlarmView(vm.snapshot(), onBack)
+        return
+    }
     // Save is the one action on this long form with a real consequence, and it sits at
     // both ends of it. A tap that lands and does nothing visible for a moment reads as a
     // tap that missed; the tick says it landed.
@@ -264,6 +275,17 @@ fun AlarmEditScreen(
                     singleLine    = true,
                     shape         = RoundedCornerShape(14.dp),
                     enabled       = !s.unnamed,
+                )
+            }
+
+            // ── Which phone it is for ─────────────────────────────
+            // Only a parent has children to offer. For an alarm that is already for a child the
+            // choice stays visible, so it can be moved back to this phone.
+            if (children.isNotEmpty() || s.sync.managedForDeviceId != null) item {
+                TargetCard(
+                    children = children,
+                    selected = s.sync.managedForDeviceId,
+                    onSelect = vm::setTarget,
                 )
             }
 

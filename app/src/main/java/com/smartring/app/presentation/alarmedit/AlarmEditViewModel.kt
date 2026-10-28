@@ -260,7 +260,7 @@ class AlarmEditViewModel @Inject constructor(
      * someone because they changed a default in another window would be worse than
      * stale.
      */
-    fun startNew(name: String? = null, hour: Int? = null, minute: Int? = null) {
+    fun startNew(name: String? = null, hour: Int? = null, minute: Int? = null, targetDeviceId: String? = null) {
         viewModelScope.launch {
             val d = defaultsRepository.defaults.first()
             _state.update {
@@ -281,11 +281,23 @@ class AlarmEditViewModel @Inject constructor(
                     crescendoStepSeconds = d.crescendoStepSeconds,
                     crescendoStepPercent = d.crescendoStepPercent,
                     isShabbatMode        = d.isShabbatMode,
+                    // Opened from a child's section of the Devices screen: the alarm is for that
+                    // phone from the start, so the person cannot forget to pick it.
+                    sync                 = AlarmSync(managedForDeviceId = targetDeviceId),
                 )
             }
             updateNextFireHintLater()
         }
     }
+
+    /**
+     * Which phone this alarm is for: null for this one, or a child's device id. Only offered for
+     * alarms that are not themselves locked; the repository checks the stored row regardless.
+     */
+    fun setTarget(deviceId: String?) = _state.update { it.copy(sync = it.sync.copy(managedForDeviceId = deviceId)) }
+
+    /** The alarm as currently configured, for a screen that only displays it (a locked alarm). */
+    fun snapshot(): Alarm = buildAlarm(_state.value)
 
     // ── Setters ───────────────────────────────────────────────────
     // Typing clears the toggle: the field and the toggle would otherwise disagree, and

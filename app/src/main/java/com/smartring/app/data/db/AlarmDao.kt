@@ -18,6 +18,10 @@ interface AlarmDao {
     @Transaction @Query("SELECT * FROM alarms WHERE managedForDeviceId IS NULL ORDER BY hour, minute")
     fun observeLocalAlarms(): Flow<List<AlarmWithDetails>>
 
+    /** The records this phone keeps on behalf of its children — the Devices screen's lists. */
+    @Transaction @Query("SELECT * FROM alarms WHERE managedForDeviceId IS NOT NULL ORDER BY hour, minute")
+    fun observeManagedForChildren(): Flow<List<AlarmWithDetails>>
+
     @Transaction @Query("SELECT * FROM alarms WHERE id = :id")
     suspend fun getAlarmWithDetails(id: Long): AlarmWithDetails?
 

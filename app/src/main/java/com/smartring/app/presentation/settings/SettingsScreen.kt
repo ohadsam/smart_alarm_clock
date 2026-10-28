@@ -56,6 +56,7 @@ fun SettingsScreen(
     onBack: () -> Unit,
     onOpenLogs: () -> Unit = {},
     onOpenDiagnosis: () -> Unit = {},
+    onOpenDevices: () -> Unit = {},
     vm: SettingsViewModel = hiltViewModel(),
 ) {
     val s by vm.state.collectAsStateWithLifecycle()
@@ -305,6 +306,15 @@ fun SettingsScreen(
                     // moment anything rendered it LTR.
                     trailingContent   = { Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, null) },
                     modifier          = Modifier.clickable(onClick = onOpenLogs),
+                )
+            }
+            SettingsGroup("מכשירים מקושרים") {
+                ListItem(
+                    headlineContent   = { Text("מכשירים מקושרים", fontWeight = FontWeight.Medium) },
+                    supportingContent = { Text("הורה וילד, ושליחת שעמורים בין מכשירים — דרך Bluetooth ו-NFC, עם קוד צימוד") },
+                    leadingContent    = { Icon(Icons.Rounded.Devices, null) },
+                    trailingContent   = { Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, null) },
+                    modifier          = Modifier.clickable(onClick = onOpenDevices),
                 )
             }
             SettingsGroup("אודות") {

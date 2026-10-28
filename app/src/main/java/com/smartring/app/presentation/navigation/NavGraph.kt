@@ -6,6 +6,8 @@ import androidx.navigation.compose.*
 import com.smartring.app.presentation.alarmedit.AlarmEditScreen
 import com.smartring.app.presentation.alarmlist.AlarmListScreen
 import com.smartring.app.presentation.alarmring.AlarmRingScreen
+import com.smartring.app.presentation.devices.DevicesScreen
+import com.smartring.app.presentation.devices.PairScreen
 import com.smartring.app.presentation.diagnosis.DiagnosisScreen
 import com.smartring.app.presentation.history.HistoryScreen
 import com.smartring.app.presentation.logs.LogsScreen
@@ -15,7 +17,7 @@ sealed class Screen(val route: String) {
     object List     : Screen("list")
     // name/hour/minute are optional prefill values for a brand-new alarm (id=0),
     // used by History's "load again" action; a real edit (id>0) ignores them.
-    object Edit     : Screen("edit/{alarmId}?name={name}&hour={hour}&minute={minute}&copyOf={copyOf}") {
+    object Edit     : Screen("edit/{alarmId}?name={name}&hour={hour}&minute={minute}&copyOf={copyOf}&target={target}") {
         fun go(id: Long, name: String? = null, hour: Int? = null, minute: Int? = null): String {
             val params = buildList {
                 name?.let { add("name=${Uri.encode(it)}") }
@@ -36,12 +38,17 @@ sealed class Screen(val route: String) {
          * ring, which is the bug this release is mostly about.
          */
         fun duplicate(sourceId: Long) = "edit/0?copyOf=$sourceId"
+
+        /** A new alarm for a child device; [deviceId] is 32 hex characters, so it needs no encoding. */
+        fun forChild(deviceId: String) = "edit/0?target=$deviceId"
     }
     object Ring     : Screen("ring/{alarmId}") { fun go(id: Long) = "ring/$id" }
     object History  : Screen("history")
     object Settings : Screen("settings")
     object Logs     : Screen("logs")
     object Diagnosis: Screen("diagnosis")
+    object Devices  : Screen("devices")
+    object Pairing  : Screen("pair")
 }
 
 /**
@@ -131,6 +138,7 @@ fun SmartRingNavGraph(
             navArgument("hour")   { type = NavType.IntType; defaultValue = -1 },
             navArgument("minute") { type = NavType.IntType; defaultValue = -1 },
             navArgument("copyOf") { type = NavType.LongType; defaultValue = 0L },
+            navArgument("target") { type = NavType.StringType; nullable = true; defaultValue = null },
         )) {
             AlarmEditScreen(
                 alarmId       = it.arguments?.getLong("alarmId") ?: 0L,
@@ -138,6 +146,7 @@ fun SmartRingNavGraph(
                 prefillHour   = it.arguments?.getInt("hour")?.takeIf { h -> h >= 0 },
                 prefillMinute = it.arguments?.getInt("minute")?.takeIf { m -> m >= 0 },
                 copyOfAlarmId = it.arguments?.getLong("copyOf")?.takeIf { c -> c > 0L } ?: 0L,
+                targetDeviceId = it.arguments?.getString("target")?.takeIf { t -> t.length == 32 },
                 onBack        = { nav.popBackStack() },
             )
         }
@@ -170,7 +179,19 @@ fun SmartRingNavGraph(
                 onBack = { nav.popBackStack() },
                 onOpenLogs = { nav.navigate(Screen.Logs.route) },
                 onOpenDiagnosis = { nav.navigate(Screen.Diagnosis.route) },
+                onOpenDevices = { nav.navigate(Screen.Devices.route) },
             )
+        }
+        composable(Screen.Devices.route) {
+            DevicesScreen(
+                onBack = { nav.popBackStack() },
+                onAddDevice = { nav.navigate(Screen.Pairing.route) },
+                onEditAlarm = { nav.navigate(Screen.Edit.go(it)) },
+                onAddAlarmFor = { nav.navigate(Screen.Edit.forChild(it)) },
+            )
+        }
+        composable(Screen.Pairing.route) {
+            PairScreen(onBack = { nav.popBackStack() })
         }
         composable(Screen.Logs.route) {
             LogsScreen(onBack = { nav.popBackStack() })

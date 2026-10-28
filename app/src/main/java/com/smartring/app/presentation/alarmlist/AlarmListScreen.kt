@@ -26,6 +26,9 @@ import androidx.compose.ui.unit.*
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.smartring.app.domain.model.Alarm
+import com.smartring.app.presentation.devices.ShareAlarmDialog
+import com.smartring.app.presentation.devices.ShareViewModel
+import com.smartring.app.sync.nfc.NfcReader
 import com.smartring.app.presentation.theme.*
 import com.smartring.app.presentation.intro.IntroDialog
 import com.smartring.app.presentation.intro.IntroViewModel
@@ -60,6 +63,13 @@ fun AlarmListScreen(onAddAlarm: ()->Unit, onEditAlarm: (Long)->Unit,
     val snackbarHost = remember { SnackbarHostState() }
     val quickPresets by vm.quickPresets.collectAsStateWithLifecycle()
     var query by rememberSaveable { mutableStateOf("") }
+    // Sharing a copy needs somewhere to send it: an equal peer, or NFC. Without either the button
+    // would only lead to a dialog that says so.
+    val shareVm: ShareViewModel = hiltViewModel()
+    val sharePeers by shareVm.peers.collectAsStateWithLifecycle()
+    val canShare = sharePeers.isNotEmpty() || NfcReader.isSupported(LocalContext.current)
+    var sharing by remember { mutableStateOf<Alarm?>(null) }
+    sharing?.let { ShareAlarmDialog(it, onDismiss = { sharing = null }) }
 
     // "היום" is a claim about the current date, so it has to be re-evaluated when the
     // screen comes back rather than fixed at whatever moment it was first composed. A
@@ -251,6 +261,7 @@ fun AlarmListScreen(onAddAlarm: ()->Unit, onEditAlarm: (Long)->Unit,
                                 if (inSelection) vm.toggleSelection(alarm.id) else onEditAlarm(alarm.id)
                             },
                             onDuplicate = {onDuplicateAlarm(alarm.id)},
+                            onShare = if (canShare) ({ sharing = alarm }) else null,
                             onScheduleNextDay = {vm.scheduleForNextDay(alarm)},
                             onDelete = {vm.delete(alarm)},
                             onLongPress = { vm.toggleSelection(alarm.id) },
@@ -324,6 +335,7 @@ private fun AlarmCardItem(
     onToggle: (Boolean) -> Unit,
     onEdit: () -> Unit,
     onDuplicate: () -> Unit,
+    onShare: (() -> Unit)?,
     onScheduleNextDay: () -> Unit,
     onDelete: () -> Unit,
     onLongPress: () -> Unit,
@@ -353,9 +365,14 @@ private fun AlarmCardItem(
             false
         },
     )
+    // An alarm another device set for this one is not this user's to switch off or delete: the
+    // controls say so by being absent, and the repository refuses regardless.
+    val locked = alarm.isLockedForUser
 
     SwipeToDismissBox(
         state = dismissState,
+        enableDismissFromStartToEnd = !locked,
+        enableDismissFromEndToStart = !locked,
         backgroundContent = {
             val alignment = if (dismissState.dismissDirection == SwipeToDismissBoxValue.StartToEnd)
                 Alignment.CenterStart else Alignment.CenterEnd
@@ -438,9 +455,17 @@ private fun AlarmCardItem(
                         }
                     }
                 }
-                if (alarm.hasFinished || alarm.isFrozen || alarm.isShabbatMode || !alarm.snoozeEnabled) {
+                if (alarm.hasFinished || alarm.isFrozen || alarm.isShabbatMode || !alarm.snoozeEnabled ||
+                    alarm.sync.cameFromAnotherDevice) {
                     Spacer(Modifier.height(3.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        // Where this alarm came from, in words. A locked one says it is locked and by
+                        // whom; a copy somebody sent says so without implying it is controlled.
+                        if (alarm.sync.isRemoteManaged) {
+                            MiniBadge("🔒 הוגדר על ידי ${alarm.sync.originDeviceName ?: "מכשיר אחר"}", MaterialTheme.colorScheme.primary)
+                        } else if (alarm.sync.cameFromAnotherDevice) {
+                            MiniBadge("📥 התקבל מ-${alarm.sync.originDeviceName ?: "מכשיר אחר"}", MaterialTheme.colorScheme.secondary)
+                        }
                         // Says what to do about it, not just what happened: the fix is one
                         // toggle away and nothing previously pointed at it.
                         if (alarm.hasFinished)
@@ -460,7 +485,7 @@ private fun AlarmCardItem(
             // inside a row whose tap now means "select" is three different meanings
             // competing in one place.
             if (!inSelectionMode) Column(horizontalAlignment=Alignment.End){
-                Switch(alarm.isEnabled,onToggle,
+                Switch(alarm.isEnabled,onToggle, enabled = !locked,
                     // "מוקפא" is called out separately from the on/off state: a frozen
                     // alarm reads as "פעיל" to the switch but never rings, and a screen
                     // reader user has no dot color or badge to fall back on.
@@ -471,11 +496,22 @@ private fun AlarmCardItem(
                 // Those still work, but a gesture nobody discovers is not an affordance,
                 // and duplicating had no gesture at all.
                 Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                    // Not for a locked alarm: a copy would be that alarm with its lock and its
+                    // author stripped, carried to a third phone.
+                    if (onShare != null && !locked) IconButton(onShare, Modifier.size(40.dp)) {
+                        Icon(Icons.Rounded.Share, "שלח עותק של ${alarm.name}",
+                            Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
+                    }
                     IconButton(onDuplicate, Modifier.size(40.dp)) {
                         Icon(Icons.Rounded.ContentCopy, "שכפל את ${alarm.name}",
                             Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
                     }
-                    IconButton(onDelete, Modifier.size(40.dp)) {
+                    if (locked) {
+                        Box(Modifier.size(40.dp), contentAlignment = Alignment.Center) {
+                            Icon(Icons.Rounded.Lock, "נעול — הוגדר על ידי מכשיר אחר",
+                                Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    } else IconButton(onDelete, Modifier.size(40.dp)) {
                         Icon(Icons.Rounded.DeleteOutline, "מחק את ${alarm.name}",
                             Modifier.size(18.dp), tint = MaterialTheme.colorScheme.error)
                     }
