@@ -21,6 +21,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextDirection
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
@@ -196,6 +197,10 @@ private fun HostingView(s: PairingUiState.Hosting, onCancel: () -> Unit) {
             s.code, Modifier.padding(vertical = 28.dp).fillMaxWidth(),
             textAlign = TextAlign.Center, fontSize = 44.sp, fontWeight = FontWeight.ExtraBold,
             fontFamily = FontFamily.Monospace, letterSpacing = 4.sp,
+            // Digits are direction-neutral, so in this right-to-left app "1234 5678" would show its two
+            // groups in the opposite order — and the person reading it out would type a different
+            // number than the one on the other phone. Pinned left-to-right.
+            style = LocalTextStyle.current.copy(textDirection = TextDirection.Ltr),
         )
     }
     Text(
@@ -295,6 +300,7 @@ private fun JoinSetup(vm: PairViewModel) {
         label = { Text("קוד בן ${PairingCodes.LENGTH} ספרות") },
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
         singleLine = true,
+        textStyle = LocalTextStyle.current.copy(textDirection = TextDirection.Ltr),
         modifier = Modifier.fillMaxWidth(),
     )
     val valid = PairingCodes.normalize(code) != null && selected != null
@@ -334,6 +340,7 @@ private fun ConfirmView(summary: PeerSummary, onAnswer: (Boolean) -> Unit) {
             summary.verification.chunked(3).joinToString(" "),
             Modifier.padding(vertical = 22.dp).fillMaxWidth(), textAlign = TextAlign.Center,
             fontSize = 38.sp, fontWeight = FontWeight.ExtraBold, fontFamily = FontFamily.Monospace,
+            style = LocalTextStyle.current.copy(textDirection = TextDirection.Ltr),
         )
     }
     Text(

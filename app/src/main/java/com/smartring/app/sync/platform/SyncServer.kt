@@ -166,7 +166,12 @@ class SyncServer @Inject constructor(
     }
 
     private suspend fun respondToSession(channel: FrameChannel, remoteAddress: String?) {
-        val auth = SessionProtocol().respond(channel, pairedDevices.candidates())
+        val candidates = pairedDevices.candidates()
+        val auth = try {
+            SessionProtocol().respond(channel, candidates)
+        } finally {
+            candidates.forEach { it.pairingKey.fill(0) }
+        }
         if (auth !is SessionAuth.Authenticated) return   // the protocol already closed the link
         val device = pairedDevices.get(auth.deviceId)
         if (device == null || !device.isEnabled) {

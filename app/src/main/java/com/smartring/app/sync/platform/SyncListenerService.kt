@@ -6,12 +6,16 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.bluetooth.BluetoothAdapter
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.IntentFilter
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
+import androidx.core.content.ContextCompat
 import com.smartring.app.MainActivity
 import com.smartring.app.R
 import dagger.hilt.android.AndroidEntryPoint
@@ -45,15 +49,34 @@ class SyncListenerService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
-        if (!BluetoothSupport.canConnect(this) || !BluetoothSupport.isEnabled(this)) {
+        if (!BluetoothSupport.canConnect(this)) {
             stopSelf()
             return START_NOT_STICKY
         }
-        server.acquire(OWNER)
+        // Registered once. Bluetooth being off is not a reason to stop: the person switching it on is
+        // exactly when this phone should start listening, and nothing else would start it again.
+        if (stateReceiver == null) {
+            stateReceiver = object : BroadcastReceiver() {
+                override fun onReceive(context: Context, intent: Intent) {
+                    if (intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, -1) == BluetoothAdapter.STATE_ON) {
+                        server.acquire(OWNER)
+                    }
+                }
+            }.also {
+                ContextCompat.registerReceiver(
+                    this, it, IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED), ContextCompat.RECEIVER_NOT_EXPORTED,
+                )
+            }
+        }
+        if (BluetoothSupport.isEnabled(this)) server.acquire(OWNER)
         return START_STICKY
     }
 
+    private var stateReceiver: BroadcastReceiver? = null
+
     override fun onDestroy() {
+        stateReceiver?.let { runCatching { unregisterReceiver(it) } }
+        stateReceiver = null
         server.release(OWNER)
         super.onDestroy()
     }

@@ -175,6 +175,18 @@
 | 146 | הנתונים נקראים בתוך התצוגה מזרם חי; שינוי ב-Room או ב-DataStore מצייר מחדש לבד | `widgetStateFlow` (v1.12.7) |
 | 147 | `provideGlance` הוא `final`; גודל מצהיר רק על `Body` — כדי שגודל אחד לא יחזיר את הבאג | `SmartRingBaseWidget` (v1.12.7) |
 | 148 | `update()` שהסתיים **אינו** אומר שרונדר; כש-session חי הוא רק מצייר מחדש את התצוגה הקיימת | `refreshAllWidgets` (v1.12.7) |
+| 149 | **מכשירים מקושרים** (הורה/ילד/שווה): צימוד בקוד + מספר אימות, Bluetooth, NFC להקלה בלבד — `docs/PAIRING.md` | חבילת `sync/` (v1.13.0) |
+| 150 | הרשאות במקום אחד: `SyncPolicy`, נבדקת לפני שליחה **ו**לפני יישום; תפקיד לא נלקח מהודעה לעולם | `DeviceRole.kt`, `SyncEngine` (v1.13.0) |
+| 151 | **נעילה נבדקת מול הרשומה השמורה**, לא העותק שבמסך; שאילתות מרובות מדלגות על נעולים ב-SQL | `AlarmRepository`, `AlarmDao` (v1.13.0) |
+| 152 | **רשימת ה-cancel של פעולות מרובות חייבת להיות `getActiveControllableAlarms()`** — אחרת שעמור נעול נשאר מופעל ושקט | `AlarmListViewModel`, ווידג'ט, אריח (v1.13.0) |
+| 153 | רשומה שנשמרת עבור ילד (`ringsOnThisDevice == false`) לא מתוזמנת, לא ברשימה ולא בווידג'ט | `AlarmScheduler`, `observeLocalAlarms` (v1.13.0) |
+| 154 | שדה ב-`AlarmEditUiState` שלא עובר ב-`buildAlarm` מתאפס בשמירה — כך `sync` מועבר, אחרת נעילה נעלמת | `AlarmEditViewModel` (v1.13.0) |
+| 155 | חיבור/סשן שנכשל **סוגר את הערוץ**; אחרת הצד השני יושב בקריאה עד ה-timeout | `PairingProtocol`/`SessionProtocol`/`SyncEngine.guarded` (v1.13.0) |
+| 156 | `read()`/`accept()` של Bluetooth לא ניתנים להפסקה — ביטול סוגר את השקע | `blockingCancellable` (v1.13.0) |
+| 157 | נעילת try-only לכל מכשיר: חיבור הדדי בו-זמני לא ממתין (deadlock) | `PeerLocks` (v1.13.0) |
+| 158 | ספרות בטקסט RTL מתהפכות בין קבוצות ("1234 5678" → "5678 1234"); קוד ומספר אימות מקובעים LTR | `PairScreen` (v1.13.0) |
+| 159 | `CoarseFineLocation`: `ACCESS_FINE_LOCATION` חייב לבוא עם `COARSE` (גם עם `maxSdkVersion`) | `AndroidManifest.xml` (v1.13.0) |
+| 160 | Room לא כותב מחדש קובץ סכימה שהטבלאות בו שוות מבנית — hash שגוי נשאר; כדי להחליפו צריך להרוס מבנה זמנית ולקרוא את ה-diff מה-CI | `4.json` (v1.13.0) |
 
 ---
 
@@ -232,13 +244,16 @@ smartring-kotlin/
 /settings   → SettingsScreen
 /logs       → LogsScreen  (v1.2.0)
 /diagnosis  → DiagnosisScreen  ("למה השעמור לא צלצל?", v1.8.1)
+/devices    → DevicesScreen  (מכשירים מקושרים, v1.13.0)
+/pair       → PairScreen  (הוספת מכשיר: קוד + מספר אימות, v1.13.0)
+/edit/{id}?…&target={deviceId} → שעמור חדש עבור ילד (v1.13.0)
 
 אין route ל-IntroDialog — הוא דיאלוג מעל /list (פעם אחת בהתקנה) ומעל /settings (בלחיצה), v1.9.0.
 ```
 
 ---
 
-## 5. DB Schema – version 3
+## 5. DB Schema – version 3 (גרסה 4 ב-v1.13.0: ראו הסעיף הבא)
 
 ```sql
 -- alarms (עמודות חדשות ב-v2/v3 מסומנות)
@@ -275,6 +290,11 @@ CREATE TABLE alarm_logs (
   scheduledFor INTEGER,          -- v2
   action TEXT                    -- FIRED/STOPPED/SNOOZED/MISSED
 );
+
+-- v4 (v1.13.0, מכשירים מקושרים): 7 עמודות חדשות ב-alarms, כולן עם ברירת מחדל ששומרת כל שעמור קיים כמקומי רגיל:
+--   syncId, originDeviceId, originDeviceName, isRemoteManaged (נעילה!), managedForDeviceId, syncRevision, syncedRevision
+-- וארבע טבלאות: paired_devices (המפתח עטוף ב-Keystore), sync_tombstones, pending_transfers, outgoing_transfers.
+-- MigrationTest מקבע ששעמור שעובר 3→4 אינו נעול ואינו "עבור ילד".
 
 -- app_logs (v3 NEW) — technical/diagnostic log, separate from alarm_logs; no FK,
 -- viewed/copied/downloaded/cleared from Settings → Logs, trimmed to 3 days by
@@ -410,6 +430,7 @@ if (!alarm.acceptsInteraction) return
 - [ ] Export/Import JSON של שעמורים
 - [ ] פעולת "דלג על המופע הבא" בווידג'ט ובכרטיס — נשקלה שוב ב-v1.11.0 לתפריט הפעולות המהירות ונדחתה: אין לה ייצוג במודל — לא מומשה כי אין לה ייצוג במודל הנתונים כרגע (`occurrencesFired` סופר צלצולים שקרו, לא דילוגים); דורשת שדה משלה ומיגרציה
 - [ ] Custom accent color
+- [ ] **מכשירים מקושרים — בדיקה על שני מכשירים אמיתיים** (Bluetooth, NFC/HCE, שירות foreground, הרשאות על Android 12+/14). מתאמי הרדיו אינם נבדקים ב-CI; הפרוטוקול כן. בנוסף: BLE במקום Classic (גילוי בלי "ניתן לגילוי"), סימון תפקיד בווידג'ט, ושם מקומי (כינוי) לצימוד.
 
 ---
 
@@ -418,6 +439,8 @@ if (!alarm.acceptsInteraction) return
 | בעיה | מקום | חומרה |
 |------|-------|--------|
 | BIWEEKLY parity נגזרת מתאריך מוחלט (`daysSinceEpoch/7`) ולא מהשבוע שבו המשתמש יצר את השעמור — קצב "כל שבועיים" יציב, אבל הצלצול הראשון עלול להיות שבוע אחרי הצפוי | `AlarmScheduler.nextFireTime()` | נמוכה |
+| מכשירים מקושרים: מתאמי Bluetooth/NFC לא נבדקו על חומרה אמיתית (נכתבו מהמסמכים, עברו קומפילציה ו-lint) | `sync/platform/*`, `sync/nfc/*` | **גבוהה עד שתיבדק** |
+| נעילת שעמור היא הגנה מפני תקלות, לא מפני בעל המכשיר (הוא יכול לבטל צימוד) — בכוונה | `docs/PAIRING.md` §3 | מתועד |
 | Long.toInt() ל-id גדול | `AlarmScheduler.buildIntent()` | נמוכה |
 | מסך הצלצול (רשת ביטחון) עלול "לנצח" את טיימר השירות האמיתי אם `AlarmFiringService.onStartCommand()` איטי מ-GRACE_SECONDS (2 שניות) — במקרה כזה רשומת "MISSED" לא תיכתב | `AlarmRingViewModel.tick()`, `AlarmFiringService.fireAlarm()` | נמוכה (v1.4.0) |
 | `recurrenceUntilDate` של שעמורים שנשמרו לפני v1.5.0 עדיין מכיל חצות UTC (מסתיים יום מוקדם). לא מנורמל בטעינה בכוונה — זה היה מסמן את המסך כ"עם שינויים שלא נשמרו" עוד לפני שהמשתמש נגע במשהו. נפתר ברגע שהמשתמש בוחר תאריך סיום מחדש | `AlarmEditViewModel.setRecurrenceUntilDate()` | נמוכה (v1.5.0) |

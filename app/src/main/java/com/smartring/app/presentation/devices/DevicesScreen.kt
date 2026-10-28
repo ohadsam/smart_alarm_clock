@@ -23,6 +23,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -230,7 +232,10 @@ private fun DeviceCard(
                     Text(device.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                     Text(roleLabel(device), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
                 }
-                Switch(device.isEnabled, onEnabled)
+                Switch(
+                    device.isEnabled, onEnabled,
+                    modifier = Modifier.semantics { contentDescription = "מותר לתקשר עם ${device.name}" },
+                )
             }
             if (!device.isEnabled) {
                 Text("מושבת — המכשיר הזה לא יתקשר איתך עד שתפעיל שוב", style = MaterialTheme.typography.bodySmall,
@@ -291,7 +296,10 @@ private fun ChildAlarmRow(
                 color = if (alarm.sync.isAwaitingDelivery) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        Switch(alarm.isEnabled, { onToggle(alarm, it) })
+        Switch(
+            alarm.isEnabled, { onToggle(alarm, it) },
+            modifier = Modifier.semantics { contentDescription = "שעמור ${alarm.name} בשעה ${alarm.timeFormatted}, ${if (alarm.isEnabled) "פעיל" else "כבוי"}" },
+        )
         IconButton({ onDelete(alarm) }) {
             Icon(Icons.Rounded.DeleteOutline, "מחק את ${alarm.name}", tint = MaterialTheme.colorScheme.error)
         }

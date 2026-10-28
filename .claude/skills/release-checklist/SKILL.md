@@ -1139,3 +1139,37 @@ If the user asks for a PR-based workflow going forward, follow that instead and 
 - This checklist itself explicitly reconsidered in light of this batch.
 - Pushed to `main`, and the GitHub Actions "Build SmartRing APK" run for that push confirmed
   green (or a red run's root cause fixed and re-pushed until it is).
+- **Room does not rewrite a schema JSON whose tables are structurally equal, so a placeholder
+  `identityHash` stays forever** (`app/schemas/.../4.json`, v1.13.0). The CI "Check Room schemas
+  are committed and current" step diffs the committed file against the generated one and the diff
+  *is* the way to read the real hash: commit a file that is structurally different (drop a
+  column), let the build fail that one step, and take the `+` lines — `identityHash` and the
+  `setupQueries` INSERT — from its log. `RoomSchemaTest` needs the file to exist and contain
+  `"version": N` before that step is even reached, so ship a hand-built one first.
+- **A locked/guarded alarm needs the guard at every layer, and the list of alarms a bulk flow
+  cancels must come from the same filtered source the DAO acts on** (`getActiveControllableAlarms()`,
+  v1.13.0). "Turn everything off" read `getActiveAlarms()`, cancelled those schedules, then relied on
+  the DAO to disable them — and the DAO skips locked rows, so a locked alarm would have been
+  *enabled in the database and unscheduled on the phone*. Any new bulk path (widget, tile, list,
+  selection) re-checks this. The same goes for `AlarmEditUiState`/`buildAlarm`: a field the editor does
+  not carry (`sync`) is reset on the next save, which would silently unlock the alarm.
+- **Digits are direction-neutral, so in a right-to-left screen a number with a space reverses its
+  groups** (`PairScreen`, v1.13.0): "1234 5678" renders as "5678 1234", and a pairing code read off
+  one phone and typed into the other fails for no visible reason. Any code, verification number or
+  other must-be-copied-exactly figure gets `textDirection = TextDirection.Ltr` in its `TextStyle`.
+- **A protocol bug can hide in "the other side waits for its timeout"** (`guarded()` in
+  `PairingProtocol`/`SessionProtocol`/`SyncEngine`, v1.13.0): a handshake that failed returned an
+  error but left the connection open, so the peer sat in a read for twenty seconds after the answer
+  was known. Found by a test that measured elapsed time, not by one that checked the result. Every
+  new protocol step that can fail needs the close, and a test that the other side learns at once.
+- **Lint `CoarseFineLocation` is an error even with `maxSdkVersion`**: declaring
+  `ACCESS_FINE_LOCATION` alone (for Bluetooth discovery on API ≤ 30) fails the lint step — declare
+  `ACCESS_COARSE_LOCATION` beside it. Also `UnspecifiedRegisterReceiverFlag`,
+  `MissingPermission` (Bluetooth calls need `@SuppressLint` + a runtime guard) and `ExportedService`
+  (the HCE service is exported and must carry `BIND_NFC_SERVICE`) all gate this feature's code.
+- **Radio code cannot be exercised by CI or by the authoring environment.** For anything that talks to
+  Bluetooth/NFC hardware, keep the decision-making in plain Kotlin behind a one-method channel
+  interface (`FrameChannel`) so it can be tested between two simulated peers, make the platform adapter
+  as thin as possible, and say in the release notes, the changelog and the final report that the
+  adapter itself was not run on a device.
+

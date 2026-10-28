@@ -2,7 +2,7 @@
 
 ## שכבות
 ```
-Compose UI → ViewModels (StateFlow) → AlarmRepository → Room DB v3
+Compose UI → ViewModels (StateFlow) → AlarmRepository → Room DB v4
                                    → AlarmScheduler (AlarmManager)
                                    → AppLogger (app_logs, אבחון)
                                    → WorkManager (reschedule + log cleanup + widget refresh)
@@ -14,12 +14,14 @@ Glance Widgets (SmartRingWidget.kt) → WidgetUiState → גופי Glance טהו
 | מסך | Route |
 |-----|-------|
 | AlarmListScreen | /list (מציג WhatsNewDialog אחרי עדכון גרסה) |
-| AlarmEditScreen | /edit/{id}?name&hour&minute |
+| AlarmEditScreen | /edit/{id}?name&hour&minute&copyOf&target (target = מזהה ילד לשעמור חדש עבורו, v1.13.0) |
 | AlarmRingScreen | /ring/{id} |
 | HistoryScreen   | /history |
 | SettingsScreen  | /settings |
 | LogsScreen      | /logs ← חדש (v1.2.0) |
 | DiagnosisScreen | /diagnosis ← חדש (v1.8.1) — "למה השעמור לא צלצל?" |
+| DevicesScreen | /devices ← חדש (v1.13.0) — מכשירים מקושרים |
+| PairScreen | /pair ← חדש (v1.13.0) — הוספת מכשיר (קוד, אימות) |
 
 מחוץ לגרף הניווט: `IntroDialog` (דיאלוג מעל /list ו-/settings, v1.9.0), ו-`AlarmsTileService`
 — אריח Quick Settings שהמערכת קושרת אליו ישירות, ללא Activity (v1.9.0).
@@ -246,3 +248,29 @@ allowBackup=false · exported=false · FLAG_IMMUTABLE · ProGuard · prepareAsyn
 - סדר העדיפות בכל הגדלים: `loadError` → `panelOpen` → גוף רגיל.
 - כל פעולה בפאנל מסיימת ב-`refreshAllWidgets`, שעובר על כל ארבעת ה-receivers, ולכן
   הווידג'ט הקטן מתרענן גם מפעולה שבוצעה בגדול ולהפך.
+
+## מכשירים מקושרים (v1.13.0) — פירוט מלא ב-`docs/PAIRING.md`
+חבילה `com.smartring.app.sync`, בשלוש שכבות שמפרידות בין "מה מחליט" לבין "מה מזיז בייטים":
+
+```
+sync/
+├── DeviceRole.kt, Hex.kt            ← תפקידים + SyncPolicy (טבלת ההרשאות במקום אחד), PeerLink
+├── crypto/                          ← JCE בלבד (זהה ב-JVM וב-Android 26+): AEAD, HKDF, PBKDF2, ECDH, SecureChannel
+├── protocol/                        ← קודק בינארי חסום, SyncAlarm (ולידציה + ניקוי), Messages
+├── pairing/                         ← PairingCodes, PairingProtocol (host/join), SessionProtocol (חיבור חוזר)
+├── engine/                          ← SyncEngine, RemoteAlarmApplier, TransferInbox  (טהור — נבדק ב-JVM)
+├── nfc/                             ← NfcOffer/NfcApdu (טהור), HCE service, reader
+└── platform/                        ← כל מה שנוגע ב-Android: Bluetooth, Keystore, Room, DataStore, שירות
+```
+
+* **נתונים:** DB v4 — 7 עמודות ב-`alarms` (`syncId`, `originDeviceId/Name`, `isRemoteManaged`,
+  `managedForDeviceId`, `syncRevision`, `syncedRevision`) + `paired_devices`, `sync_tombstones`,
+  `pending_transfers`, `outgoing_transfers`. ב-Room ולא באחסון צדדי כדי שמחיקת רשומה ומצבת-המחיקה יהיו טרנזקציה אחת.
+* **שלושה סוגי שעמור (`AlarmSync`):** מקומי רגיל · מנוהל (הורה הגדיר; מצלצל כאן, נעול) · רשומה
+  שנשמרת עבור ילד (`ringsOnThisDevice == false` — לא מתוזמנת, לא ברשימה, לא בווידג'ט).
+* **נעילה:** נאכפת ב-`AlarmRepository` מול הרשומה *השמורה*, וב-DAO לשאילתות מרובות. רשימות ה-cancel של
+  פעולות מרובות מגיעות מ-`getActiveControllableAlarms()` (ולא `getActiveAlarms()`).
+* **מי מפעיל מה:** `SyncController` (מתוך `SmartRingApp`) → שירות האזנה `SyncListenerService` (מכשיר שמישהו
+  יכול לשלוח אליו) ו-`SyncCoordinator` + `SyncWorker` (מכשיר ששולח). `SyncServer` הוא שקע השרת היחיד, משותף
+  להאזנה ולצימוד; ההודעה הראשונה קובעת לאן החיבור הולך.
+

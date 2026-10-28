@@ -1,5 +1,37 @@
 # SmartRing – Changelog
 
+## v1.13.0 (2026-10-28)
+
+### Linked devices: a parent sets alarms on a child; equals send each other copies
+
+Two phones running the app can be paired with a code. Afterwards a **parent** can create, change,
+switch and delete alarms on a **child**; those alarms are marked and locked on the child. **Equals**
+can send each other a *copy* of an alarm, which the receiver accepts or declines. Transport is
+Bluetooth; NFC is a convenience (it carries the pairing invitation, or an alarm to be approved).
+Full design, threat model and limitations: `docs/PAIRING.md`.
+
+**Security, in one paragraph.** Eight digits is ~26 bits, so the code is never used alone: it is the
+HKDF salt over an ephemeral P-256 ECDH secret, stretched with PBKDF2 (200k), so a recording cannot be
+tested against guesses and a live attacker gets one attempt per connection (3 per code, 3 minutes,
+single use). After the keys exist both people see who they are pairing with, what the relationship
+means, and a six-digit verification number; nothing is stored until both agree. Sessions are
+AES-256-GCM with an implicit counter nonce (replay, reorder, drop, tamper and reflection each fail the
+tag). Reconnection is keyed by the pairing key with fresh ECDH (forward secret) and sends a hint, not
+an id. The pairing key is wrapped with an Android Keystore key. Roles are agreed once, by people, and
+never read from a message. Everything received is bounded, validated and sanitized.
+
+**Honest limits.** The crypto, handshake, sync engine, lock rules and migration are covered by JVM tests
+that run two simulated phones over an in-memory channel (including a man in the middle) and by Room
+tests; the Bluetooth/NFC adapters are thin and are *not* exercised by CI — they need two real phones. A
+lock is a guard against accidents (bulk "turn everything off", widgets, tiles, swipes), not against the
+phone's owner, who can always unpair.
+
+Also in this release: Room v4 (7 columns on `alarms`, 4 tables; `MigrationTest` pins that every existing
+alarm upgrades as an ordinary local one), the `AlarmSync` model, `getActiveControllableAlarms()` for the
+bulk flows (cancelling a locked alarm's schedule from the unfiltered list would leave it enabled and
+silent), and fixes found by the tests: a failed handshake/session now closes the link instead of leaving
+the peer waiting, and a failed sync no longer erases the last successful sync time.
+
 ## v1.12.7 (2026-09-21)
 
 ### The root cause, after six releases of fixing things around it
