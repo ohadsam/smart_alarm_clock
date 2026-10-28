@@ -470,7 +470,7 @@
       },
       {
         "tableName": "paired_devices",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`deviceId` TEXT NOT NULL, `name` TEXT NOT NULL, `myRole` TEXT NOT NULL, `theirRole` TEXT NOT NULL, `bluetoothAddress` TEXT, `encryptedKey` BLOB NOT NULL, `isEnabled` INTEGER NOT NULL, `createdAt` INTEGER NOT NULL, `lastSyncAt` INTEGER, `lastError` TEXT, PRIMARY KEY(`deviceId`))",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`deviceId` TEXT NOT NULL, `name` TEXT NOT NULL, `myRole` TEXT NOT NULL, `theirRole` TEXT NOT NULL, `bluetoothAddress` TEXT, `encryptedKey` BLOB NOT NULL, `isEnabled` INTEGER NOT NULL, `createdAt` INTEGER NOT NULL, `lastSyncAt` INTEGER, PRIMARY KEY(`deviceId`))",
         "fields": [
           {
             "fieldPath": "deviceId",
@@ -524,12 +524,6 @@
             "fieldPath": "lastSyncAt",
             "columnName": "lastSyncAt",
             "affinity": "INTEGER",
-            "notNull": false
-          },
-          {
-            "fieldPath": "lastError",
-            "columnName": "lastError",
-            "affinity": "TEXT",
             "notNull": false
           }
         ],
