@@ -5,7 +5,9 @@ import com.smartring.app.domain.model.AlarmSync
 import com.smartring.app.sync.PeerLink
 import com.smartring.app.sync.SyncPolicy
 import com.smartring.app.sync.protocol.AckStatus
+import com.smartring.app.sync.protocol.Proto
 import com.smartring.app.sync.protocol.ProtocolException
+import com.smartring.app.sync.protocol.cleanText
 import com.smartring.app.sync.protocol.SyncAlarm
 import com.smartring.app.sync.protocol.decodeSyncAlarm
 import com.smartring.app.sync.protocol.encodeSyncAlarm
@@ -66,6 +68,21 @@ class TransferInbox(
     }
 
     /**
+     * A copy handed over by tapping phones together (NFC): the sender was not authenticated, so this
+     * is held for approval exactly like any other copy but is labelled for what it is — a name
+     * somebody typed, not a verified device. It counts against its own bucket, so a stranger tapping
+     * repeatedly cannot crowd out copies from the phones this one has actually paired with.
+     */
+    suspend fun receiveUnverified(senderName: String, transferId: String, alarm: SyncAlarm): AckStatus {
+        if (store.count() >= maxTotal || store.countFrom(UNVERIFIED_SOURCE) >= maxPerPeer) return AckStatus.BUSY
+        val name = cleanText(senderName, Proto.DEVICE_NAME_MAX_CHARS).ifEmpty { "?" }
+        val stored = store.insert(
+            StoredTransfer(transferId, UNVERIFIED_SOURCE, "$name · NFC", encodeSyncAlarm(alarm), clock())
+        )
+        return if (stored) AckStatus.OK else AckStatus.STALE
+    }
+
+    /**
      * The alarm the user is about to keep, or null if the transfer is gone or its contents no longer
      * pass validation (they are re-validated on the way out: storage is not trusted either).
      */
@@ -83,7 +100,11 @@ class TransferInbox(
         val local = alarm.toAlarm().copy(
             // The copy starts switched off if its sender had it off, but is otherwise a normal
             // alarm. Its origin is a note, not a tether.
-            sync = AlarmSync(originDeviceId = transfer.fromDeviceId, originDeviceName = transfer.fromDeviceName),
+            // An unverified sender has no device id to remember: only the label it gave itself.
+            sync = AlarmSync(
+                originDeviceId = transfer.fromDeviceId.takeIf { it != UNVERIFIED_SOURCE },
+                originDeviceName = transfer.fromDeviceName,
+            ),
         )
         val id = sink(local)
         store.delete(transferId)
@@ -95,5 +116,8 @@ class TransferInbox(
     companion object {
         const val DEFAULT_MAX_TOTAL = 30
         const val DEFAULT_MAX_PER_PEER = 10
+
+        /** The bucket NFC hand-overs share. Not a valid device id, so it can never collide with one. */
+        const val UNVERIFIED_SOURCE = "nfc"
     }
 }

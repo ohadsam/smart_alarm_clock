@@ -27,6 +27,7 @@ class SmartRingApp : Application(), Configuration.Provider {
     @Inject lateinit var widgetRefresher: WidgetRefresher
     @Inject lateinit var quickPresetsRepository: QuickPresetsRepository
     @Inject lateinit var appLogger: AppLogger
+    @Inject lateinit var syncController: com.smartring.app.sync.platform.SyncController
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     // Last night-mode state this process rendered widgets for. The widgets pick their
@@ -71,6 +72,10 @@ class SmartRingApp : Application(), Configuration.Provider {
         appLogger.log("SmartRingApp", "גרסה ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
         lastNightMode = (resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
             android.content.res.Configuration.UI_MODE_NIGHT_YES
+        // Paired devices: start the listener and sender only if a pairing exists. A failure here
+        // must never stop the app — alarms matter more than syncing.
+        runCatching { syncController.start() }
+            .onFailure { e -> appLogger.log("SmartRingApp", "הפעלת הסנכרון נכשלה: ${e.message}") }
         // Runs daily (not every 3 days) so a log written right after one cleanup pass
         // is trimmed within ~1 day of crossing the 3-day retention line, not ~3 more.
         WorkManager.getInstance(this).enqueueUniquePeriodicWork(

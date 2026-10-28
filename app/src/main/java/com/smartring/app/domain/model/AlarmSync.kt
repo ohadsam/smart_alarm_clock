@@ -49,8 +49,11 @@ data class AlarmSync(
     val revision: Long               = 0L,
     val syncedRevision: Long         = 0L,
 ) {
-    /** True for an alarm that arrived from another device, locked or not. */
-    val cameFromAnotherDevice: Boolean get() = originDeviceId != null
+    /**
+     * True for an alarm that arrived from another device, locked or not. A copy handed over by NFC
+     * has a name but no device id — nobody authenticated it — and counts too.
+     */
+    val cameFromAnotherDevice: Boolean get() = originDeviceId != null || originDeviceName != null
 
     /** A change this device made for a child that the child has not confirmed yet. */
     val isAwaitingDelivery: Boolean

@@ -40,7 +40,7 @@ interface SyncDao {
     @Query("UPDATE paired_devices SET isEnabled = :enabled WHERE deviceId = :id")
     suspend fun setPairedDeviceEnabled(id: String, enabled: Boolean)
 
-    @Query("UPDATE paired_devices SET lastSyncAt = :at, lastError = :error WHERE deviceId = :id")
+    @Query("UPDATE paired_devices SET lastSyncAt = COALESCE(:at, lastSyncAt), lastError = :error WHERE deviceId = :id")
     suspend fun recordSyncResult(id: String, at: Long?, error: String?)
 
     @Query("UPDATE paired_devices SET bluetoothAddress = :address WHERE deviceId = :id")
@@ -71,6 +71,19 @@ interface SyncDao {
 
     @Query("UPDATE alarms SET syncedRevision = :revision WHERE managedForDeviceId = :deviceId AND syncId = :syncId AND syncedRevision < :revision")
     suspend fun markDelivered(deviceId: String, syncId: String, revision: Long)
+
+    /**
+     * Changes whenever anything this phone has to tell a child changes: an alarm kept for one is
+     * added, edited (its revision moves) or removed. The coordinator watches it to know when to sync.
+     */
+    @Query("SELECT COALESCE(SUM(syncRevision), 0) + COUNT(*) * 1000003 FROM alarms WHERE managedForDeviceId IS NOT NULL")
+    fun observeManagedFingerprint(): Flow<Long>
+
+    @Query("SELECT COUNT(*) FROM sync_tombstones")
+    fun observeTombstoneCount(): Flow<Int>
+
+    @Query("SELECT COUNT(*) FROM outgoing_transfers")
+    fun observeOutgoingTransferCount(): Flow<Int>
 
     @Query("SELECT COUNT(*) FROM alarms WHERE managedForDeviceId = :deviceId")
     suspend fun countManagedFor(deviceId: String): Int
@@ -108,6 +121,9 @@ interface SyncDao {
 
     @Query("SELECT COUNT(*) FROM pending_transfers")
     suspend fun countPendingTransfers(): Int
+
+    @Query("SELECT COUNT(*) FROM pending_transfers WHERE fromDeviceId = :deviceId")
+    suspend fun countPendingTransfersFrom(deviceId: String): Int
 
     @Query("SELECT * FROM pending_transfers WHERE transferId = :id")
     suspend fun getPendingTransfer(id: String): PendingTransferEntity?

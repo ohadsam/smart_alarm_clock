@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- requireDeviceUnlock: a locked phone offers nothing over NFC. The only application id is this
+     app's own; the service answers "nothing here" unless the person has asked to hand something over. -->
+<host-apdu-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:description="@string/nfc_service_description"
+    android:requireDeviceUnlock="true"
+    android:requireDeviceScreenOn="true">
+    <aid-group android:description="@string/nfc_service_description" android:category="other">
+        <aid-filter android:name="F0534D52494E4701"/>
+    </aid-group>
+</host-apdu-service>

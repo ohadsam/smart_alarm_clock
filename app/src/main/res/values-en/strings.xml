@@ -13,6 +13,7 @@
 -->
 <resources>
     <string name="app_name">SmartRing</string>
+    <string name="nfc_service_description">Alarm sharing and device pairing</string>
     <string name="channel_name">SmartRing Alarms</string>
     <string name="action_stop">Stop</string>
     <string name="action_snooze">Snooze</string>

@@ -25,6 +25,26 @@
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO"/>
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32"/>
 
+    <!-- Pairing two phones and syncing alarms between them (sync/platform).
+         Bluetooth before API 31 had install-time permissions only; from 31 the three runtime ones.
+         BLUETOOTH_SCAN is declared neverForLocation: the app finds a phone to pair with, it never
+         learns where anyone is, so no location permission is needed on 31+. Discovery on older
+         releases is the one place location is still required, hence the maxSdk-bounded grant. -->
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30"/>
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30"/>
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" android:maxSdkVersion="30"/>
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT"/>
+    <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE"/>
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" android:usesPermissionFlags="neverForLocation"
+        tools:targetApi="s"/>
+    <uses-permission android:name="android.permission.NFC"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE"/>
+
+    <!-- Optional: the app is fully usable on a phone with neither. -->
+    <uses-feature android:name="android.hardware.bluetooth" android:required="false"/>
+    <uses-feature android:name="android.hardware.nfc" android:required="false"/>
+    <uses-feature android:name="android.hardware.nfc.hce" android:required="false"/>
+
     <application
         android:name=".SmartRingApp"
         android:label="@string/app_name"
@@ -68,6 +88,23 @@
                 <action android:name="android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED"/>
             </intent-filter>
         </receiver>
+
+        <!-- Keeps the phone reachable by the phone that manages it. Not exported: only this app starts it. -->
+        <service android:name=".sync.platform.SyncListenerService"
+            android:exported="false" android:foregroundServiceType="connectedDevice"/>
+
+        <!-- Hands a pairing invitation or an alarm to a phone held against this one. Must be exported
+             for the NFC system service to bind it; BIND_NFC_SERVICE is held only by the platform. -->
+        <service android:name=".sync.nfc.NfcOfferService"
+            android:exported="true"
+            android:permission="android.permission.BIND_NFC_SERVICE">
+            <intent-filter>
+                <action android:name="android.nfc.cardemulation.action.HOST_APDU_SERVICE"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+            </intent-filter>
+            <meta-data android:name="android.nfc.cardemulation.host_apdu_service"
+                android:resource="@xml/apduservice"/>
+        </service>
 
         <service android:name=".service.AlarmFiringService"
             android:exported="false" android:foregroundServiceType="specialUse"
