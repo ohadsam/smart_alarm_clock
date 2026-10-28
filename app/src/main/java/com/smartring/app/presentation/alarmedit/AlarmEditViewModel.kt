@@ -115,6 +115,16 @@ data class AlarmEditUiState(
      * instead of leaving the generic name sitting there looking like the user typed it.
      */
     val unnamed: Boolean                   = false,
+    /**
+     * Where this alarm came from and who may change it (multi-device).
+     *
+     * Carried through the editor untouched, because [buildAlarm] constructs a whole new
+     * `Alarm` and any field it does not copy is reset to its default on every save. For
+     * these that would be silent and serious: an alarm this phone keeps for a child would
+     * lose its target and start ringing *here*, and a peer-sent copy would forget who sent
+     * it.
+     */
+    val sync: AlarmSync                    = AlarmSync.LOCAL,
 )
 
 @HiltViewModel
@@ -186,6 +196,7 @@ class AlarmEditViewModel @Inject constructor(
                     loadedDisabled       = !a.isEnabled,
                     isFrozen             = a.isFrozen,
                     occurrencesFired     = a.occurrencesFired,
+                    sync                 = a.sync,
                     // Computed up front (not via a separate updateNextFireHint() call
                     // after the fact) so originalState and the initial _state are the
                     // exact same value — otherwise isDirty (structural equality against
@@ -224,6 +235,10 @@ class AlarmEditViewModel @Inject constructor(
                     loadedDisabled   = false,
                     occurrencesFired = 0,
                     unnamed          = false,
+                    // A copy is a new alarm of this user's own. Carrying the original's
+                    // identity would make the copy a second claimant on the same shared
+                    // alarm — and, for a parent's locked alarm, a way to copy the lock.
+                    sync             = AlarmSync.LOCAL,
                 )
             }
         }
@@ -553,5 +568,6 @@ class AlarmEditViewModel @Inject constructor(
         crescendoStartVolume = s.crescendoStartVolume,
         crescendoStepSeconds = s.crescendoStepSeconds,
         crescendoStepPercent = s.crescendoStepPercent,
+        sync                 = s.sync,
     )
 }

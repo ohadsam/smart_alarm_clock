@@ -8,6 +8,7 @@ import androidx.sqlite.db.framework.FrameworkSQLiteOpenHelperFactory
 import androidx.test.core.app.ApplicationProvider
 import com.smartring.app.di.MIGRATION_1_2
 import com.smartring.app.di.MIGRATION_2_3
+import com.smartring.app.di.MIGRATION_3_4
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import org.junit.After
@@ -155,7 +156,7 @@ class MigrationTest {
      */
     private fun openThroughRoom(): AppDatabase =
         Room.databaseBuilder(context, AppDatabase::class.java, dbName)
-            .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
             .allowMainThreadQueries()
             .build()
 
@@ -182,7 +183,7 @@ class MigrationTest {
     }
 
     @Test
-    fun `an alarm created before the upgrade survives v1 to v3 with sane defaults`() = runTest {
+    fun `an alarm created before the upgrade survives v1 to v4 with sane defaults`() = runTest {
         seedOldDatabase(1) { createV1(this); execSQL(v1Alarm) }
 
         val room = openThroughRoom()
@@ -251,6 +252,77 @@ class MigrationTest {
         val room = openThroughRoom()
         room.alarmDao().insertAppLog(AppLogEntity(tag = "T", message = "m"))
         assertEquals(1, room.alarmDao().observeAppLogs().first().size)
+        room.close()
+    }
+
+    // ── v3 → v4: multi-device sync ──────────────────────────────────────────
+
+    private fun seedV3(withAlarm: Boolean) = seedOldDatabase(3) {
+        createV1(this); MIGRATION_1_2.migrate(this); MIGRATION_2_3.migrate(this)
+        if (withAlarm) execSQL(
+            """
+            INSERT INTO alarms (name, hour, minute, isEnabled, isFrozen, repeatDaysBitmask,
+                repeatFrequency, ringDurationSeconds, snoozeMinutes, snoozeMaxCount,
+                reminderText, vibrationMode, vibrationOnlySeconds, crescendoEnabled,
+                crescendoStartVolume, crescendoStepSeconds, crescendoStepPercent)
+            VALUES ('Existing', 7, 0, 1, 0, 0, 'WEEKLY', 60, 10, 3, NULL,
+                'SOUND_AND_VIBRATION', 10, 0, 10, 15, 10)
+            """
+        )
+    }
+
+    @Test
+    fun `Room accepts the schema after upgrading a v3 database`() = runTest {
+        seedV3(withAlarm = false)
+
+        val room = openThroughRoom()
+        room.alarmDao().getActiveAlarms()
+        room.close()
+    }
+
+    /**
+     * Every alarm that existed before the feature must come through as an ordinary local one.
+     * A default that left an alarm looking locked would lock every upgrading user out of
+     * their own alarms; one that left it "kept for a child" would stop it ringing at all.
+     */
+    @Test
+    fun `an existing alarm is an ordinary local alarm after the v4 upgrade`() = runTest {
+        seedV3(withAlarm = true)
+
+        val room = openThroughRoom()
+        val alarm = room.alarmDao().getActiveAlarms().single().alarm
+
+        assertEquals("Existing", alarm.name)
+        assertEquals(false, alarm.isRemoteManaged)
+        assertNull(alarm.managedForDeviceId)
+        assertNull(alarm.syncId)
+        assertNull(alarm.originDeviceId)
+        assertEquals(0L, alarm.syncRevision)
+        assertEquals(0L, alarm.syncedRevision)
+        room.close()
+    }
+
+    @Test
+    fun `the v4 tables are usable straight after the upgrade`() = runTest {
+        seedV3(withAlarm = false)
+
+        val room = openThroughRoom()
+        val sync = room.syncDao()
+        sync.upsertPairedDevice(
+            PairedDeviceEntity(
+                deviceId = "d", name = "מכשיר", myRole = "PARENT", theirRole = "CHILD",
+                bluetoothAddress = null, encryptedKey = ByteArray(8), isEnabled = true,
+                createdAt = 1L, lastSyncAt = null, lastError = null,
+            )
+        )
+        sync.insertTombstone(SyncTombstoneEntity(deviceId = "d", syncId = "s", revision = 2))
+        sync.insertPendingTransfer(PendingTransferEntity("t", "d", "מכשיר", ByteArray(1), 1L))
+        sync.insertOutgoingTransfer(OutgoingTransferEntity("o", "d", ByteArray(1), 1L))
+
+        assertEquals(1, sync.getPairedDevices().size)
+        assertEquals(1, sync.getTombstones("d").size)
+        assertEquals(1, sync.countPendingTransfers())
+        assertEquals(1, sync.getOutgoingTransfers("d").size)
         room.close()
     }
 }

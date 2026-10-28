@@ -3,6 +3,7 @@ package com.smartring.app.util
 import android.app.AlarmManager
 import androidx.test.core.app.ApplicationProvider
 import com.smartring.app.domain.model.Alarm
+import com.smartring.app.domain.model.AlarmSync
 import com.smartring.app.domain.model.AlarmDate
 import com.smartring.app.domain.model.RecurrenceEnd
 import com.smartring.app.domain.model.RecurrenceEndType
@@ -359,6 +360,51 @@ class AlarmSchedulerTest {
             ),
         )
         scheduler.schedule(alarm)
+        assertNull(shadow.peekNextScheduledAlarm())
+    }
+
+    /**
+     * A record this phone keeps for a child's alarm is information, not an alarm here.
+     * Arming it would make both phones ring at the same moment — the parent's included.
+     */
+    @Test
+    fun `schedule() never arms a record kept for a child`() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val shadow = shadowOf(context.getSystemService(AlarmManager::class.java))
+        val record = Alarm(
+            id = 51, hour = 7, minute = 0, repeatDaysBitmask = 0b1111111,
+            sync = AlarmSync(managedForDeviceId = "c".repeat(32), revision = 1),
+        )
+
+        scheduler.schedule(record)
+
+        assertNull(shadow.peekNextScheduledAlarm())
+    }
+
+    @Test
+    fun `schedule() disarms an alarm that has just been pointed at a child`() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val shadow = shadowOf(context.getSystemService(AlarmManager::class.java))
+        val local = Alarm(id = 52, hour = 7, minute = 0, repeatDaysBitmask = 0b1111111)
+        scheduler.schedule(local)
+        assertNotNull("sanity: it was armed while it was a local alarm", shadow.peekNextScheduledAlarm())
+
+        scheduler.schedule(local.copy(sync = AlarmSync(managedForDeviceId = "c".repeat(32))))
+
+        assertNull("retargeting it must not leave the old registration ringing here",
+            shadow.peekNextScheduledAlarm())
+    }
+
+    @Test
+    fun `rescheduleAll() skips a record kept for a child`() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val shadow = shadowOf(context.getSystemService(AlarmManager::class.java))
+
+        scheduler.rescheduleAll(listOf(
+            Alarm(id = 53, hour = 7, minute = 0, repeatDaysBitmask = 0b1111111,
+                sync = AlarmSync(managedForDeviceId = "c".repeat(32))),
+        ))
+
         assertNull(shadow.peekNextScheduledAlarm())
     }
 

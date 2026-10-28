@@ -404,7 +404,7 @@ abstract class SmartRingBaseWidget : GlanceAppWidget() {
         val ep = EntryPointAccessors.fromApplication(ctx, WidgetEntryPoint::class.java)
         val scheduler = ep.alarmScheduler()
         combine(
-            ep.alarmRepository().observeAlarms(),
+            ep.alarmRepository().observeLocalAlarms(),
             ep.quickPresetsRepository().config,
         ) { alarms, quick ->
             WidgetUiState(
@@ -1017,6 +1017,10 @@ class ToggleWidgetAlarmAction : ActionCallback {
         val repository = ep.alarmRepository()
         val scheduler = ep.alarmScheduler()
         val alarm = repository.getAlarm(id) ?: return
+        // A parent's alarm is not switchable from here either. Returning before any of the
+        // branches below matters: they cancel or re-arm the schedule, and doing that for an
+        // alarm the repository then refuses to change would desync the two.
+        if (alarm.isLockedForUser) return
 
         if (alarm.isEnabled) {
             repository.setEnabled(id, false)
@@ -1271,7 +1275,7 @@ class BulkAlarmAction : ActionCallback {
         val scheduler = ep.alarmScheduler()
         when (op) {
             OP_DISABLE_ALL -> {
-                val armed = repository.getActiveAlarms()
+                val armed = repository.getActiveControllableAlarms()
                 repository.disableAll()
                 scheduler.cancelAll(armed.map { it.id })
             }
@@ -1283,7 +1287,7 @@ class BulkAlarmAction : ActionCallback {
             // thing from switching off — an alarm comes back from a freeze exactly as it
             // was, with no re-dating and no counter to clear.
             OP_FREEZE_ALL -> {
-                val armed = repository.getActiveAlarms()
+                val armed = repository.getActiveControllableAlarms()
                 repository.freezeAll()
                 scheduler.cancelAll(armed.map { it.id })
             }

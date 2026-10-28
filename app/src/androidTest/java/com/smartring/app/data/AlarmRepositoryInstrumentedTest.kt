@@ -34,7 +34,7 @@ class AlarmRepositoryInstrumentedTest {
     fun setUp() {
         val context = ApplicationProvider.getApplicationContext<android.content.Context>()
         db = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java).build()
-        repository = AlarmRepository(db.alarmDao())
+        repository = AlarmRepository(db.alarmDao(), db.syncDao())
     }
 
     @After

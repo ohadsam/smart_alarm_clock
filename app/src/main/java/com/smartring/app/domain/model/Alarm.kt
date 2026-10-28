@@ -113,7 +113,29 @@ data class Alarm(
     val crescendoStartVolume: Int       = 10,
     val crescendoStepSeconds: Int       = 15,
     val crescendoStepPercent: Int       = 10,
+    // ── Multi-device ──────────────────────────────────────────────
+    // Carried on the model — not read from the row on demand — so that every save path
+    // (the editor, undo-delete, the widget's re-enable, quick actions) writes it back
+    // unchanged. A field the model does not carry is one `toEntity()` silently resets on
+    // the next edit, which for these would unlock a locked alarm.
+    val sync: AlarmSync                 = AlarmSync.LOCAL,
 ) {
+    /**
+     * Whether this device's user may change, switch off or delete it. False for an alarm
+     * a parent device set. This is the single question every UI path asks; the repository
+     * enforces the same rule again against the stored row, so a stale copy cannot bypass it.
+     */
+    val isLockedForUser: Boolean
+        get() = sync.isRemoteManaged
+
+    /**
+     * Whether this alarm should ever be armed in *this* phone's AlarmManager. An alarm this
+     * device set for a child is a record of what the child's phone does; arming it here
+     * would make both phones ring.
+     */
+    val ringsOnThisDevice: Boolean
+        get() = sync.managedForDeviceId == null
+
     /**
      * The time this alarm actually rings. For a specific-datetime alarm that's the
      * datetime's own time of day, not the hour/minute fields: only the scheduler reads

@@ -6,6 +6,7 @@ import com.smartring.app.data.repository.AlarmRepository
 import com.smartring.app.data.repository.QuickPresetsConfig
 import com.smartring.app.data.repository.QuickPresetsRepository
 import com.smartring.app.domain.model.Alarm
+import com.smartring.app.domain.model.AlarmSync
 import com.smartring.app.domain.model.AlarmRing
 import com.smartring.app.util.AlarmScheduler
 import com.smartring.app.util.QuickPreset
@@ -28,6 +29,7 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertFalse
 import org.junit.Before
 import org.junit.Test
@@ -157,7 +159,7 @@ class AlarmListViewModelTest {
         // Called after disableAll(), it returns an empty list and nothing at all gets
         // cancelled — every alarm stays armed in AlarmManager and still rings, while
         // the UI shows them all switched off.
-        coEvery { repository.getActiveAlarms() } returns listOf(Alarm(id = 1), Alarm(id = 2))
+        coEvery { repository.getActiveControllableAlarms() } returns listOf(Alarm(id = 1), Alarm(id = 2))
         val vm = viewModel()
 
         vm.disableAll()
@@ -169,7 +171,7 @@ class AlarmListViewModelTest {
 
     @Test
     fun `freezeAll cancels the alarms that were active before the write`() = runTest(testDispatcher) {
-        coEvery { repository.getActiveAlarms() } returns listOf(Alarm(id = 5))
+        coEvery { repository.getActiveControllableAlarms() } returns listOf(Alarm(id = 5))
         val vm = viewModel()
 
         vm.freezeAll()
@@ -429,4 +431,81 @@ class AlarmListViewModelTest {
 
             assertEquals(listOf(1L), seen.last().map { it.id })
         }
+
+    // ── Locked alarms (set by a parent device) ─────────────────────────────
+    //
+    // The repository enforces the lock against the stored row, so these are about the
+    // *follow-on work*: a toggle the repository refuses must not go on to cancel the
+    // schedule, because that leaves the alarm enabled in the database and silent on the
+    // phone — the one state nobody can explain.
+
+    private val locked = Alarm(id = 31, name = "קום", sync = AlarmSync(isRemoteManaged = true, originDeviceId = "p"))
+
+    @Test
+    fun `a locked alarm cannot be switched off from the list`() = runTest(testDispatcher) {
+        coEvery { repository.isUserLocked(31) } returns true
+        val vm = viewModel()
+
+        vm.toggle(locked, enabled = false)
+        advanceUntilIdle()
+
+        coVerify(exactly = 0) { repository.setEnabled(any(), any()) }
+        verify(exactly = 0) { scheduler.cancel(any()) }
+    }
+
+    @Test
+    fun `a locked alarm cannot be deleted from the list`() = runTest(testDispatcher) {
+        coEvery { repository.isUserLocked(31) } returns true
+        val vm = viewModel()
+
+        vm.delete(locked)
+        advanceUntilIdle()
+
+        coVerify(exactly = 0) { repository.deleteAlarm(any()) }
+        verify(exactly = 0) { scheduler.cancel(any()) }
+        assertNull("nothing was deleted, so there is nothing to undo", vm.undoableDelete.value)
+    }
+
+    @Test
+    fun `multi-select skips a locked alarm and still acts on the rest`() = runTest(testDispatcher) {
+        coEvery { repository.getAlarm(31) } returns locked
+        coEvery { repository.getAlarm(32) } returns Alarm(id = 32, name = "mine")
+        coEvery { repository.isUserLocked(31) } returns true
+        val vm = viewModel()
+        vm.toggleSelection(31); vm.toggleSelection(32)
+
+        vm.setSelectedEnabled(false)
+        advanceUntilIdle()
+
+        coVerify(exactly = 0) { repository.setEnabled(31, any()) }
+        coVerify { repository.setEnabled(32, false) }
+        verify { scheduler.cancel(32) }
+        verify(exactly = 0) { scheduler.cancel(31) }
+    }
+
+    @Test
+    fun `multi-select delete skips a locked alarm and still deletes the rest`() = runTest(testDispatcher) {
+        coEvery { repository.isUserLocked(31) } returns true
+        val vm = viewModel()
+        vm.toggleSelection(31); vm.toggleSelection(32)
+
+        vm.deleteSelected()
+        advanceUntilIdle()
+
+        coVerify(exactly = 0) { repository.deleteAlarm(31) }
+        coVerify { repository.deleteAlarm(32) }
+        verify(exactly = 0) { scheduler.cancel(31) }
+        verify { scheduler.cancel(32) }
+    }
+
+    @Test
+    fun `moving a locked ad-hoc alarm to the next day is refused`() = runTest(testDispatcher) {
+        coEvery { repository.isUserLocked(31) } returns true
+        val vm = viewModel()
+
+        vm.scheduleForNextDay(locked)
+        advanceUntilIdle()
+
+        coVerify(exactly = 0) { repository.saveAlarm(any()) }
+    }
 }

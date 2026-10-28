@@ -58,7 +58,7 @@ class AlarmsTileService : TileService() {
         // since the last refresh. Acting on a stale reading here would switch everything
         // *on* for someone who pressed a tile that said "on".
         scope.launch {
-            val armed = withContext(Dispatchers.IO) { runCatching { repository.getActiveAlarms() }.getOrNull() }
+            val armed = withContext(Dispatchers.IO) { runCatching { repository.getActiveControllableAlarms() }.getOrNull() }
                 ?: return@launch
             if (armed.isNotEmpty()) {
                 withContext(Dispatchers.IO) {
@@ -82,7 +82,7 @@ class AlarmsTileService : TileService() {
         // most of the time, and is not an error state worth logging.
         val tile = qsTile ?: return@launch
         val count = withContext(Dispatchers.IO) {
-            runCatching { repository.getActiveAlarms().size }.getOrDefault(0)
+            runCatching { repository.getActiveControllableAlarms().size }.getOrDefault(0)
         }
         tile.state = if (count > 0) Tile.STATE_ACTIVE else Tile.STATE_INACTIVE
         // The label stays fixed and the subtitle carries the state, so the tile reads the

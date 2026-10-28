@@ -65,6 +65,10 @@ class AlarmListViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     fun toggle(alarm: Alarm, enabled: Boolean) = viewModelScope.launch {
+        // A parent's alarm is not this user's to switch. Checked against the stored row, and
+        // before anything else: a refused toggle that still went on to cancel the schedule
+        // would leave the alarm enabled in the database and silent on the phone.
+        if (repository.isUserLocked(alarm.id)) return@launch
         repository.setEnabled(alarm.id, enabled)
         if (enabled) scheduler.schedule(alarm.copy(isEnabled = true)) else scheduler.cancel(alarm.id)
         appLogger.log("AlarmList", "\"${alarm.name}\" (#${alarm.id}) ${if (enabled) "הופעל" else "כובה"}")
@@ -84,6 +88,7 @@ class AlarmListViewModel @Inject constructor(
     val undoableDelete = _undoableDelete.asStateFlow()
 
     fun delete(alarm: Alarm) = viewModelScope.launch {
+        if (repository.isUserLocked(alarm.id)) return@launch
         // Re-read before deleting: the list's copy is complete today, but restoring a
         // partially-populated alarm would quietly drop its rings, and the user would have
         // no way to know their undo gave them back something different.
@@ -120,6 +125,7 @@ class AlarmListViewModel @Inject constructor(
      * the exact failure v1.7.0 was mostly about.
      */
     fun scheduleForNextDay(alarm: Alarm) = viewModelScope.launch {
+        if (repository.isUserLocked(alarm.id)) return@launch
         // Re-read rather than trusting the list's copy. saveAlarm() replaces an alarm's
         // rings and extra dates wholesale, so saving a partially-populated Alarm would
         // delete them. The list flow happens to be complete today (observeAllAlarms is
@@ -179,6 +185,7 @@ class AlarmListViewModel @Inject constructor(
         val ids = _selectedIds.value
         ids.forEach { id ->
             val alarm = repository.getAlarm(id) ?: return@forEach
+            if (alarm.isLockedForUser) return@forEach
             repository.setEnabled(id, enabled)
             if (enabled) scheduler.schedule(alarm.copy(isEnabled = true)) else scheduler.cancel(id)
         }
@@ -197,6 +204,9 @@ class AlarmListViewModel @Inject constructor(
     fun deleteSelected() = viewModelScope.launch {
         val ids = _selectedIds.value
         ids.forEach { id ->
+            // Skipped, not merely refused by the repository: the cancel below must not run
+            // for an alarm that is still in the database.
+            if (repository.isUserLocked(id)) return@forEach
             repository.deleteAlarm(id)
             scheduler.cancel(id)
         }
@@ -205,13 +215,13 @@ class AlarmListViewModel @Inject constructor(
     }
 
     fun disableAll() = viewModelScope.launch {
-        val alarms = repository.getActiveAlarms()
+        val alarms = repository.getActiveControllableAlarms()
         repository.disableAll()
         scheduler.cancelAll(alarms.map { it.id })
         appLogger.log("AlarmList", "כל השעמורים כובו (${alarms.size})")
     }
     fun freezeAll() = viewModelScope.launch {
-        val alarms = repository.getActiveAlarms()
+        val alarms = repository.getActiveControllableAlarms()
         repository.freezeAll()
         scheduler.cancelAll(alarms.map { it.id })
         appLogger.log("AlarmList", "כל השעמורים הוקפאו (${alarms.size})")

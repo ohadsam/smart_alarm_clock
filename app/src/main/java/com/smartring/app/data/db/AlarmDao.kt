@@ -9,8 +9,22 @@ interface AlarmDao {
     @Transaction @Query("SELECT * FROM alarms ORDER BY hour, minute")
     fun observeAllAlarms(): Flow<List<AlarmWithDetails>>
 
+    /**
+     * The alarms that actually ring on *this* phone — every row except the ones this phone
+     * only keeps as a record of what a child's phone does. The widgets read this, not
+     * [observeAllAlarms]: a widget that counted a child's alarm would show a ring that
+     * will never happen here.
+     */
+    @Transaction @Query("SELECT * FROM alarms WHERE managedForDeviceId IS NULL ORDER BY hour, minute")
+    fun observeLocalAlarms(): Flow<List<AlarmWithDetails>>
+
     @Transaction @Query("SELECT * FROM alarms WHERE id = :id")
     suspend fun getAlarmWithDetails(id: Long): AlarmWithDetails?
+
+    /** The stored lock bit for one alarm — null when the row does not exist. Read from the
+     *  database rather than trusted from a caller's copy, which may be stale. */
+    @Query("SELECT isRemoteManaged FROM alarms WHERE id = :id")
+    suspend fun isRemoteManaged(id: Long): Boolean?
 
     /**
      * Every alarm, enabled or not — a one-shot read rather than the Flow.
@@ -19,10 +33,13 @@ interface AlarmDao {
      * widget could switch an alarm *off* and then had no way to offer switching it back
      * on, because a disabled alarm was no longer in the list it renders from.
      */
-    @Transaction @Query("SELECT * FROM alarms ORDER BY hour, minute")
+    @Transaction @Query("SELECT * FROM alarms WHERE managedForDeviceId IS NULL ORDER BY hour, minute")
     suspend fun getAllAlarmsWithDetails(): List<AlarmWithDetails>
 
-    @Transaction @Query("SELECT * FROM alarms WHERE isEnabled = 1 AND isFrozen = 0 ORDER BY hour, minute")
+    // `managedForDeviceId IS NULL`: an alarm this phone only keeps on behalf of a child
+    // must never be armed here, and every caller of this query exists to arm, count or
+    // cancel alarms that ring on this phone (boot reschedule, the tile, bulk controls).
+    @Transaction @Query("SELECT * FROM alarms WHERE isEnabled = 1 AND isFrozen = 0 AND managedForDeviceId IS NULL ORDER BY hour, minute")
     suspend fun getActiveAlarms(): List<AlarmWithDetails>
 
     @Insert
@@ -47,16 +64,34 @@ interface AlarmDao {
     @Query("DELETE FROM alarms WHERE id = :id")
     suspend fun deleteAlarm(id: Long)
 
-    @Query("UPDATE alarms SET isEnabled = :e")
+    // The three bulk controls skip two kinds of row, for two different reasons:
+    //  - `isRemoteManaged = 0`: an alarm a parent set is not this user's to switch off, and
+    //    "turn everything off" from the list, a widget or the Quick Settings tile is exactly
+    //    the one-tap way round that lock.
+    //  - `managedForDeviceId IS NULL`: a record of a child's alarm is changed only through
+    //    a save that bumps its revision. Flipping `isEnabled` here would change what the
+    //    child should do without telling it, and the two phones would disagree for good.
+    @Query("UPDATE alarms SET isEnabled = :e WHERE isRemoteManaged = 0 AND managedForDeviceId IS NULL")
     suspend fun setEnabledAll(e: Boolean)
 
-    @Query("UPDATE alarms SET isFrozen = :f")
+    @Query("UPDATE alarms SET isFrozen = :f WHERE isRemoteManaged = 0 AND managedForDeviceId IS NULL")
     suspend fun setFrozenAll(f: Boolean)
 
-    @Query("UPDATE alarms SET isEnabled = 1, isFrozen = 0")
+    @Query("UPDATE alarms SET isEnabled = 1, isFrozen = 0 WHERE isRemoteManaged = 0 AND managedForDeviceId IS NULL")
     suspend fun enableAll()
 
-    @Query("UPDATE alarms SET isEnabled = :e WHERE id = :id")
+    /**
+     * Unconditional — the lock is enforced by [com.smartring.app.data.repository.AlarmRepository],
+     * which is the only caller that decides whether a given write is a user's or the system's.
+     *
+     * For a record kept on behalf of a child the revision is bumped in the same statement, so
+     * toggling it through any path still tells the child about the change.
+     */
+    @Query("""
+        UPDATE alarms SET isEnabled = :e,
+            syncRevision = syncRevision + CASE WHEN managedForDeviceId IS NOT NULL THEN 1 ELSE 0 END
+        WHERE id = :id
+    """)
     suspend fun setEnabled(id: Long, e: Boolean)
 
     @Query("UPDATE alarms SET occurrencesFired = occurrencesFired + 1 WHERE id = :id")

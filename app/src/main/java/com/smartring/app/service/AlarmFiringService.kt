@@ -141,7 +141,9 @@ class AlarmFiringService : Service() {
                 if (!advanced.isRecurrenceExpired() && scheduler.nextRecurringFireTime(advanced) != null) {
                     scheduler.schedule(advanced)
                 } else {
-                    repository.setEnabled(id, false)
+                    // The system's switch, not the user's: allowed on a locked alarm, since a
+                    // parent's one-time alarm that has rung is finished and must read as such.
+                    repository.setEnabledBySystem(id, false)
                     appLogger.log("AlarmFiringService",
                         "\"${alarm.name}\" (#$id) היה חד-פעמי — כובה אוטומטית לאחר הצלצול")
                 }

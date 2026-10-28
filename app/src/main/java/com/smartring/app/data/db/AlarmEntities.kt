@@ -36,6 +36,14 @@ data class AlarmEntity(
     val crescendoStartVolume: Int           = 10,
     val crescendoStepSeconds: Int           = 15,
     val crescendoStepPercent: Int           = 10,
+    // Multi-device (v4) — see domain/model/AlarmSync.kt for what each one means.
+    val syncId: String?                     = null,
+    val originDeviceId: String?             = null,
+    val originDeviceName: String?           = null,
+    val isRemoteManaged: Boolean            = false,
+    val managedForDeviceId: String?         = null,
+    val syncRevision: Long                  = 0L,
+    val syncedRevision: Long                = 0L,
 )
 
 // ── AlarmRing ─────────────────────────────────────────────────────
@@ -90,6 +98,69 @@ data class AppLogEntity(
     val timestamp: Long = System.currentTimeMillis(),
     val tag: String      = "",
     val message: String  = "",
+)
+
+// ── Paired devices (v4) ───────────────────────────────────────────
+
+/**
+ * Another phone this one has been paired with.
+ *
+ * [encryptedKey] is the long-term pairing key, wrapped by an Android Keystore key that
+ * never leaves the secure hardware — so a copy of this database (a backup, a rooted
+ * dump) holds ciphertext that is useless anywhere but on this phone. The plaintext key
+ * exists only in memory for the length of a session.
+ *
+ * Roles are stored from *this* device's point of view: [myRole] is what this phone is to
+ * that one, [theirRole] what that one is to this. They are fixed at pairing, after both
+ * users confirmed them, and never taken from anything a peer sends later.
+ */
+@Suppress("ArrayInDataClass")
+@Entity(tableName = "paired_devices")
+data class PairedDeviceEntity(
+    @PrimaryKey val deviceId: String,
+    val name: String,
+    val myRole: String,
+    val theirRole: String,
+    val bluetoothAddress: String?,
+    val encryptedKey: ByteArray,
+    val isEnabled: Boolean,
+    val createdAt: Long,
+    val lastSyncAt: Long?,
+    val lastError: String?,
+)
+
+/**
+ * "Delete this alarm on that child" — kept because the alarm's own row is gone the moment
+ * the parent deletes it, and nothing else would remember the child still has a copy.
+ * Lives in Room, not a side store, so it commits in the same transaction as the delete.
+ */
+@Entity(tableName = "sync_tombstones")
+data class SyncTombstoneEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val deviceId: String,
+    val syncId: String,
+    val revision: Long,
+)
+
+/** A copy of an alarm that a peer sent, waiting for this device's user to accept it. */
+@Suppress("ArrayInDataClass")
+@Entity(tableName = "pending_transfers")
+data class PendingTransferEntity(
+    @PrimaryKey val transferId: String,
+    val fromDeviceId: String,
+    val fromDeviceName: String,
+    val payload: ByteArray,
+    val receivedAt: Long,
+)
+
+/** A copy of an alarm this device is sending to a peer, waiting for a connection. */
+@Suppress("ArrayInDataClass")
+@Entity(tableName = "outgoing_transfers")
+data class OutgoingTransferEntity(
+    @PrimaryKey val transferId: String,
+    val toDeviceId: String,
+    val payload: ByteArray,
+    val createdAt: Long,
 )
 
 // ── Relation POJO ─────────────────────────────────────────────────

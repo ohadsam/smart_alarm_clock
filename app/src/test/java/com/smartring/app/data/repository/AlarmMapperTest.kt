@@ -8,6 +8,7 @@ import com.smartring.app.data.db.AlarmWithDetails
 import com.smartring.app.domain.model.Alarm
 import com.smartring.app.domain.model.AlarmDate
 import com.smartring.app.domain.model.AlarmRing
+import com.smartring.app.domain.model.AlarmSync
 import com.smartring.app.domain.model.RecurrenceEnd
 import com.smartring.app.domain.model.RecurrenceEndType
 import com.smartring.app.domain.model.RepeatFrequency
@@ -64,6 +65,32 @@ class AlarmMapperTest {
         // Compared as whole objects on purpose: a field added to Alarm and forgotten in
         // either mapping direction fails here without anyone remembering to add a case.
         assertEquals(fullyPopulated, roundTrip(fullyPopulated))
+    }
+
+    /**
+     * The one that guards the feature's central invariant. `buildAlarm()` in the editor, the
+     * undo path and the widget's re-enable all rebuild an `Alarm` and save it, so a sync
+     * field this mapping dropped would be reset on the next edit — silently unlocking a
+     * locked alarm, or turning a record kept for a child into an alarm that rings here.
+     */
+    @Test
+    fun `every sync field survives a save and reload`() {
+        val synced = fullyPopulated.copy(
+            sync = AlarmSync(
+                syncId = "a".repeat(32), originDeviceId = "b".repeat(32), originDeviceName = "אמא",
+                isRemoteManaged = true, managedForDeviceId = "c".repeat(32),
+                revision = 7, syncedRevision = 5,
+            ),
+        )
+        assertEquals(synced, roundTrip(synced))
+    }
+
+    @Test
+    fun `an alarm with no sync state reloads as an ordinary local alarm`() {
+        val reloaded = roundTrip(Alarm(id = 1, name = "x"))
+        assertEquals(AlarmSync.LOCAL, reloaded.sync)
+        assertEquals(false, reloaded.isLockedForUser)
+        assertEquals(true, reloaded.ringsOnThisDevice)
     }
 
     @Test

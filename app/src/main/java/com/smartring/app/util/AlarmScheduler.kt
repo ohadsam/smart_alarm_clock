@@ -58,6 +58,13 @@ class AlarmScheduler @Inject constructor(
      * reschedule and the firing service all go through this one function.
      */
     fun schedule(alarm: Alarm) {
+        // A record this phone keeps for a child's alarm is not an alarm *here*: arming it
+        // would make both phones ring. Cancelling (rather than just returning) covers an
+        // alarm that was an ordinary local one until it was retargeted at a child.
+        if (!alarm.ringsOnThisDevice) {
+            cancelQuiet(alarm.id)
+            return
+        }
         val t = when {
             !alarm.isActive            -> null
             alarm.isRecurrenceExpired() -> null
@@ -188,6 +195,7 @@ class AlarmScheduler @Inject constructor(
             val pendingSnooze = snoozePrefs.getLong(alarm.id.toString(), -1L)
                 .takeIf { it > System.currentTimeMillis() }
             cancelQuiet(alarm.id)
+            if (!alarm.ringsOnThisDevice) return@forEach
             if (alarm.isActive && !alarm.isRecurrenceExpired()) schedule(alarm)
             if (pendingSnooze != null && alarm.isActive) scheduleAt(alarm, pendingSnooze)
         }

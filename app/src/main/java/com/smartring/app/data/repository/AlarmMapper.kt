@@ -45,6 +45,15 @@ internal fun AlarmWithDetails.toDomain() = Alarm(
     crescendoStartVolume = alarm.crescendoStartVolume,
     crescendoStepSeconds = alarm.crescendoStepSeconds,
     crescendoStepPercent = alarm.crescendoStepPercent,
+    sync                 = AlarmSync(
+        syncId             = alarm.syncId,
+        originDeviceId     = alarm.originDeviceId,
+        originDeviceName   = alarm.originDeviceName,
+        isRemoteManaged    = alarm.isRemoteManaged,
+        managedForDeviceId = alarm.managedForDeviceId,
+        revision           = alarm.syncRevision,
+        syncedRevision     = alarm.syncedRevision,
+    ),
 )
 
 internal fun AlarmRingEntity.toDomain() = AlarmRing(id, alarmId, orderIndex, durationSeconds, volumePercent, ringtoneUri, delayAfterSeconds)
@@ -80,6 +89,13 @@ internal fun Alarm.toEntity() = AlarmEntity(
     crescendoStartVolume = crescendoStartVolume,
     crescendoStepSeconds = crescendoStepSeconds,
     crescendoStepPercent = crescendoStepPercent,
+    syncId               = sync.syncId,
+    originDeviceId       = sync.originDeviceId,
+    originDeviceName     = sync.originDeviceName,
+    isRemoteManaged      = sync.isRemoteManaged,
+    managedForDeviceId   = sync.managedForDeviceId,
+    syncRevision         = sync.revision,
+    syncedRevision       = sync.syncedRevision,
 )
 
 internal fun AlarmRing.toEntity(aId: Long) = AlarmRingEntity(id, aId, orderIndex, durationSeconds, volumePercent, ringtoneUri, delayAfterSeconds)
