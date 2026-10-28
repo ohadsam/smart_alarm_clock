@@ -14,7 +14,7 @@ Glance Widgets (SmartRingWidget.kt) → WidgetUiState → גופי Glance טהו
 | מסך | Route |
 |-----|-------|
 | AlarmListScreen | /list (מציג WhatsNewDialog אחרי עדכון גרסה) |
-| AlarmEditScreen | /edit/{id}?name&hour&minute&copyOf&target (target = מזהה ילד לשעמור חדש עבורו, v1.13.0) |
+| AlarmEditScreen | /edit/{id}?name&hour&minute&copyOf&target&template&folder (target: ילד לשעמור חדש; template: מזהה תבנית לעריכה או `new`, v1.14.0) |
 | AlarmRingScreen | /ring/{id} |
 | HistoryScreen   | /history |
 | SettingsScreen  | /settings |
@@ -22,6 +22,7 @@ Glance Widgets (SmartRingWidget.kt) → WidgetUiState → גופי Glance טהו
 | DiagnosisScreen | /diagnosis ← חדש (v1.8.1) — "למה השעמור לא צלצל?" |
 | DevicesScreen | /devices ← חדש (v1.13.0) — מכשירים מקושרים |
 | PairScreen | /pair ← חדש (v1.13.0) — הוספת מכשיר (קוד, אימות) |
+| TemplatesScreen | /templates ← חדש (v1.14.0) — ניהול תבניות ותיקיות |
 
 מחוץ לגרף הניווט: `IntroDialog` (דיאלוג מעל /list ו-/settings, v1.9.0), ו-`AlarmsTileService`
 — אריח Quick Settings שהמערכת קושרת אליו ישירות, ללא Activity (v1.9.0).
@@ -273,4 +274,17 @@ sync/
 * **מי מפעיל מה:** `SyncController` (מתוך `SmartRingApp`) → שירות האזנה `SyncListenerService` (מכשיר שמישהו
   יכול לשלוח אליו) ו-`SyncCoordinator` + `SyncWorker` (מכשיר ששולח). `SyncServer` הוא שקע השרת היחיד, משותף
   להאזנה ולצימוד; ההודעה הראשונה קובעת לאן החיבור הולך.
+
+## תבניות (v1.14.0)
+* `domain/model/AlarmTemplate.kt` — טהור: `AlarmTemplate`/`TemplateFolder`/`TemplateLibrary`, `asTemplateSettings()`
+  (מסיר זהות ומצב), `instantiateTemplate(alarm, now)` (מסיר תאריכים שעברו + הודעות), ו-`TemplateOps` — כל פעולות
+  הספרייה והמגבלות כפונקציות טהורות.
+* `data/template/TemplateJson.kt` — קודק JSON סלחני (org.json; נבדק ב-Robolectric). `data/repository/TemplateRepository.kt` —
+  מסמך JSON אחד ב-DataStore (`alarm_templates`), כל שינוי הוא `edit {}` אטומי.
+* `presentation/templates/` — `TemplatesScreen` (ניהול), `TemplateDialogs` (שמירה כתבנית, בחירת תבנית).
+  `AlarmEditViewModel` במצב תבנית (`TemplateMode`): "שמור" כותב לתבנית ולא לשעמור.
+
+## שיתוף האפליקציה (v1.14.0)
+`share/AppSharer.kt` + `ShareAppCard`: עותק טרי של `applicationInfo.sourceDir` ב-`cache/share/` (FileProvider), נבדק מול
+ה-`versionCode` המותקן. `res/xml/file_paths.xml` חושף רק את התיקייה הזו.
 

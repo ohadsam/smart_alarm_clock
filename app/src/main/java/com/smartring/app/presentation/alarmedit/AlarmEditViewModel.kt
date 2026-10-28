@@ -3,6 +3,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.smartring.app.data.repository.AlarmDefaultsRepository
 import com.smartring.app.data.repository.AlarmRepository
+import com.smartring.app.data.repository.TemplateRepository
 import com.smartring.app.domain.model.*
 import com.smartring.app.util.AlarmScheduler
 import com.smartring.app.util.COPY_SUFFIX
@@ -125,7 +126,28 @@ data class AlarmEditUiState(
      * it.
      */
     val sync: AlarmSync                    = AlarmSync.LOCAL,
+    /**
+     * For a **new** alarm: which phones it is for. This phone and/or any number of children — saving
+     * creates one independent alarm per choice (a child's alarm is that child's own record, so each
+     * can later be changed, switched or removed on its own). Editing an existing alarm is single-target
+     * and uses [sync] instead.
+     */
+    val targetThisDevice: Boolean          = true,
+    val targetChildren: Set<String>        = emptySet(),
+    // ── Templates ─────────────────────────────────────────────────
+    /** The screen is editing a *template*, not an alarm: Save writes the template. */
+    val isTemplateMode: Boolean            = false,
+    val templateName: String               = "",
+    val templateNameError: Boolean         = false,
+    /** What changed when a template was applied (a past date dropped, …). Shown until dismissed. */
+    val templateNotices: List<String>      = emptyList(),
 )
+
+/** What a template-editing screen is doing to the library. */
+sealed interface TemplateMode {
+    data class Edit(val id: String) : TemplateMode
+    data class New(val folderId: String?) : TemplateMode
+}
 
 @HiltViewModel
 class AlarmEditViewModel @Inject constructor(
@@ -133,7 +155,14 @@ class AlarmEditViewModel @Inject constructor(
     private val defaultsRepository: AlarmDefaultsRepository,
     private val scheduler: AlarmScheduler,
     private val appLogger: AppLogger,
+    private val templateRepository: TemplateRepository,
 ) : ViewModel() {
+
+    private var templateMode: TemplateMode? = null
+
+    private val _templateMessages = MutableSharedFlow<String>(extraBufferCapacity = 4)
+    /** One-shot results of saving a template, for a snackbar. */
+    val templateMessages: SharedFlow<String> = _templateMessages.asSharedFlow()
 
     private val _state = MutableStateFlow(AlarmEditUiState())
     val state: StateFlow<AlarmEditUiState> = _state.asStateFlow()
@@ -283,7 +312,9 @@ class AlarmEditViewModel @Inject constructor(
                     isShabbatMode        = d.isShabbatMode,
                     // Opened from a child's section of the Devices screen: the alarm is for that
                     // phone from the start, so the person cannot forget to pick it.
-                    sync                 = AlarmSync(managedForDeviceId = targetDeviceId),
+                    targetThisDevice     = targetDeviceId == null,
+                    targetChildren       = setOfNotNull(targetDeviceId),
+                    isTemplateMode       = templateMode != null,
                 )
             }
             updateNextFireHintLater()
@@ -295,6 +326,126 @@ class AlarmEditViewModel @Inject constructor(
      * alarms that are not themselves locked; the repository checks the stored row regardless.
      */
     fun setTarget(deviceId: String?) = _state.update { it.copy(sync = it.sync.copy(managedForDeviceId = deviceId)) }
+
+    /** New alarm: include / exclude this phone. At least one target always stays chosen. */
+    fun toggleTargetThisDevice() = _state.update {
+        if (it.targetThisDevice && it.targetChildren.isEmpty()) it else it.copy(targetThisDevice = !it.targetThisDevice)
+    }
+
+    /** New alarm: include / exclude one child. At least one target always stays chosen. */
+    fun toggleTargetChild(deviceId: String) = _state.update {
+        val next = if (deviceId in it.targetChildren) it.targetChildren - deviceId else it.targetChildren + deviceId
+        if (next.isEmpty() && !it.targetThisDevice) it else it.copy(targetChildren = next)
+    }
+
+    // ── Templates ─────────────────────────────────────────────────
+
+    /** Opens an existing template for editing. */
+    fun loadTemplate(id: String) {
+        templateMode = TemplateMode.Edit(id)
+        viewModelScope.launch {
+            val t = templateRepository.current().template(id) ?: return@launch
+            val loaded = stateFromAlarm(t.alarm).copy(isTemplateMode = true, templateName = t.name)
+            originalState = loaded
+            _state.update { loaded }
+        }
+    }
+
+    /** Starts a brand-new template (from the defaults), to be saved into [folderId]. */
+    fun startNewTemplate(folderId: String?) {
+        templateMode = TemplateMode.New(folderId)
+        startNew()
+    }
+
+    fun setTemplateName(v: String) = _state.update { it.copy(templateName = v.take(TemplateLimits.NAME_MAX_CHARS), templateNameError = false) }
+
+    /**
+     * Fills the form from a template. Everything the template holds replaces what is on the form —
+     * except which phones the alarm is for, which is a choice about *this* alarm, not a setting.
+     * What had to be changed on the way (a date that has passed) is reported in `templateNotices`.
+     */
+    fun applyTemplate(templateId: String) {
+        viewModelScope.launch {
+            val t = templateRepository.current().template(templateId) ?: return@launch
+            val instance = instantiateTemplate(t.alarm)
+            _state.update {
+                stateFromAlarm(instance.alarm).copy(
+                    targetThisDevice = it.targetThisDevice,
+                    targetChildren = it.targetChildren,
+                    templateNotices = instance.notices,
+                )
+            }
+            appLogger.log("AlarmEdit", "הוחלה תבנית \"${t.name}\"" + if (instance.notices.isNotEmpty()) " (${instance.notices.size} הערות)" else "")
+        }
+    }
+
+    fun dismissTemplateNotices() = _state.update { it.copy(templateNotices = emptyList()) }
+
+    /**
+     * Saves the form as a template, without leaving it. A non-blank [newFolderName] creates that folder
+     * first and files the template there.
+     */
+    fun saveAsTemplate(name: String, folderId: String?, newFolderName: String? = null) {
+        val alarm = buildAlarm(_state.value)
+        viewModelScope.launch {
+            var folder = folderId
+            if (!newFolderName.isNullOrBlank()) {
+                when (val r = templateRepository.addFolder(newFolderName)) {
+                    is LibraryResult.Ok -> folder = r.id
+                    is LibraryResult.Refused -> { _templateMessages.tryEmit(templateErrorText(r.error)); return@launch }
+                }
+            }
+            _templateMessages.tryEmit(
+                when (val r = templateRepository.saveNew(name, folder, alarm)) {
+                    is LibraryResult.Ok -> "נשמר כתבנית \"${name.trim()}\""
+                    is LibraryResult.Refused -> templateErrorText(r.error)
+                }
+            )
+        }
+    }
+
+    /** Template mode: keep the original and save the form as another template ("save again"). */
+    fun saveTemplateAsCopy() {
+        val s = _state.value
+        if (s.templateName.isBlank()) { _state.update { it.copy(templateNameError = true) }; return }
+        val alarm = buildAlarm(s)
+        viewModelScope.launch {
+            val folder = (templateMode as? TemplateMode.Edit)?.let { templateRepository.current().template(it.id)?.folderId }
+                ?: (templateMode as? TemplateMode.New)?.folderId
+            when (val r = templateRepository.saveNew(s.templateName, folder, alarm)) {
+                is LibraryResult.Ok -> { _templateMessages.tryEmit("נשמרה תבנית חדשה \"${s.templateName.trim()}\""); _state.update { it.copy(isSaved = true) } }
+                is LibraryResult.Refused -> _templateMessages.tryEmit(templateErrorText(r.error))
+            }
+        }
+    }
+
+    private fun saveTemplate() {
+        val s = _state.value
+        if (s.templateName.isBlank()) { _state.update { it.copy(templateNameError = true) }; return }
+        val alarm = buildAlarm(s)
+        _state.update { it.copy(isSaving = true, saveError = false) }
+        viewModelScope.launch {
+            val result = when (val mode = templateMode) {
+                is TemplateMode.Edit -> templateRepository.update(mode.id, s.templateName, alarm)
+                is TemplateMode.New -> templateRepository.saveNew(s.templateName, mode.folderId, alarm)
+                null -> return@launch
+            }
+            when (result) {
+                is LibraryResult.Ok -> _state.update { it.copy(isSaving = false, isSaved = true) }
+                is LibraryResult.Refused -> {
+                    _templateMessages.tryEmit(templateErrorText(result.error))
+                    _state.update { it.copy(isSaving = false, saveError = true) }
+                }
+            }
+        }
+    }
+
+    private fun templateErrorText(e: LibraryError) = when (e) {
+        LibraryError.LIMIT_TEMPLATES -> "יש כבר ${TemplateLimits.MAX_TEMPLATES} תבניות — מחקו כמה כדי להוסיף"
+        LibraryError.LIMIT_FOLDERS -> "יש כבר ${TemplateLimits.MAX_FOLDERS} תיקיות"
+        LibraryError.NOT_FOUND -> "התבנית כבר לא קיימת"
+        LibraryError.BLANK_NAME -> "נדרש שם"
+    }
 
     /** The alarm as currently configured, for a screen that only displays it (a locked alarm). */
     fun snapshot(): Alarm = buildAlarm(_state.value)
@@ -489,6 +640,7 @@ class AlarmEditViewModel @Inject constructor(
      * mistake, while "no future occurrence" can be a deliberate parking place.
      */
     fun save(force: Boolean = false) {
+        if (templateMode != null) { saveTemplate(); return }
         val s = _state.value
         if (s.name.isBlank()) {
             _state.update { it.copy(nameError = true) }
@@ -524,15 +676,28 @@ class AlarmEditViewModel @Inject constructor(
             // their alarm had not been saved at all.
             try {
                 val alarm = buildAlarm(s)
-                val savedId = repository.saveAlarm(alarm)
-                // Logged so a revival is visible in the diagnostics: this is the path
-                // that used to fail silently, and "why did my alarm stop working" is
-                // exactly the question the log exists to answer.
-                if (s.loadedDisabled && s.isEnabled) appLogger.log("AlarmEdit",
-                    "\"${alarm.name}\" (#$savedId) הופעל מחדש; מונה החזרות אופס")
-                scheduler.schedule(alarm.copy(id = savedId))
-                appLogger.log("AlarmEdit", (if (editingId > 0L) "שעמור עודכן: " else "שעמור חדש נוצר: ") +
-                    "\"${alarm.name}\" (#$savedId) ל-%02d:%02d".format(alarm.hour, alarm.minute))
+                var savedId = 0L
+                // A new alarm can be for several phones at once: one independent alarm each. Editing
+                // is always a single alarm.
+                val targets: List<String?> = if (editingId == 0L) {
+                    buildList {
+                        if (s.targetThisDevice || s.targetChildren.isEmpty()) add(null)
+                        addAll(s.targetChildren.sorted())
+                    }
+                } else listOf(alarm.sync.managedForDeviceId)
+                for (target in targets) {
+                    val one = if (editingId == 0L) alarm.copy(sync = AlarmSync(managedForDeviceId = target)) else alarm
+                    savedId = repository.saveAlarm(one)
+                    // Logged so a revival is visible in the diagnostics: this is the path
+                    // that used to fail silently, and "why did my alarm stop working" is
+                    // exactly the question the log exists to answer.
+                    if (s.loadedDisabled && s.isEnabled) appLogger.log("AlarmEdit",
+                        "\"${one.name}\" (#$savedId) הופעל מחדש; מונה החזרות אופס")
+                    scheduler.schedule(one.copy(id = savedId))
+                    appLogger.log("AlarmEdit", (if (editingId > 0L) "שעמור עודכן: " else "שעמור חדש נוצר: ") +
+                        "\"${one.name}\" (#$savedId) ל-%02d:%02d".format(one.hour, one.minute) +
+                        (target?.let { " עבור מכשיר מקושר" } ?: ""))
+                }
                 _state.update { it.copy(isSaving = false, isSaved = true) }
             } catch (e: CancellationException) {
                 throw e

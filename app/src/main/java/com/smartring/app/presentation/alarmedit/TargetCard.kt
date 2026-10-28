@@ -11,13 +11,44 @@ import androidx.compose.ui.unit.dp
 import com.smartring.app.sync.platform.PairedDevice
 
 /**
- * "Whose alarm is this?" — this phone, or one of the children paired to it.
+ * "Whose alarm is this?" — for a NEW alarm, any combination of this phone and the children paired to
+ * it (one independent alarm is created for each); see [TargetCard] for an existing alarm.
  *
  * For a child's alarm the ringtone is the child's own default: ringtones are addresses into a
  * phone's own media store and mean nothing on another, so they are not sent. Said here, where the
  * choice is made, so nobody picks a favourite song on the parent's phone and wonders why the child
  * does not hear it.
  */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun MultiTargetCard(
+    children: List<PairedDevice>,
+    thisDevice: Boolean,
+    selected: Set<String>,
+    onToggleThis: () -> Unit,
+    onToggleChild: (String) -> Unit,
+) {
+    Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("השעמור הזה מיועד ל…", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                FilterChip(thisDevice, onToggleThis, label = { Text("המכשיר הזה") })
+                children.forEach { child ->
+                    FilterChip(child.deviceId in selected, { onToggleChild(child.deviceId) }, label = { Text(child.name) })
+                }
+            }
+            Text(
+                if (selected.isEmpty()) "אפשר לבחור כמה מכשירים: לכל אחד ייווצר שעמור משלו, ואפשר יהיה לשנות או להסיר כל אחד בנפרד."
+                else "לכל מכשיר שנבחר ייווצר שעמור משלו (אפשר יהיה לשנות או להסיר כל אחד בנפרד). השעמור יצלצל במכשיר הנבחר ולא כאן, " +
+                    "הצלצול יהיה ברירת המחדל שלו, והשעמור יישלח אליו כשיהיה בטווח.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+/** An existing alarm has one owner: this phone, or one child (moving it re-targets it). */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun TargetCard(children: List<PairedDevice>, selected: String?, onSelect: (String?) -> Unit) {

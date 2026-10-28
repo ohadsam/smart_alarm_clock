@@ -1,5 +1,36 @@
 # SmartRing – Changelog
 
+## v1.14.0 (2026-10-28)
+
+Three features, each its own entry in `docs/FEATURES.md`.
+
+### F84 – several devices, several relationships at once
+A new alarm can be for any combination of this phone and the paired children; saving creates one
+**independent** alarm per choice (its own record and revision), so each can be changed, switched or
+deleted alone. Sending a copy to equals works for several at once ("send to all"). Deliberately not a
+group: an edit to one does not reach its siblings. A phone can be a parent to one pairing, a child to
+another and an equal to a third — pairings were always per device; the editor and share dialog now expose it.
+
+### F85 – share the app (APK) through WhatsApp, e-mail or any app
+Same mechanism as the Tehilim app: a fresh copy of the **installed** APK via `FileProvider`, with Hebrew
+install/update instructions, optional zip. There is no pre-packed APK to keep current: the copy is made when
+the person taps share and is refused unless its `versionCode` equals the running build's. The file name
+carries the build number. Added to the release checklist as a verification step (it cannot go stale, but its
+text, `queries` and provider must still be right).
+
+### F86 – alarm templates, folders and their management
+Save an alarm as a template from the alarm itself; start a new alarm from a template; manage the library in
+Settings (create, edit, save changes or save as new, rename, duplicate, move, delete, search, folders).
+Instantiating a template drops dates that have passed (one-off date/time, list dates, recurrence end) and says
+so on the form — the recurrence-end case turns the alarm open-ended, and the notice says that. Stored as one
+JSON document in its own DataStore (limits: 200 templates, 30 folders): reads are tolerant (a bad entry is
+skipped, unknown enums take defaults, values are clamped), and every rule lives in a pure `TemplateOps`.
+Deleting a folder keeps its templates unless asked otherwise.
+
+Tests: pure domain (instantiate rules for every kind of past date, every library operation and limit), JSON
+round-trip and damage handling, the repository over a real DataStore, the editor's multi-target save and its
+template flows, and the share file name / zip.
+
 ## v1.13.0 (2026-10-28)
 
 ### Linked devices: a parent sets alarms on a child; equals send each other copies

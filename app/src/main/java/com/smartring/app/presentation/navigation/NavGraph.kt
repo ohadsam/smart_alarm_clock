@@ -12,12 +12,13 @@ import com.smartring.app.presentation.diagnosis.DiagnosisScreen
 import com.smartring.app.presentation.history.HistoryScreen
 import com.smartring.app.presentation.logs.LogsScreen
 import com.smartring.app.presentation.settings.SettingsScreen
+import com.smartring.app.presentation.templates.TemplatesScreen
 
 sealed class Screen(val route: String) {
     object List     : Screen("list")
     // name/hour/minute are optional prefill values for a brand-new alarm (id=0),
     // used by History's "load again" action; a real edit (id>0) ignores them.
-    object Edit     : Screen("edit/{alarmId}?name={name}&hour={hour}&minute={minute}&copyOf={copyOf}&target={target}") {
+    object Edit     : Screen("edit/{alarmId}?name={name}&hour={hour}&minute={minute}&copyOf={copyOf}&target={target}&template={template}&folder={folder}") {
         fun go(id: Long, name: String? = null, hour: Int? = null, minute: Int? = null): String {
             val params = buildList {
                 name?.let { add("name=${Uri.encode(it)}") }
@@ -41,6 +42,12 @@ sealed class Screen(val route: String) {
 
         /** A new alarm for a child device; [deviceId] is 32 hex characters, so it needs no encoding. */
         fun forChild(deviceId: String) = "edit/0?target=$deviceId"
+
+        /** The editor on a saved template (its id is a UUID, so it needs no encoding). */
+        fun template(templateId: String) = "edit/0?template=$templateId"
+
+        /** The editor on a brand-new template, to be filed in [folderId] (null: the top level). */
+        fun newTemplate(folderId: String?) = "edit/0?template=new" + (folderId?.let { "&folder=$it" } ?: "")
     }
     object Ring     : Screen("ring/{alarmId}") { fun go(id: Long) = "ring/$id" }
     object History  : Screen("history")
@@ -49,6 +56,7 @@ sealed class Screen(val route: String) {
     object Diagnosis: Screen("diagnosis")
     object Devices  : Screen("devices")
     object Pairing  : Screen("pair")
+    object Templates: Screen("templates")
 }
 
 /**
@@ -139,6 +147,8 @@ fun SmartRingNavGraph(
             navArgument("minute") { type = NavType.IntType; defaultValue = -1 },
             navArgument("copyOf") { type = NavType.LongType; defaultValue = 0L },
             navArgument("target") { type = NavType.StringType; nullable = true; defaultValue = null },
+            navArgument("template") { type = NavType.StringType; nullable = true; defaultValue = null },
+            navArgument("folder") { type = NavType.StringType; nullable = true; defaultValue = null },
         )) {
             AlarmEditScreen(
                 alarmId       = it.arguments?.getLong("alarmId") ?: 0L,
@@ -147,6 +157,8 @@ fun SmartRingNavGraph(
                 prefillMinute = it.arguments?.getInt("minute")?.takeIf { m -> m >= 0 },
                 copyOfAlarmId = it.arguments?.getLong("copyOf")?.takeIf { c -> c > 0L } ?: 0L,
                 targetDeviceId = it.arguments?.getString("target")?.takeIf { t -> t.length == 32 },
+                templateId = it.arguments?.getString("template"),
+                templateFolderId = it.arguments?.getString("folder"),
                 onBack        = { nav.popBackStack() },
             )
         }
@@ -180,6 +192,14 @@ fun SmartRingNavGraph(
                 onOpenLogs = { nav.navigate(Screen.Logs.route) },
                 onOpenDiagnosis = { nav.navigate(Screen.Diagnosis.route) },
                 onOpenDevices = { nav.navigate(Screen.Devices.route) },
+                onOpenTemplates = { nav.navigate(Screen.Templates.route) },
+            )
+        }
+        composable(Screen.Templates.route) {
+            TemplatesScreen(
+                onBack = { nav.popBackStack() },
+                onEditTemplate = { nav.navigate(Screen.Edit.template(it)) },
+                onNewTemplate = { nav.navigate(Screen.Edit.newTemplate(it)) },
             )
         }
         composable(Screen.Devices.route) {

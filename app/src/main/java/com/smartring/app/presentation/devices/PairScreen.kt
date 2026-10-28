@@ -95,6 +95,11 @@ private fun ChooseMode(onPick: (Mode) -> Unit) {
     )
     BigChoice("הצג קוד", "במכשיר הזה יוצג קוד. הקלידו אותו במכשיר השני.", Icons.Rounded.Pin) { onPick(Mode.HOST) }
     BigChoice("הקלד קוד", "במכשיר השני מוצג קוד. הקלידו אותו כאן.", Icons.Rounded.Keyboard) { onPick(Mode.JOIN) }
+    // The other phone has to have the app first.
+    Text("למכשיר השני אין את האפליקציה?", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+    Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxWidth()) {
+        com.smartring.app.share.ShareAppCard()
+    }
 }
 
 @Composable

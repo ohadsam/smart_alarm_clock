@@ -152,6 +152,26 @@ worth its own check, or reveal a step whose instructions were incomplete? If so,
 example the way "Known gotchas" below does — file, symptom, why. If nothing calls for a change,
 say so explicitly.
 
+## 5b. The shareable install file ("share the app") — every release
+
+The app can send itself (its APK + install instructions) through WhatsApp, e-mail or any app — the same
+mechanism as the Tehilim app (`share/AppSharer.kt`, `ShareAppCard`, Settings → share the app, and the
+pairing screen). There is **no checked-in or pre-packed APK to refresh**: the file is a fresh copy of the
+installed APK made at share time, and `AppSharer.prepare` refuses to hand it out unless its `versionCode`
+equals the running build's. That is what keeps it from ever being stale — so the per-release job is to make
+sure that guarantee still holds, not to copy a file:
+
+- `AppSharerTest` is green (file name carries `versionName` **and** the build number; zip round-trip).
+- The share message in `AppSharer.message` still describes the app truthfully: if this release added a
+  headline feature or changed how it is installed/updated, change the text (it is what a stranger reads in
+  the chat). Bump nothing else — the version is interpolated.
+- `FileProvider` is still declared (`${applicationId}.fileprovider`), `res/xml/file_paths.xml` still exposes
+  only `cache/share/`, and the manifest `<queries>` still lists WhatsApp / WhatsApp Business / Gmail.
+- Signing is untouched (`signingConfigs.shared`, both build types): a recipient installs over an existing copy
+  *only* because every build is signed with the one committed key.
+- After CI is green, name the artifact to hand around in the final report: the run's `SmartRing-release-<run>`
+  (or debug) APK — the thing `AppSharer` will be sending from a phone that installed it.
+
 ## 6. Build verification (compile + tests, via CI — there's no other way here)
 
 There is no local Android SDK in this environment (see the note at the top about why a local
@@ -1172,4 +1192,16 @@ If the user asks for a PR-based workflow going forward, follow that instead and 
   interface (`FrameChannel`) so it can be tested between two simulated peers, make the platform adapter
   as thin as possible, and say in the release notes, the changelog and the final report that the
   adapter itself was not run on a device.
+- **Templates must be instantiated through `instantiateTemplate`, never copied raw** (v1.14.0): a template can
+  hold dates that were in the future when it was saved. A raw copy hands the editor a form whose first Save is
+  refused ("date in the past"), and quietly dropping them would change what the person chose. The function
+  removes them *and* returns a notice for each — a new kind of date on `Alarm` (another "until"/"on" field)
+  must be added there, with a test, or templates will carry it stale.
+- **A new field on `Alarm` has four homes that must agree**: the Room entity/mapper, `buildAlarm`/`stateFromAlarm`
+  (the editor), the sync codec (`SyncAlarm`, if it should travel to another device), and `TemplateJson`
+  (if it should be saved in a template). `TemplateJson`'s round-trip test (`every setting survives the round trip`)
+  compares whole `Alarm`s, so a field added to the model but not to the JSON fails there.
+- **A multi-target save (`for (target in targets)`) must build each alarm from the same base and give it its own
+  `sync`** (v1.14.0): reusing one `Alarm` instance's `sync.syncId` across children would make the second child's
+  record overwrite the first's. New alarms start from `AlarmSync(managedForDeviceId = target)` each time.
 

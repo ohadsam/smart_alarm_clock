@@ -57,6 +57,7 @@ fun SettingsScreen(
     onOpenLogs: () -> Unit = {},
     onOpenDiagnosis: () -> Unit = {},
     onOpenDevices: () -> Unit = {},
+    onOpenTemplates: () -> Unit = {},
     vm: SettingsViewModel = hiltViewModel(),
 ) {
     val s by vm.state.collectAsStateWithLifecycle()
@@ -308,6 +309,15 @@ fun SettingsScreen(
                     modifier          = Modifier.clickable(onClick = onOpenLogs),
                 )
             }
+            SettingsGroup("תבניות") {
+                ListItem(
+                    headlineContent   = { Text("ניהול תבניות", fontWeight = FontWeight.Medium) },
+                    supportingContent = { Text("שעמורים שמורים להתחלה מהירה של שעמור חדש: עריכה, תיקיות, שכפול ומחיקה") },
+                    leadingContent    = { Icon(Icons.Rounded.BookmarkBorder, null) },
+                    trailingContent   = { Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, null) },
+                    modifier          = Modifier.clickable(onClick = onOpenTemplates),
+                )
+            }
             SettingsGroup("מכשירים מקושרים") {
                 ListItem(
                     headlineContent   = { Text("מכשירים מקושרים", fontWeight = FontWeight.Medium) },
@@ -316,6 +326,9 @@ fun SettingsScreen(
                     trailingContent   = { Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, null) },
                     modifier          = Modifier.clickable(onClick = onOpenDevices),
                 )
+            }
+            SettingsGroup("שיתוף האפליקציה") {
+                com.smartring.app.share.ShareAppCard()
             }
             SettingsGroup("אודות") {
                 ListItem(

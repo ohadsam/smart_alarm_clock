@@ -46,6 +46,14 @@
     <uses-feature android:name="android.hardware.nfc" android:required="false"/>
     <uses-feature android:name="android.hardware.nfc.hce" android:required="false"/>
 
+    <!-- Lets the share screens see whether WhatsApp / Gmail are installed (Android 11+ package
+         visibility) so the APK can be sent straight to them. -->
+    <queries>
+        <package android:name="com.whatsapp"/>
+        <package android:name="com.whatsapp.w4b"/>
+        <package android:name="com.google.android.gm"/>
+    </queries>
+
     <application
         android:name=".SmartRingApp"
         android:label="@string/app_name"
@@ -149,6 +157,14 @@
             <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE"/></intent-filter>
             <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_large_info"/>
         </receiver>
+
+        <!-- Serves the copy of the app's own APK that "share the app" makes. Not exported; access is
+             granted per share with FLAG_GRANT_READ_URI_PERMISSION. -->
+        <provider android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false" android:grantUriPermissions="true">
+            <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/file_paths"/>
+        </provider>
 
         <provider android:name="androidx.startup.InitializationProvider"
             android:authorities="${applicationId}.androidx-startup"

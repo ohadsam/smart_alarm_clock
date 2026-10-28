@@ -42,6 +42,9 @@ import com.smartring.app.domain.model.*
 import kotlinx.coroutines.delay
 import com.smartring.app.presentation.theme.*
 import com.smartring.app.presentation.devices.TargetsViewModel
+import com.smartring.app.presentation.templates.SaveAsTemplateDialog
+import com.smartring.app.presentation.templates.TemplatePickerDialog
+import com.smartring.app.presentation.templates.TemplatesViewModel
 import com.smartring.app.util.GENERIC_ALARM_NAME
 import com.smartring.app.util.TEST_RING_DELAY_SECONDS
 import com.smartring.app.util.RingtonePreviewPlayer
@@ -59,6 +62,9 @@ import com.smartring.app.util.localInstantToPickedDay
 import java.text.SimpleDateFormat
 import java.util.*
 
+
+/** The `templateId` that means "create a new template" rather than edit an existing one. */
+const val NEW_TEMPLATE = "new"
 
 /** Test tags for [AlarmEditScreen]. Declared beside the screen so renaming one has to
  *  pass through the same file as the UI it identifies. */
@@ -86,12 +92,19 @@ fun AlarmEditScreen(
     copyOfAlarmId: Long = 0L,
     /** For a new alarm: the child's device id it is being created for, or null for this phone. */
     targetDeviceId: String? = null,
+    /** Editing a template instead of an alarm: a template id, or [NEW_TEMPLATE] to create one. */
+    templateId: String? = null,
+    /** For a new template: the folder to file it in. */
+    templateFolderId: String? = null,
     onBack: () -> Unit,
     vm: AlarmEditViewModel = hiltViewModel(),
     targets: TargetsViewModel = hiltViewModel(),
+    templates: TemplatesViewModel = hiltViewModel(),
 ) {
-    LaunchedEffect(alarmId, prefillName, prefillHour, prefillMinute, copyOfAlarmId, targetDeviceId) {
+    LaunchedEffect(alarmId, prefillName, prefillHour, prefillMinute, copyOfAlarmId, targetDeviceId, templateId, templateFolderId) {
         when {
+            templateId == NEW_TEMPLATE -> vm.startNewTemplate(templateFolderId)
+            templateId != null -> vm.loadTemplate(templateId)
             alarmId > 0L       -> vm.loadAlarm(alarmId)
             copyOfAlarmId > 0L -> vm.loadAsCopy(copyOfAlarmId)
             // Every new alarm — prefilled from History or not — starts from the user's
@@ -101,6 +114,14 @@ fun AlarmEditScreen(
     }
     val s by vm.state.collectAsStateWithLifecycle()
     val children by targets.children.collectAsStateWithLifecycle()
+    // From the route, not only the state: the state flips a moment after the screen opens, and the
+    // title and the "start from a template" button would otherwise flash the wrong thing.
+    val inTemplate = templateId != null || s.isTemplateMode
+    val library by templates.library.collectAsStateWithLifecycle()
+    val snackbar = remember { SnackbarHostState() }
+    LaunchedEffect(Unit) { vm.templateMessages.collect { snackbar.showSnackbar(it) } }
+    var showPicker by remember { mutableStateOf(false) }
+    var showSaveTemplate by remember { mutableStateOf(false) }
     // An alarm another phone set for this one is shown, not edited: every control on this form would
     // be a promise the repository then refuses to keep.
     if (s.sync.isRemoteManaged) {
@@ -153,13 +174,23 @@ fun AlarmEditScreen(
         )
     }
 
+    if (showPicker) TemplatePickerDialog(library, onPick = { vm.applyTemplate(it.id); showPicker = false }, onDismiss = { showPicker = false })
+    if (showSaveTemplate) SaveAsTemplateDialog(
+        defaultName = s.name.takeIf { it.isNotBlank() && !s.unnamed } ?: "",
+        library = library,
+        onSave = { name, folder, newFolder -> vm.saveAsTemplate(name, folder, newFolder); showSaveTemplate = false },
+        onDismiss = { showSaveTemplate = false },
+    )
+
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
             TopAppBar(
                 navigationIcon = { IconButton(onBackPressed) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, "חזור") } },
                 title          = {
                     Text(
                         when {
+                            inTemplate  -> if (templateId == NEW_TEMPLATE) "תבנית חדשה" else "עריכת תבנית"
                             alarmId > 0       -> "עריכת שעמור"
                             copyOfAlarmId > 0 -> "שכפול שעמור"
                             else              -> "שעמור חדש"
@@ -168,6 +199,15 @@ fun AlarmEditScreen(
                     )
                 },
                 actions = {
+                    // Save this alarm as a template: from the alarm itself, so what is saved is what is on
+                    // screen. Template mode has the matching "save as a new template" instead.
+                    if (inTemplate) {
+                        if (templateId != NEW_TEMPLATE) IconButton({ vm.saveTemplateAsCopy() }) {
+                            Icon(Icons.Rounded.CopyAll, "שמור כתבנית חדשה, והשאר את המקורית")
+                        }
+                    } else {
+                        IconButton({ showSaveTemplate = true }) { Icon(Icons.Rounded.BookmarkAdd, "שמור כתבנית") }
+                    }
                     TextButton(onClick = { haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove); vm.save() },
                         enabled = !s.isSaving) {
                         if (s.isSaving) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
@@ -278,10 +318,53 @@ fun AlarmEditScreen(
                 )
             }
 
+            // ── Template mode: its name, and a banner for a template just applied ─────────
+            if (inTemplate) item {
+                OutlinedTextField(
+                    value = s.templateName, onValueChange = vm::setTemplateName,
+                    modifier = Modifier.fillMaxWidth(), singleLine = true,
+                    label = { Text("שם התבנית") }, isError = s.templateNameError,
+                    supportingText = if (s.templateNameError) {{ Text("נדרש שם") }} else null,
+                    leadingIcon = { Icon(Icons.Rounded.BookmarkAdd, null) },
+                    shape = RoundedCornerShape(14.dp),
+                )
+            }
+            if (!inTemplate && alarmId == 0L && copyOfAlarmId == 0L) item {
+                OutlinedButton({ showPicker = true }, Modifier.fillMaxWidth()) {
+                    Icon(Icons.Rounded.BookmarkBorder, null, Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("התחל מתבנית")
+                }
+            }
+            if (s.templateNotices.isNotEmpty()) item {
+                Surface(shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.tertiaryContainer, modifier = Modifier.fillMaxWidth()) {
+                    Row(Modifier.padding(14.dp), verticalAlignment = Alignment.Top) {
+                        Icon(Icons.Rounded.Info, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onTertiaryContainer)
+                        Spacer(Modifier.width(10.dp))
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            s.templateNotices.forEach {
+                                Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onTertiaryContainer)
+                            }
+                        }
+                        IconButton({ vm.dismissTemplateNotices() }, Modifier.size(28.dp)) {
+                            Icon(Icons.Rounded.Close, "סגור הודעה", Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onTertiaryContainer)
+                        }
+                    }
+                }
+            }
+
             // ── Which phone it is for ─────────────────────────────
             // Only a parent has children to offer. For an alarm that is already for a child the
             // choice stays visible, so it can be moved back to this phone.
-            if (children.isNotEmpty() || s.sync.managedForDeviceId != null) item {
+            if (!inTemplate && alarmId == 0L && children.isNotEmpty()) item {
+                MultiTargetCard(
+                    children = children,
+                    thisDevice = s.targetThisDevice,
+                    selected = s.targetChildren,
+                    onToggleThis = vm::toggleTargetThisDevice,
+                    onToggleChild = vm::toggleTargetChild,
+                )
+            } else if (!inTemplate && alarmId > 0L && (children.isNotEmpty() || s.sync.managedForDeviceId != null)) item {
                 TargetCard(
                     children = children,
                     selected = s.sync.managedForDeviceId,

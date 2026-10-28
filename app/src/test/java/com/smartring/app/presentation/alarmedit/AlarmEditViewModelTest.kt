@@ -60,7 +60,7 @@ class AlarmEditViewModelTest {
         // the confirmation dialog by accident. The default says what is true of a real
         // default alarm: it fires.
         every { scheduler.effectiveNextFireTime(any()) } returns System.currentTimeMillis() + 3_600_000L
-        vm = AlarmEditViewModel(repository, defaultsRepository, scheduler, appLogger)
+        vm = AlarmEditViewModel(repository, defaultsRepository, scheduler, appLogger, mockk(relaxed = true))
     }
 
     @After

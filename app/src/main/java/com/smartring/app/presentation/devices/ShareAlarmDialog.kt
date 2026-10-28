@@ -24,6 +24,8 @@ fun ShareAlarmDialog(alarm: Alarm, onDismiss: () -> Unit, vm: ShareViewModel = h
     val scope = rememberCoroutineScope()
     var status by remember { mutableStateOf<String?>(null) }
     var offering by remember { mutableStateOf(false) }
+    // Who it has already been queued for, so the same dialog can send it on to several people.
+    var sentTo by remember { mutableStateOf(setOf<String>()) }
 
     DisposableEffect(Unit) { onDispose { vm.stopOffer() } }
 
@@ -36,11 +38,26 @@ fun ShareAlarmDialog(alarm: Alarm, onDismiss: () -> Unit, vm: ShareViewModel = h
                     OutlinedButton(
                         onClick = {
                             scope.launch {
-                                status = if (vm.sendCopy(alarm, peer)) "נשלח ל-${peer.name} כשיהיה בטווח" else "אי אפשר לשלוח את השעמור הזה"
+                                if (vm.sendCopy(alarm, peer)) {
+                                    sentTo = sentTo + peer.deviceId
+                                    status = "יישלח ל-${sentTo.size} מכשירים כשיהיו בטווח. אפשר לבחור עוד."
+                                } else status = "אי אפשר לשלוח את השעמור הזה"
+                            }
+                        },
+                        enabled = peer.deviceId !in sentTo,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text(if (peer.deviceId in sentTo) "✓ ${peer.name}" else peer.name) }
+                }
+                if (peers.size > 1 && sentTo.size < peers.size) {
+                    Button(
+                        onClick = {
+                            scope.launch {
+                                peers.filter { it.deviceId !in sentTo }.forEach { if (vm.sendCopy(alarm, it)) sentTo = sentTo + it.deviceId }
+                                status = "יישלח ל-${sentTo.size} מכשירים כשיהיו בטווח."
                             }
                         },
                         modifier = Modifier.fillMaxWidth(),
-                    ) { Text(peer.name) }
+                    ) { Text("שלח לכולם") }
                 }
                 if (peers.isEmpty()) {
                     Text("אין מכשיר שווה מקושר. אפשר לצמד מכשיר כ\"שווים\" דרך הגדרות ← מכשירים מקושרים.",
