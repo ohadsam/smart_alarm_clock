@@ -38,4 +38,14 @@ class AppSharerTest {
             dir.deleteRecursively()
         }
     }
+
+    @Test
+    fun `the link message carries the newest-release link and says how to update from inside the app`() {
+        val m = AppSharer.linkMessage("1.15.0")
+        assertTrue(m.contains("https://github.com/ohadsam/smart_alarm_clock/releases/latest/download/smartring.apk"))
+        assertTrue(m.contains("עדכוני אפליקציה"))
+        assertTrue(m.contains("1.15.0"))
+        assertTrue("a link message is short enough for a chat", m.length < 800)
+    }
 }
+

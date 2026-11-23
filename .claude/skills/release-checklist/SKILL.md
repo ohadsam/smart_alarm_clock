@@ -172,6 +172,24 @@ sure that guarantee still holds, not to copy a file:
 - After CI is green, name the artifact to hand around in the final report: the run's `SmartRing-release-<run>`
   (or debug) APK — the thing `AppSharer` will be sending from a phone that installed it.
 
+## 5c. In-app update — every release
+
+Since v1.15.0 the app can check for, download and install its own updates (`update/`, Settings → app updates),
+reading the GitHub Release that the `release` job in `.github/workflows/build-apk.yml` publishes after each green
+push to main. For that to keep working the release has to stay *readable by the app*:
+
+- The release **title** is `vX.Y.Z (build N)` and `versionName` in `app/build.gradle.kts` is `X.Y.Z` (the job reads
+  it with `sed`; keep it on one line, `versionName = "X.Y.Z"`). A malformed title reads as "no version" in the app.
+- The assets are exactly `smartring.apk`, `smartring-debug.apk` and a `.sha256` beside each; `UpdateMath.validUrl`
+  whitelists those names — renaming one needs the whitelist, `assetName()` and its tests changed together.
+- The **What's-New entry** for this version exists and its items are quoted lines (the job cuts the release notes out
+  of `WhatsNew.kt` with `awk`): a version without an entry publishes a release whose notes are just its name.
+- The signing config is unchanged (`signingConfigs.shared`). The updater refuses an APK whose signing key differs from
+  the installed app's, so a changed key would make every installed copy un-updatable *from inside the app*.
+- `versionCode` strictly increased (the updater refuses a not-newer APK, and Android would anyway).
+- After CI is green, confirm the release exists (`gh release view`/the Releases page) with both APKs and checksums — that
+  is the one thing nothing else in the pipeline checks.
+
 ## 6. Build verification (compile + tests, via CI — there's no other way here)
 
 There is no local Android SDK in this environment (see the note at the top about why a local
@@ -1204,4 +1222,12 @@ If the user asks for a PR-based workflow going forward, follow that instead and 
 - **A multi-target save (`for (target in targets)`) must build each alarm from the same base and give it its own
   `sync`** (v1.14.0): reusing one `Alarm` instance's `sync.syncId` across children would make the second child's
   record overwrite the first's. New alarms start from `AlarmSync(managedForDeviceId = target)` each time.
+- **An in-app updater has two packages to serve, not one** (v1.15.0): debug builds are `com.smartring.app.debug`, so the
+  release APK cannot update them (and the reverse) — `PackageInstaller` rejects a different package. Publish both, and
+  choose by `BuildConfig.DEBUG`. Likewise a **PendingIntent handed to `PackageInstaller` must be `FLAG_MUTABLE`** (it fills
+  in status extras); that is the one deliberate exception to the "always FLAG_IMMUTABLE" rule, and is safe because the
+  intent is explicit and aimed at our own non-exported receiver.
+- **A step in CI that parses source with `sed`/`awk` needs to be run, not just written** (the release job's version and
+  What's-New extraction): the escaping of `\"` inside a YAML block inside a heredoc is easy to get wrong silently, and
+  the failure mode is a release with empty notes. It was checked locally against `WhatsNew.kt` before being committed.
 

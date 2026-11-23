@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import androidx.core.content.FileProvider
 import androidx.core.content.pm.PackageInfoCompat
+import com.smartring.app.update.UpdateMath
 import java.io.File
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
@@ -37,6 +38,32 @@ object AppSharer {
 
         עדכון לגרסה חדשה: מתקינים את הקובץ החדש ישירות מעל הקיים — אין צורך להסיר את האפליקציה, וכל השעמורים וההגדרות נשמרים.
     """.trimIndent()
+
+    /**
+     * The message for sharing a **link** instead of the file: always the newest published build, not the one
+     * installed here, and a few lines instead of tens of megabytes in a chat.
+     */
+    fun linkMessage(versionName: String): String = """
+        שלום! זו אפליקציית "SmartRing" — שעון מעורר עם סבבי צלצול, מצב שבת, ווידג'טים, תבניות, וחיבור בין מכשירים (הורה/ילד).
+
+        להורדה (תמיד הגרסה האחרונה):
+        ${UpdateMath.latestUrl(debugBuild = false)}
+
+        איך מתקינים: פותחים את הקישור בדפדפן, מורידים, ופותחים את הקובץ. אם מתבקש, מאשרים "התקנה ממקורות לא ידועים" פעם אחת, ואז "התקן". 
+        מי שכבר התקין אותה: אפשר לעדכן מתוך האפליקציה (הגדרות ← עדכוני אפליקציה) — בלי להסיר ובלי לאבד שעמורים.
+        (נשלח מגרסה $versionName)
+    """.trimIndent()
+
+    /** A plain-text share of [linkMessage], straight to WhatsApp / Gmail when installed, else the chooser. */
+    fun linkIntent(context: Context, versionName: String, target: Target): Intent {
+        val send = Intent(Intent.ACTION_SEND)
+            .setType("text/plain")
+            .putExtra(Intent.EXTRA_SUBJECT, "SmartRing")
+            .putExtra(Intent.EXTRA_TEXT, linkMessage(versionName))
+        val preferred = preferredPackage(context, target)
+        if (preferred != null) return send.setPackage(preferred)
+        return Intent.createChooser(send, "שיתוף האפליקציה")
+    }
 
     /** The build number is part of the name: two builds with one versionName must never look like one file. */
     fun fileName(versionName: String, zip: Boolean, build: Long? = null) =
@@ -80,14 +107,16 @@ object AppSharer {
             .putExtra(Intent.EXTRA_SUBJECT, "SmartRing $versionName")
             .putExtra(Intent.EXTRA_TEXT, message(versionName))
             .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        val preferred = when (target) {
-            Target.WHATSAPP -> listOf(WHATSAPP, WHATSAPP_BUSINESS)
-            Target.EMAIL -> listOf(GMAIL)
-            Target.ANY -> emptyList()
-        }.firstOrNull { isInstalled(context, it) }
+        val preferred = preferredPackage(context, target)
         if (preferred != null) return send.setPackage(preferred)
         return Intent.createChooser(send, "שיתוף האפליקציה").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
     }
+
+    private fun preferredPackage(context: Context, target: Target): String? = when (target) {
+        Target.WHATSAPP -> listOf(WHATSAPP, WHATSAPP_BUSINESS)
+        Target.EMAIL -> listOf(GMAIL)
+        Target.ANY -> emptyList()
+    }.firstOrNull { isInstalled(context, it) }
 
     private fun isInstalled(context: Context, pkg: String) =
         runCatching { context.packageManager.getPackageInfo(pkg, 0) }.isSuccess

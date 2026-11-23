@@ -28,6 +28,15 @@ fun ShareAppCard(modifier: Modifier = Modifier) {
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
 
+    fun shareLink(target: AppSharer.Target) {
+        error = null
+        try {
+            context.startActivity(AppSharer.linkIntent(context, BuildConfig.VERSION_NAME, target))
+        } catch (e: ActivityNotFoundException) {
+            error = "לא נמצאה אפליקציה לשיתוף"
+        }
+    }
+
     fun share(target: AppSharer.Target) {
         scope.launch {
             busy = true
@@ -65,6 +74,14 @@ fun ShareAppCard(modifier: Modifier = Modifier) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("ארוז כ-zip (לאפליקציות שחוסמות קובץ APK)", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
             Switch(zip, { zip = it }, modifier = Modifier.semantics { contentDescription = "ארוז את הקובץ כ-zip" })
+        }
+        HorizontalDivider()
+        Text("או שלחו רק קישור להורדה — תמיד הגרסה האחרונה, בלי קובץ כבד בצ'אט:",
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton({ shareLink(AppSharer.Target.WHATSAPP) }) { Text("WhatsApp") }
+            OutlinedButton({ shareLink(AppSharer.Target.EMAIL) }) { Text("אימייל") }
+            OutlinedButton({ shareLink(AppSharer.Target.ANY) }) { Text("אחר…") }
         }
         error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
     }

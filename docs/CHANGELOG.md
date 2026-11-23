@@ -1,5 +1,30 @@
 # SmartRing – Changelog
 
+## v1.15.0 (2026-11-23)
+
+### F87 – check for updates, download and install from inside the app; share a link
+
+Ported from StepUp (`ohadsam/distance_analyzer`, `Updater.kt` / `UpdateMath.kt`). Settings → app updates:
+"Check for updates" reads the latest GitHub release; "Download and install" fetches the APK and its published
+SHA-256 (the checksum **first** — no checksum, no download), caps the size at 80 MB while streaming, refuses a
+hash mismatch, then requires the APK to be this package, a **higher** version code and signed by the **same
+key** as the installed app before handing it to `PackageInstaller` as an update (data stays). Each failure has
+its own Hebrew message; a manual download link is always shown. Debug and release builds are different
+packages (`.debug`), so the updater picks the matching asset.
+
+**CI now publishes a GitHub Release** on every push to main (new `release` job, `needs: [build, instrumented]`
+so a build that failed its tests is never offered): `smartring.apk`, `smartring-debug.apk`, a `.sha256` for each,
+title `vX.Y.Z (build N)`, body = the version's What's-New bullets cut out of `WhatsNew.kt`; the newest 10 are kept.
+
+`INTERNET` is a new permission — until now the app made no network calls at all. It is used by this one feature,
+only when the person taps. `REQUEST_INSTALL_PACKAGES` is new too (Android asks once).
+
+Also: sharing a **link** (WhatsApp / e-mail / any app) next to sharing the file — a few lines in the chat and
+always the newest build. Honest limits: the install path (`PackageInstaller`, the permission screen) and the
+GitHub round trip were not run on a device; the pure rules (URL whitelist, checksum parsing, version
+comparison, release-note cleaning) are JVM tests. The checksum comes from the same place as the file, so it
+guards against a damaged download, not a compromised release — the signature check is the real gate.
+
 ## v1.14.0 (2026-10-28)
 
 Three features, each its own entry in `docs/FEATURES.md`.

@@ -253,3 +253,61 @@ jobs:
             tail -60 "${RUNNER_TEMP:-/tmp}/instrumented-test.log" 2>/dev/null \
               || echo "(no gradle log captured)"
           fi
+
+  # ── Publish the build as a GitHub Release ────────────────────────────
+  # This is what the in-app "check for updates" reads (update/UpdateManager.kt): the newest release's
+  # title ("v1.15.0 (build 80)"), its body, and two assets — smartring.apk (the release build) and
+  # smartring-debug.apk (the debug build, a different package, so it needs its own) — each with a
+  # .sha256 beside it. Only after BOTH the build and the emulator jobs are green, so a build that
+  # failed its tests is never offered to anyone's phone. Only on main.
+  release:
+    name: Publish GitHub release
+    needs: [build, instrumented]
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download the release APK
+        uses: actions/download-artifact@v4
+        with:
+          name: SmartRing-release-${{ github.run_number }}
+          path: dist/release
+
+      - name: Download the debug APK
+        uses: actions/download-artifact@v4
+        with:
+          name: SmartRing-debug-${{ github.run_number }}
+          path: dist/debug
+
+      - name: Create the release (becomes "latest")
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          VERSION=$(sed -n 's/.*versionName *= *"\([0-9.]*\)".*/\1/p' app/build.gradle.kts | head -1)
+          [ -n "$VERSION" ] || { echo "::error::could not read versionName"; exit 1; }
+          mkdir -p out
+          cp dist/release/app-release.apk out/smartring.apk
+          cp dist/debug/app-debug.apk out/smartring-debug.apk
+          (cd out && sha256sum smartring.apk | tee smartring.apk.sha256 && sha256sum smartring-debug.apk | tee smartring-debug.apk.sha256)
+          # The notes are this version's "What's New" bullets (the same Hebrew text the app shows after
+          # an update), cut out of WhatsNew.kt: the entry whose versionName matches, its quoted lines.
+          awk -v v="$VERSION" '
+            /versionName = "/ { f = (index($0, "\"" v "\"") > 0); next }
+            f && /^[[:space:]]+"/ { l=$0; sub(/^[[:space:]]+"/, "", l); sub(/",?[[:space:]]*$/, "", l); gsub(/\\"/, "\"", l); print "- " l }
+          ' app/src/main/java/com/smartring/app/presentation/whatsnew/WhatsNew.kt > notes.md
+          [ -s notes.md ] || echo "SmartRing $VERSION" > notes.md
+          TAG="build-${GITHUB_RUN_NUMBER}"
+          gh release create "$TAG" out/smartring.apk out/smartring.apk.sha256 out/smartring-debug.apk out/smartring-debug.apk.sha256 \
+            --title "v${VERSION} (build ${GITHUB_RUN_NUMBER})" --notes-file notes.md --target "$GITHUB_SHA" --latest
+          # Keep the list tidy: the newest 10 stay.
+          gh release list --limit 100 --json tagName --jq '.[10:][].tagName' | while read -r old; do
+            gh release delete "$old" --cleanup-tag --yes || true
+          done
+

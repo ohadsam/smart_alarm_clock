@@ -288,3 +288,8 @@ sync/
 `share/AppSharer.kt` + `ShareAppCard`: עותק טרי של `applicationInfo.sourceDir` ב-`cache/share/` (FileProvider), נבדק מול
 ה-`versionCode` המותקן. `res/xml/file_paths.xml` חושף רק את התיקייה הזו.
 
+## עדכון מתוך האפליקציה (v1.15.0)
+`update/`: `UpdateMath` (טהור — רשימת כתובות מותרות, סכום ביקורת, השוואת גרסאות, ניקוי הערות), `UpdateManager` (singleton; `StateFlow<UpdateState>`:
+בדיקה → הורדה → אימות → התקנה דרך `PackageInstaller`), `InstallReceiver` (תשובת המתקין; `PendingIntent` **mutable** כי המתקין ממלא בו תוצאה),
+`UpdateCard` (הקופסה בהגדרות). ה-CI (`release` ב-`build-apk.yml`) מפרסם את הנכסים שהוא קורא.
+

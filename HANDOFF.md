@@ -192,6 +192,11 @@
 | 163 | תבניות: מסמך JSON אחד ב-DataStore; כל הכללים ב-`TemplateOps` הטהור; מחיקת תיקייה משאירה תבניות כברירת מחדל | `TemplateRepository`, `AlarmTemplate.kt` (v1.14.0) |
 | 164 | יצירת שעמור מתבנית מסירה תאריכים שעברו **ומודיעה**; סיום חזרתיות שעבר הופך ל"ללא הגבלה" והודעה אומרת זאת | `instantiateTemplate` (v1.14.0) |
 | 165 | העורך יודע "מצב תבנית" (`TemplateMode`): Save כותב תבנית, שם השעמור לא חובה, אין בחירת מכשירים | `AlarmEditViewModel` (v1.14.0) |
+| 166 | **עדכון מתוך האפליקציה** (כמו StepUp): בדיקת Release אחרון, הורדה, אימות סכום + חבילה + גרסה + חתימה, התקנה כעדכון | `update/*` (v1.15.0) |
+| 167 | ה-CI מפרסם GitHub Release **רק אחרי** build + emulators ירוקים; נכסים: `smartring.apk`, `smartring-debug.apk` + `.sha256`; בולטי "מה חדש" נחתכים מ-`WhatsNew.kt` | `build-apk.yml` job `release` (v1.15.0) |
+| 168 | debug ו-release הן **חבילות שונות** — העדכון בוחר נכס לפי `BuildConfig.DEBUG`; התקנת האחד מעל השני נדחית | `UpdateMath.assetName` (v1.15.0) |
+| 169 | `PendingIntent` של `PackageInstaller` חייב להיות **MUTABLE** (המתקין ממלא בו extras) — החריג היחיד לכלל `FLAG_IMMUTABLE`; הוא מפורש ובמקבל פנימי | `UpdateManager.perform` (v1.15.0) |
+| 170 | `INTERNET` נוספה לראשונה; הרשת משמשת רק לכפתור "בדוק עדכונים" / "הורד והתקן" | `AndroidManifest.xml` (v1.15.0) |
 
 ---
 
@@ -447,6 +452,7 @@ if (!alarm.acceptsInteraction) return
 | בעיה | מקום | חומרה |
 |------|-------|--------|
 | BIWEEKLY parity נגזרת מתאריך מוחלט (`daysSinceEpoch/7`) ולא מהשבוע שבו המשתמש יצר את השעמור — קצב "כל שבועיים" יציב, אבל הצלצול הראשון עלול להיות שבוע אחרי הצפוי | `AlarmScheduler.nextFireTime()` | נמוכה |
+| עדכון מתוך האפליקציה: מסלול ההתקנה (`PackageInstaller`, מסך ההרשאה) והבקשה ל-GitHub לא נבדקו על מכשיר | `update/*` | **בינונית עד שתיבדק** |
 | מכשירים מקושרים: מתאמי Bluetooth/NFC לא נבדקו על חומרה אמיתית (נכתבו מהמסמכים, עברו קומפילציה ו-lint) | `sync/platform/*`, `sync/nfc/*` | **גבוהה עד שתיבדק** |
 | נעילת שעמור היא הגנה מפני תקלות, לא מפני בעל המכשיר (הוא יכול לבטל צימוד) — בכוונה | `docs/PAIRING.md` §3 | מתועד |
 | Long.toInt() ל-id גדול | `AlarmScheduler.buildIntent()` | נמוכה |

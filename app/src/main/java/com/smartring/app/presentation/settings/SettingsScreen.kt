@@ -80,6 +80,9 @@ fun SettingsScreen(
             Modifier.padding(pad).padding(16.dp).verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            SettingsGroup("עדכוני אפליקציה") {
+                com.smartring.app.update.UpdateCard()
+            }
             SettingsGroup("אמינות ברקע") {
                 ReliabilitySection()
             }

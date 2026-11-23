@@ -2,6 +2,12 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <!-- In-app update (update/): one GET for the latest GitHub release when the person taps "check for
+         updates", and the APK + its checksum when they tap install. Nothing else in the app uses the network. -->
+    <uses-permission android:name="android.permission.INTERNET"/>
+    <!-- Installing the downloaded APK over this app (an update: same package and signing key, data stays).
+         Android asks the person once to allow it. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
     <uses-permission android:name="android.permission.WAKE_LOCK"/>
     <uses-permission android:name="android.permission.VIBRATE"/>
@@ -77,6 +83,9 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+
+        <!-- The installer's answer to an in-app update (a PendingIntent of ours; nothing else can call it). -->
+        <receiver android:name=".update.InstallReceiver" android:exported="false"/>
 
         <receiver android:name=".receiver.AlarmReceiver"      android:exported="false"/>
         <receiver android:name=".service.StopAlarmReceiver"   android:exported="false"/>
